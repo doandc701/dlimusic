@@ -39,8 +39,16 @@ const HISTORY_LIMIT = 2000;
 const CHUNK = 512 * 1024; // divides 1 MB, so aligned requests never cross a Telegram 1 MB block
 const PHOTO_CACHE_MAX = 40;
 
+// Phones and tablets: Chrome Android has showDirectoryPicker, but the system picker refuses the usual
+// folders (Download, storage root) and the write permission is lost between visits, so the folder
+// choice is a PC/desktop-only feature; elsewhere files go to the browser's Downloads folder.
+const isMobile =
+  navigator.userAgentData?.mobile ??
+  (/Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) ||
+    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1)); // iPadOS reports a Mac
+
 const caps = {
-  pickFolder: typeof window.showDirectoryPicker === "function",
+  pickFolder: typeof window.showDirectoryPicker === "function" && !isMobile,
   openFolder: false,
   serviceWorker: "serviceWorker" in navigator,
 };
@@ -962,7 +970,7 @@ async function start() {
   if (started) return;
   started = true;
   try {
-    dirHandle = (await idbGet("dir")) || null;
+    dirHandle = (caps.pickFolder && (await idbGet("dir"))) || null;
   } catch {
     dirHandle = null;
   }

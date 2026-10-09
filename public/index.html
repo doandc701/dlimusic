@@ -138,6 +138,137 @@
     .file-table .col-num, .file-table .col-state, .file-table td:nth-child(3), .file-table td:nth-child(6) { display: none; }
     .dl-panel { width: 100vw; }
   }
+  /* ---------- Playful palette: each group of buttons gets its own colour (--c) ---------- */
+  :root, [data-bs-theme=light] {
+    --fun-violet: #7c3aed; --fun-pink: #db2777; --fun-orange: #ea580c; --fun-amber: #d97706;
+    --fun-green: #059669; --fun-teal: #0d9488; --fun-sky: #0284c7; --fun-indigo: #4f46e5;
+    --fun-coral: #e11d48; --fun-slate: #64748b;
+    --bs-primary: #7c3aed; --bs-primary-rgb: 124, 58, 237;
+    --bs-primary-text-emphasis: #5b21b6; --bs-primary-bg-subtle: #ede9fe; --bs-primary-border-subtle: #c4b5fd;
+    --bs-link-color: #7c3aed; --bs-link-color-rgb: 124, 58, 237; --bs-link-hover-color: #db2777; --bs-link-hover-color-rgb: 219, 39, 119;
+  }
+  [data-bs-theme=dark] {
+    --fun-violet: #a78bfa; --fun-pink: #f472b6; --fun-orange: #fb923c; --fun-amber: #fbbf24;
+    --fun-green: #34d399; --fun-teal: #2dd4bf; --fun-sky: #38bdf8; --fun-indigo: #818cf8;
+    --fun-coral: #fb7185; --fun-slate: #94a3b8;
+    --bs-primary: #8b5cf6; --bs-primary-rgb: 139, 92, 246;
+    --bs-primary-text-emphasis: #c4b5fd; --bs-primary-bg-subtle: #2e1065; --bs-primary-border-subtle: #5b21b6;
+    --bs-link-color: #a78bfa; --bs-link-color-rgb: 167, 139, 250; --bs-link-hover-color: #f472b6; --bs-link-hover-color-rgb: 244, 114, 182;
+  }
+  .btn, .btn-sm, .btn-lg { --bs-btn-border-radius: 50rem; transition: transform .12s ease, box-shadow .15s ease, background-color .15s ease, color .15s ease, filter .15s ease; }
+  .input-group .btn { --bs-btn-border-radius: var(--bs-border-radius); }
+  .choice-btn { --bs-btn-border-radius: 1rem; }
+  .btn:not(:disabled):not(.btn-group > .btn):hover { transform: translateY(-1px); }
+  .btn:not(:disabled):not(.btn-group > .btn):active { transform: translateY(0) scale(.97); }
+
+  .btn-outline-primary, .btn-outline-secondary, .btn-outline-danger {
+    --bs-btn-color: var(--c); --bs-btn-border-color: color-mix(in srgb, var(--c) 40%, transparent);
+    --bs-btn-hover-color: #fff; --bs-btn-hover-bg: var(--c); --bs-btn-hover-border-color: var(--c);
+    --bs-btn-active-color: #fff; --bs-btn-active-bg: var(--c); --bs-btn-active-border-color: var(--c);
+    --bs-btn-disabled-color: var(--c); --bs-btn-disabled-border-color: color-mix(in srgb, var(--c) 40%, transparent);
+    --bs-btn-focus-box-shadow: 0 0 0 .25rem color-mix(in srgb, var(--c) 30%, transparent);
+  }
+  .btn-outline-primary { --c: var(--fun-violet); }
+  .btn-outline-secondary { --c: var(--fun-violet); }
+  .btn-outline-danger { --c: var(--fun-coral); }
+  [data-bs-dismiss].btn-outline-secondary { --c: var(--fun-slate); }
+  /* borderless icon buttons (player, history rows): a soft tinted bubble on hover */
+  .btn.border-0:not(:disabled):hover { --bs-btn-hover-bg: color-mix(in srgb, var(--c) 16%, transparent); --bs-btn-hover-color: var(--c); }
+
+  .btn-primary, .btn-danger {
+    --bs-btn-color: #fff; --bs-btn-hover-color: #fff; --bs-btn-active-color: #fff; --bs-btn-disabled-color: #fff;
+    --bs-btn-border-color: transparent; --bs-btn-hover-border-color: transparent; --bs-btn-active-border-color: transparent; --bs-btn-disabled-border-color: transparent;
+    --bs-btn-bg: var(--g1); --bs-btn-hover-bg: var(--g1); --bs-btn-active-bg: var(--g1); --bs-btn-disabled-bg: var(--g1);
+    --bs-btn-focus-box-shadow: 0 0 0 .25rem color-mix(in srgb, var(--g2) 35%, transparent);
+    background-image: linear-gradient(135deg, var(--g1), var(--g2));
+    box-shadow: 0 4px 14px -6px color-mix(in srgb, var(--g2) 80%, transparent);
+  }
+  .btn-primary { --g1: #7c3aed; --g2: #ec4899; }
+  .btn-danger { --g1: #f43f5e; --g2: #f97316; }
+  .btn-primary:not(:disabled):hover, .btn-danger:not(:disabled):hover { filter: brightness(1.08) saturate(1.1); box-shadow: 0 6px 18px -6px color-mix(in srgb, var(--g2) 90%, transparent); }
+  .btn-primary:disabled, .btn-danger:disabled { opacity: .45; box-shadow: none; }
+  #downloadBtn, #confirmYes { --g1: #10b981; --g2: #06b6d4; }
+
+  /* header */
+  #historyBtn { --c: var(--fun-amber); }
+  #settingsBtn { --c: var(--fun-teal); }
+  #themeBtn { --c: var(--fun-violet); }
+  #filterBtn { --c: var(--fun-pink); }
+  /* file types: one colour each */
+  [data-type=music] { --c: var(--fun-pink); }
+  [data-type=video] { --c: var(--fun-orange); }
+  [data-type=photo] { --c: var(--fun-green); }
+  [data-type=document] { --c: var(--fun-sky); }
+  [data-type=voice] { --c: var(--fun-violet); }
+  [data-type=all] { --c: var(--fun-indigo); }
+  [data-show=all] { --c: var(--fun-indigo); }
+  [data-show=new] { --c: var(--fun-amber); }
+  [data-show=done] { --c: var(--fun-green); }
+  #reloadBtn { --c: var(--fun-green); }
+  #folderBtn, #setDirBtn, #confirmDirBtn, [data-hopen] { --c: var(--fun-amber); }
+  #selAllBtn, #selAllM { --c: var(--fun-green); }
+  #selNoneBtn, #selNoneM { --c: var(--fun-coral); }
+  [data-play] { --c: var(--fun-pink); }
+  [data-preview] { --c: var(--fun-sky); }
+  #previewSelect { --c: var(--fun-pink); }
+  [data-choice=own] { --c: var(--fun-pink); }
+  .phone-code { --c: var(--fun-slate); }
+
+  /* accents that go with the buttons */
+  .form-check-input:checked { background-color: var(--bs-primary); border-color: var(--bs-primary); }
+  .form-check-input:focus { border-color: var(--bs-primary-border-subtle); box-shadow: 0 0 0 .25rem rgba(var(--bs-primary-rgb), .25); }
+  .progress-bar { background-image: linear-gradient(90deg, #10b981, #06b6d4); }
+  .text-bg-primary { background-image: linear-gradient(135deg, #7c3aed, #ec4899) !important; }
+  .brand-tele { color: #229ed9; }
+  /* login field: compact and rounded like the buttons */
+  .login-field { --bs-border-radius: .375rem; }
+  .login-field .form-control { padding-left: .8rem; }
+  .login-field .phone-code { padding-left: .7rem; font-size: .95rem; }
+  #loginBtn { --bs-btn-border-radius: .375rem; --bs-btn-padding-y: .55rem; } /* same corners as the field above it */
+  #loginForm { padding-bottom: .75rem; } /* air under the button, like above it */
+  .login-field .dropdown-menu { --bs-border-radius: .75rem; }
+  /* the hidden country button is still the first child: give the lone input its left corners back */
+  .login-field > .d-none + .dropdown-menu + .form-control { margin-left: 0; border-top-left-radius: var(--bs-border-radius); border-bottom-left-radius: var(--bs-border-radius); }
+  .otp-boxes { display: flex; justify-content: center; gap: .55rem; }
+  .otp-boxes.d-none { display: none; }
+  .otp-box { width: 3rem; height: 3.4rem; padding: 0; text-align: center; font-size: 1.5rem; font-weight: 600;
+    border-radius: .9rem; border-width: 2px; caret-color: var(--bs-primary); transition: border-color .15s, box-shadow .15s, transform .12s; }
+  .otp-box:focus { border-color: var(--fun-violet); box-shadow: 0 0 0 .25rem rgba(var(--bs-primary-rgb), .2); transform: translateY(-2px); }
+  .otp-box.filled { border-color: color-mix(in srgb, var(--fun-pink) 60%, transparent); background: color-mix(in srgb, var(--fun-pink) 8%, var(--bs-body-bg)); }
+  @media (max-width: 360px) { .otp-box { width: 2.6rem; height: 3rem; font-size: 1.3rem; } }
+  /* dark theme: the bright fills need dark text to stay readable */
+  [data-bs-theme=dark] :is(.btn-outline-primary, .btn-outline-secondary, .btn-outline-danger) { --bs-btn-hover-color: #111827; --bs-btn-active-color: #111827; }
+  .form-range::-webkit-slider-thumb { background: linear-gradient(135deg, #7c3aed, #ec4899); }
+  .form-range::-moz-range-thumb { background: linear-gradient(135deg, #7c3aed, #ec4899); }
+  .form-range:focus::-webkit-slider-thumb { box-shadow: 0 0 0 1px var(--bs-body-bg), 0 0 0 .25rem rgba(var(--bs-primary-rgb), .25); }
+  /* ---------- notifications: toast + alerts in the same playful palette ---------- */
+  .fun-toast { --k: #10b981; --k2: #06b6d4; border-radius: 1rem; overflow: hidden; background: var(--bs-body-bg);
+    box-shadow: 0 10px 30px -10px color-mix(in srgb, var(--k) 60%, transparent), 0 0 0 1px color-mix(in srgb, var(--k) 30%, transparent);
+    border-left: 5px solid var(--k) !important; }
+  .fun-toast[data-kind=error] { --k: #f43f5e; --k2: #f97316; }
+  .fun-toast[data-kind=warn] { --k: #f59e0b; --k2: #f97316; }
+  .fun-toast[data-kind=info] { --k: #8b5cf6; --k2: #ec4899; }
+  .fun-toast .toast-body { font-weight: 500; color: var(--bs-body-color); }
+  .fun-toast .toast-ico { flex: none; width: 28px; height: 28px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;
+    color: #fff; background: linear-gradient(135deg, var(--k), var(--k2)); font-size: 1rem; }
+  .fun-toast.showing, .fun-toast.show { animation: toast-pop .35s cubic-bezier(.34, 1.56, .64, 1); }
+  @keyframes toast-pop { from { transform: translateY(-12px) scale(.95); opacity: 0; } to { transform: none; opacity: 1; } }
+  @media (prefers-reduced-motion: reduce) { .fun-toast.showing, .fun-toast.show { animation: none; } }
+
+  .alert { --k: var(--fun-violet); border: 0; border-left: 4px solid var(--k); border-radius: .85rem;
+    background: color-mix(in srgb, var(--k) 12%, var(--bs-body-bg)); color: var(--bs-body-color);
+    display: flex; align-items: flex-start; gap: .5rem; }
+  .alert.d-none { display: none !important; }
+  .alert::before { font-family: bootstrap-icons; color: var(--k); line-height: inherit; flex: none; }
+  .alert-danger { --k: var(--fun-coral); }
+  .alert-danger::before { content: "\f622"; }
+  .alert-warning { --k: var(--fun-amber); }
+  .alert-warning::before { content: "\f33a"; }
+  .alert-success { --k: var(--fun-green); }
+  .alert-success::before { content: "\f26a"; }
+  .alert-info { --k: var(--fun-sky); }
+  .alert-info::before { content: "\f430"; }
+  .alert > .bi:first-child { display: none; } /* alerts that bring their own icon: the ::before one is enough */
 </style>
 </head>
 <body class="d-flex flex-column app-body">
@@ -161,7 +292,7 @@
     <button type="button" class="btn btn-sm login-back d-none" id="loginBack" title="Quay lại chọn cách kết nối (API có sẵn / tự tạo API ID)">
       <i class="bi bi-arrow-left"></i> Quay lại</button>
     <div class="card-body p-4">
-      <div class="text-center mb-3"><i class="bi bi-telegram text-primary" style="font-size: 3rem"></i></div>
+      <div class="text-center mb-3"><i class="bi bi-telegram brand-tele" style="font-size: 3rem"></i></div>
       <h4 class="card-title text-center" id="loginTitle">Đang kết nối…</h4>
       <p class="text-body-secondary text-center" id="loginDesc"><span class="spinner-border spinner-border-sm"></span></p>
       <div class="alert alert-warning py-2 small d-none" id="choiceError"></div>
@@ -176,15 +307,16 @@
         </button>
       </div>
       <form id="loginForm" class="d-none">
-        <div class="input-group input-group-lg mb-3">
+        <div class="input-group login-field mb-4" id="loginField">
           <button class="btn btn-outline-secondary dropdown-toggle phone-code d-none" type="button" id="phoneCode"
             data-bs-toggle="dropdown" aria-expanded="false" title="Mã quốc gia" aria-label="Mã quốc gia">
             <span class="fi fi-vn" id="phoneFlag"></span><span id="phoneDial">+84</span></button>
           <ul class="dropdown-menu phone-menu" id="phoneMenu"></ul>
           <input class="form-control" id="loginInput" autocomplete="off" required>
         </div>
+        <div class="otp-boxes d-none mb-4" id="otpBoxes" role="group" aria-label="Mã xác nhận"></div>
         <div class="alert alert-danger py-2 d-none" id="loginError"></div>
-        <button class="btn btn-primary btn-lg w-100" type="submit" id="loginBtn">Tiếp tục</button>
+        <button class="btn btn-primary w-100 fw-semibold" type="submit" id="loginBtn">Tiếp tục</button>
       </form>
     </div>
   </div>
@@ -508,9 +640,11 @@
 
 <!-- ============ toast ============ -->
 <div class="toast-container position-fixed top-0 start-50 translate-middle-x p-3">
-  <div class="toast align-items-center text-bg-dark border-0" id="toast" role="status" aria-live="polite">
-    <div class="d-flex"><div class="toast-body" id="toastBody"></div>
-      <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Đóng"></button></div>
+  <div class="toast fun-toast border-0" id="toast" role="status" aria-live="polite" data-kind="success">
+    <div class="d-flex align-items-center gap-2 ps-2">
+      <span class="toast-ico" aria-hidden="true"><i class="bi bi-check-lg" id="toastIcon"></i></span>
+      <div class="toast-body flex-grow-1 ps-1" id="toastBody"></div>
+      <button type="button" class="btn-close me-2 m-auto" data-bs-dismiss="toast" aria-label="Đóng"></button></div>
   </div>
 </div>
 
@@ -589,7 +723,14 @@ async function api(path, body) {
   return data;
 }
 
-function toast(msg) {
+const TOAST_KINDS = { success: "bi-check-lg", error: "bi-x-lg", warn: "bi-exclamation-lg", info: "bi-info-lg" };
+
+/** Short message at the top: kind = "success" (default) | "error" | "warn" | "info". */
+function toast(msg, kind = "success") {
+  if (!TOAST_KINDS[kind]) kind = "info";
+  $("toast").dataset.kind = kind;
+  $("toast").setAttribute("role", kind === "error" ? "alert" : "status");
+  $("toastIcon").className = `bi ${TOAST_KINDS[kind]}`;
   $("toastBody").textContent = msg;
   toastBox.show();
 }
@@ -634,6 +775,8 @@ function renderAuth(auth) {
 
   if (ready) {
     if (prev !== "ready") loadDialogs();
+    // Only right after signing in here, not when a saved session reconnects on page load.
+    if (LOGIN_STEPS[prev] || prev === "waiting") toast(`Đăng nhập thành công! Xin chào ${auth.me?.name || "bạn"} 👋`);
     return;
   }
 
@@ -668,7 +811,8 @@ function renderAuth(auth) {
       input.value = "";
       if (auth.step === "phone") fillPhone(auth.phone);
       input.inputMode = auth.step === "phone" || auth.step === "code" || auth.step === "api_id" ? "numeric" : "text";
-      setTimeout(() => input.focus(), 0);
+      setOtpMode(auth.step === "code");
+      setTimeout(() => (auth.step === "code" ? otpInputs()[0] : input).focus(), 0);
     }
     $("loginBtn").disabled = false;
   } else if (auth.step === "error") {
@@ -684,7 +828,7 @@ async function sendLogin(kind, value) {
   try {
     await api("/api/login", { kind, value });
   } catch (err) {
-    toast(err.message);
+    toast(err.message, "error");
   }
 }
 
@@ -768,9 +912,82 @@ function composePhone(code, typed) {
   return `+${code}${digits}`;
 }
 
+// ---------- verification code: one box per digit ----------
+const OTP_LEN = 5; // Telegram login codes are 5 digits
+const otpInputs = () => [...$("otpBoxes").querySelectorAll("input")];
+
+$("otpBoxes").innerHTML = Array.from({ length: OTP_LEN }, (_, i) =>
+  `<input class="form-control otp-box" inputmode="numeric" pattern="[0-9]*" maxlength="1"
+     ${i === 0 ? 'autocomplete="one-time-code"' : 'autocomplete="off"'} aria-label="Số thứ ${i + 1}">`).join("");
+
+/** The code step shows the digit boxes instead of the single input (which then only carries the value). */
+function setOtpMode(on) {
+  show($("loginField"), !on);
+  show($("otpBoxes"), on);
+  $("loginInput").required = !on;
+  for (const b of otpInputs()) { b.value = ""; b.classList.remove("filled"); }
+}
+
+/** Write digits into the boxes from box `from` on (typing, pasting or the phone's autofill). */
+function fillOtp(from, text) {
+  const boxes = otpInputs();
+  const digits = String(text).replace(/\D/g, "").split("");
+  let i = from;
+  for (const d of digits) {
+    if (i >= boxes.length) break;
+    boxes[i].value = d;
+    i++;
+  }
+  boxes.forEach((b) => b.classList.toggle("filled", !!b.value));
+  const code = boxes.map((b) => b.value).join("");
+  $("loginInput").value = code;
+  if (code.length === boxes.length) {
+    boxes[boxes.length - 1].focus();
+    if (!$("loginBtn").disabled) $("loginForm").requestSubmit();
+  } else boxes[Math.min(i, boxes.length - 1)].focus();
+}
+
+$("otpBoxes").addEventListener("input", (e) => {
+  const box = e.target;
+  const i = otpInputs().indexOf(box);
+  const typed = box.value;
+  box.value = "";
+  if (typed.replace(/\D/g, "")) fillOtp(i, typed);
+  else fillOtp(i, ""); // a letter: drop it
+});
+
+$("otpBoxes").addEventListener("keydown", (e) => {
+  const boxes = otpInputs();
+  const i = boxes.indexOf(e.target);
+  if (e.key === "Backspace" && !e.target.value && i > 0) {
+    e.preventDefault();
+    boxes[i - 1].value = "";
+    fillOtp(i - 1, "");
+  } else if (e.key === "ArrowLeft" && i > 0) {
+    e.preventDefault();
+    boxes[i - 1].focus();
+  } else if (e.key === "ArrowRight" && i < boxes.length - 1) {
+    e.preventDefault();
+    boxes[i + 1].focus();
+  }
+});
+
+$("otpBoxes").addEventListener("paste", (e) => {
+  e.preventDefault();
+  fillOtp(0, e.clipboardData.getData("text"));
+});
+
+$("otpBoxes").addEventListener("focusin", (e) => e.target.select());
+
 $("loginForm").addEventListener("submit", async (e) => {
   e.preventDefault();
   let value = $("loginInput").value;
+  if (state.auth.step === "code" && value.length < OTP_LEN) {
+    $("loginError").textContent = `Nhập đủ ${OTP_LEN} số của mã xác nhận.`;
+    show($("loginError"), true);
+    otpInputs()[value.length]?.focus();
+    return;
+  }
   if (state.auth.step === "phone") {
     value = composePhone(phoneCode(), value);
     if (!value) {
@@ -799,7 +1016,7 @@ $("logoutBtn").addEventListener("click", async () => {
   // Go to the login screen right away; the server finishes signing out in the background.
   resetWorkspace();
   renderAuth({ step: "phone", error: null, me: null, phone: state.auth?.phone || "" });
-  api("/api/logout", {}).catch((e) => toast(e.message));
+  api("/api/logout", {}).catch((e) => toast(e.message, "error"));
 });
 
 /** Forget everything tied to the signed-out account (chat, files, selection, player, queue view). */
@@ -1151,8 +1368,8 @@ $("nowPlaying").addEventListener("click", () => {
 });
 $("reloadBtn").addEventListener("click", () => state.chat && loadFiles());
 $("folderBtn").addEventListener("click", () => api("/api/open-folder", { key: state.scan?.key }).catch((e) => {
-  if (e.code !== "NEED_DIR") return toast(e.message);
-  toast("Chưa chọn thư mục tải xuống — hãy chọn trong Cài đặt");
+  if (e.code !== "NEED_DIR") return toast(e.message, "error");
+  toast("Chưa chọn thư mục tải xuống — hãy chọn trong Cài đặt", "warn");
   openSettings();
 }));
 
@@ -1253,7 +1470,7 @@ for (const evt of ["play", "pause", "ended"]) {
   });
 }
 player.addEventListener("error", () => {
-  if (player.src) toast("Không phát được file này (định dạng không hỗ trợ hoặc lỗi mạng)");
+  if (player.src) toast("Không phát được file này (định dạng không hỗ trợ hoặc lỗi mạng)", "error");
 });
 
 // ---------- photo / video preview ----------
@@ -1395,7 +1612,7 @@ async function pickerLoad(p) {
   try {
     picker = await api(`/api/fs?path=${encodeURIComponent(p || "")}`);
   } catch (err) {
-    return toast(err.message);
+    return toast(err.message, "error");
   }
   $("pickPath").value = picker.path;
   $("pickUp").disabled = !picker.parent;
@@ -1421,7 +1638,7 @@ async function pickFolder({ start, remember = null, title = "Chọn thư mục t
       const r = await BACKEND.pickDirectory();
       return r && { path: r.path, remember: remember !== false };
     } catch (err) {
-      toast(err.message);
+      toast(err.message, "error");
       return null;
     }
   }
@@ -1455,7 +1672,7 @@ async function makeDir() {
     $("pickNewName").value = "";
     await pickerLoad(path);
   } catch (err) {
-    toast(err.message);
+    toast(err.message, "error");
   }
 }
 $("pickNewBtn").addEventListener("click", makeDir);
@@ -1506,7 +1723,7 @@ $("settingsSave").addEventListener("click", async () => {
     settingsModal.hide();
     toast("Đã lưu cài đặt");
   } catch (err) {
-    toast(err.message);
+    toast(err.message, "error");
   }
 });
 
@@ -1572,7 +1789,7 @@ async function startDownload(target) {
     renderFiles();
     setPanelOpen(true);
   } catch (err) {
-    if (err.code !== "NEED_DIR") return toast(err.message);
+    if (err.code !== "NEED_DIR") return toast(err.message, "error");
     const picked = await pickFolder({ remember: true });
     if (picked) return startDownload(picked);
   }
@@ -1702,7 +1919,7 @@ $("historyList").addEventListener("click", async (e) => {
       await api("/api/open-folder", { historyId: Number(open.dataset.hopen) });
     }
   } catch (err) {
-    toast(err.message);
+    toast(err.message, "error");
   }
 });
 $("historySearch").addEventListener("input", renderHistory);
@@ -1712,7 +1929,7 @@ $("historyClearBtn").addEventListener("click", async () => {
     body: `Xoá <strong>${state.history.length}</strong> mục khỏi lịch sử tải?<div class="small text-body-secondary mt-2">Chỉ xoá lịch sử. File đã tải trên máy <strong>không</strong> bị xoá.</div>`,
     ok: "Xoá lịch sử", okClass: "btn-danger",
   });
-  if (ok) api("/api/history/clear", {}).then((r) => toast(`Đã xoá ${r.removed} mục khỏi lịch sử`)).catch((e) => toast(e.message));
+  if (ok) api("/api/history/clear", {}).then((r) => toast(`Đã xoá ${r.removed} mục khỏi lịch sử`)).catch((e) => toast(e.message, "error"));
 });
 $("historyBtn").addEventListener("click", () => setPanelOpen(!state.panelOpen));
 $("historyClose").addEventListener("click", () => setPanelOpen(false));
@@ -1740,7 +1957,7 @@ function applyJob(job) {
   scheduleJobsRender();
 }
 
-$("cancelBtn").addEventListener("click", () => api("/api/cancel", {}).then((r) => toast(`Đã huỷ ${r.cancelled} file`)).catch((e) => toast(e.message)));
+$("cancelBtn").addEventListener("click", () => api("/api/cancel", {}).then((r) => toast(`Đã huỷ ${r.cancelled} file`, "info")).catch((e) => toast(e.message, "error")));
 
 // ---------- live updates ----------
 

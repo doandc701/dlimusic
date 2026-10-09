@@ -27,7 +27,7 @@ test('every $("id") used by the script exists in the page', () => {
 });
 
 test("phone numbers: +84 is fixed in front and common ways of typing are understood", () => {
-  const src = script.slice(script.indexOf("function composePhone("), script.indexOf('$("loginForm").addEventListener("submit"'));
+  const src = script.slice(script.indexOf("function composePhone("), script.indexOf("// ---------- verification code"));
   const composePhone = new Function(`${src}; return composePhone;`)();
   const cases = [
     ["84", "912345678", "+84912345678"], ["84", "0912345678", "+84912345678"], ["84", "0912 345 678", "+84912345678"],

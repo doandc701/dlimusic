@@ -24,6 +24,7 @@ import { pathToFileURL } from "node:url";
 import {
   FILTERS,
   createClient,
+  envValue,
   saveSession,
   sanitize,
   formatBytes,
@@ -79,7 +80,7 @@ async function connect() {
   }
 
   await client.start({
-    phoneNumber: async () => process.env.PHONE || (await ask("Phone number (+84...): ")),
+    phoneNumber: async () => envValue("PHONE")?.replace(/^\+84$/, "") || (await ask("Phone number (+84...): ")),
     password: async () => await ask("2FA password: "),
     phoneCode: async () => await ask("Login code sent to Telegram: "),
     onError: (err) => console.error("Login error:", err.message),

@@ -99,7 +99,7 @@ before(async () => {
   server = spawn(process.execPath, ["server.js", "--open"], {
     cwd: ROOT,
     // Isolated settings/history, and no DOWNLOAD_DIR: the server starts with no download folder.
-    env: { ...process.env, PORT: String(port), DOWNLOAD_DIR: "", SETTINGS_FILE: path.join(TMP, "settings.json"), HISTORY_FILE: path.join(TMP, "history.json"), UI_TOKEN: TOKEN, TOKEN_FILE: path.join(TMP, ".ui-token"), TDL_OPEN_CMD: OPENER },
+    env: { ...process.env, PORT: String(port), DOWNLOAD_DIR: "", SETTINGS_FILE: path.join(TMP, "settings.json"), HISTORY_FILE: path.join(TMP, "history.json"), UI_TOKEN: TOKEN, TOKEN_FILE: path.join(TMP, ".ui-token"), TDL_OPEN_CMD: OPENER, API_FILE: path.join(TMP, "api.json") },
     stdio: ["ignore", "pipe", "pipe"],
   });
   await new Promise((resolve, reject) => {
@@ -137,7 +137,7 @@ describe("http basics", () => {
   test("status reports the auth step", async () => {
     const { status, data } = await api("/api/status");
     assert.equal(status, 200);
-    assert.ok(["ready", "phone", "code", "password", "error"].includes(data.step), data.step);
+    assert.ok(["ready", "api_choice", "api_id", "api_hash", "phone", "code", "password", "error"].includes(data.step), data.step);
   });
 });
 
@@ -162,7 +162,8 @@ describe("security", () => {
   });
 
   test("POST requires a JSON content type (blocks simple cross-site form posts)", async () => {
-    const res = await authed(base + "/api/download", { method: "POST", headers: { "Content-Type": "text/plain" }, body: "{}" });
+    // /api/settings works signed in or not, so this checks only the content-type rule
+    const res = await authed(base + "/api/settings", { method: "POST", headers: { "Content-Type": "text/plain" }, body: "{}" });
     assert.equal(res.status, 415);
   });
 
@@ -541,5 +542,80 @@ describe("telegram (real account)", () => {
     }, 10_000);
     await api("/api/clear", { method: "POST", body: {} });
     await done;
+  });
+});
+
+// ---------- API choice on the login screen (no Telegram account involved) ----------
+
+async function startServer(env) {
+  const port = await freePort();
+  const proc = spawn(process.execPath, ["server.js"], {
+    cwd: ROOT,
+    env: { ...process.env, PORT: String(port), UI_TOKEN: TOKEN, ...env },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  await new Promise((resolve, reject) => {
+    proc.stdout.on("data", (d) => String(d).includes("Telegram downloader UI") && resolve());
+    proc.on("exit", (code) => reject(new Error(`server exited with ${code}`)));
+  });
+  const call = async (p, body) => {
+    const res = await fetch(`http://127.0.0.1:${port}${p}`, {
+      method: body ? "POST" : "GET",
+      headers: { Cookie: COOKIE, ...(body && { "Content-Type": "application/json" }) },
+      body: body && JSON.stringify(body),
+    });
+    return res.json();
+  };
+  const waitStep = async (step) => {
+    for (let i = 0; i < 50; i++) {
+      const s = await call("/api/status");
+      if (s.step === step) return s;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    return call("/api/status");
+  };
+  return { proc, call, waitStep };
+}
+
+describe("API choice on the login screen", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tele-dl-api-"));
+  const servers = [];
+  after(() => {
+    for (const s of servers) s.proc.kill();
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+  const envFile = (name, text) => {
+    const f = path.join(dir, name);
+    fs.writeFileSync(f, text);
+    return f;
+  };
+
+  test("no API in .env: asks for the user's own API ID directly (was an error before)", async () => {
+    const data = fs.mkdtempSync(path.join(dir, "d-"));
+    const s = await startServer({ TDL_ENV_FILE: envFile("empty.env", "PHONE=+84\n"), TDL_DATA_DIR: data, API_FILE: path.join(data, "api.json") });
+    servers.push(s);
+    const st = await s.waitStep("api_id");
+    assert.equal(st.step, "api_id");
+    assert.equal(st.apiChoice, false, "nothing to choose without a built-in API");
+    await s.call("/api/login", { kind: "api_id", value: "abc" });
+    const again = await s.waitStep("api_id");
+    assert.match(again.error, /dãy số/);
+    assert.equal((await s.call("/api/login", { kind: "api_id", value: "__back__" })).ok, true);
+    assert.equal((await s.waitStep("api_id")).step, "api_id", "no way back when there is no built-in API");
+    assert.ok(!fs.existsSync(path.join(data, "api.json")), "nothing saved yet");
+  });
+
+  test("API in .env and not signed in: offers the choice; own API can go back to it", async () => {
+    const data = fs.mkdtempSync(path.join(dir, "d-"));
+    const env = envFile("full.env", "API_ID=123456\nAPI_HASH=0123456789abcdef0123456789abcdef\n");
+    const s = await startServer({ TDL_ENV_FILE: env, TDL_DATA_DIR: data, API_FILE: path.join(data, "api.json") });
+    servers.push(s);
+    const st = await s.waitStep("api_choice");
+    assert.equal(st.step, "api_choice");
+    assert.equal(st.apiChoice, true);
+    await s.call("/api/login", { kind: "api_choice", value: "own" });
+    assert.equal((await s.waitStep("api_id")).step, "api_id");
+    await s.call("/api/login", { kind: "api_id", value: "__back__" });
+    assert.equal((await s.waitStep("api_choice")).step, "api_choice");
   });
 });

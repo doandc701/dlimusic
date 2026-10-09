@@ -24,6 +24,8 @@ import {
   DATA_DIR,
   dataFile,
   createClient,
+  envCreds,
+  envValue,
   saveSession,
   sanitize,
   fileInfo,
@@ -151,7 +153,7 @@ function pageCsp(html) {
     `script-src 'self' https://cdn.jsdelivr.net ${hashes.join(" ")}`,
     "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net",
     "font-src https://cdn.jsdelivr.net",
-    "img-src 'self' data: blob:",
+    "img-src 'self' data: blob: https://cdn.jsdelivr.net",
     "media-src 'self' blob:",
     "connect-src 'self'",
     "frame-ancestors 'none'",
@@ -315,9 +317,14 @@ function makeFolder(parent, name) {
 // ---------- auth ----------
 
 let client = null;
-const auth = { step: "connecting", error: null, me: null, phone: "" };
-let pendingInput = null; // { kind, resolve } while GramJS waits for phone / code / password
+const auth = { step: "connecting", error: null, me: null, phone: "", apiChoice: false };
+let pendingInput = null; // { kind, resolve, reject } while waiting for the user (API, phone, code, password)
 let earlyPhone = null; // phone typed on the login screen before the fresh client asked for it (right after logout)
+
+// Which Telegram app (API ID / hash) to use: the built-in one from .env, or the user's own, chosen on the
+// login screen like in the browser build. The choice / own credentials live in the private data folder.
+const API_FILE = path.resolve(process.env.API_FILE || dataFile("api.json"));
+const BACK = "__back__"; // "← choose again" on the login screen
 
 function waitInput(kind) {
   if (kind === "phone" && earlyPhone) {
@@ -327,15 +334,69 @@ function waitInput(kind) {
   }
   auth.step = kind;
   broadcast("auth", auth);
-  return new Promise((resolve) => (pendingInput = { kind, resolve }));
+  return new Promise((resolve, reject) => (pendingInput = { kind, resolve, reject }));
 }
 
-async function startAuth({ keepStep = false } = {}) {
+/** Credentials chosen earlier, or null when the user has to choose / enter them. */
+function chosenCreds() {
+  const saved = readJsonFile(API_FILE, null);
+  if (saved?.mode === "builtin") return envCreds(); // null if .env lost them: ask again
+  if (saved?.id && saved?.hash) return { id: saved.id, hash: saved.hash };
+  // Signed in with the .env app before this choice existed: keep using it without asking.
+  if (!saved && envCreds() && fs.existsSync(SESSION_FILE)) return envCreds();
+  return null;
+}
+
+/** Ask how to connect: the built-in app from .env (when it has one) or the user's own API ID/hash. */
+async function chooseCreds() {
+  for (;;) {
+    const mode = envCreds() ? await waitInput("api_choice") : "own";
+    if (mode === "builtin" && envCreds()) {
+      writeJsonFile(API_FILE, { mode: "builtin" });
+      return envCreds();
+    }
+    const own = await askApiCreds();
+    if (own) return own;
+  }
+}
+
+/** The user's own API ID + hash; null when they go back to the choice screen. */
+async function askApiCreds() {
+  for (;;) {
+    const id = String(await waitInput("api_id")).trim();
+    if (id === BACK && envCreds()) return (auth.error = null);
+    if (!/^\d{3,12}$/.test(id)) {
+      auth.error = "API ID là một dãy số (lấy ở my.telegram.org)";
+      continue;
+    }
+    auth.error = null;
+    const hash = String(await waitInput("api_hash")).trim().toLowerCase();
+    if (hash === BACK && envCreds()) return (auth.error = null);
+    if (!/^[0-9a-f]{32}$/.test(hash)) {
+      auth.error = "API hash gồm 32 ký tự 0-9, a-f";
+      continue;
+    }
+    auth.error = null;
+    const creds = { id: Number(id), hash };
+    writeJsonFile(API_FILE, creds);
+    return creds;
+  }
+}
+
+// Each sign-in attempt has a number; going back to the API choice starts a new one, and anything the
+// abandoned attempt does afterwards (errors, prompts, "ready") is ignored.
+let authRun = 0;
+
+async function startAuth({ keepStep = false } = {}, run = authRun) {
   if (!keepStep) auth.step = "connecting";
   auth.error = null;
   auth.me = null;
-  client = createClient();
-  auth.phone = process.env.PHONE || "";
+  auth.apiChoice = !!envCreds();
+  auth.phone = envValue("PHONE") || "";
+
+  const creds = chosenCreds() || (await chooseCreds());
+  if (run !== authRun) return;
+  client = createClient(creds);
   await client.connect();
 
   if (!(await client.checkAuthorization())) {
@@ -344,15 +405,18 @@ async function startAuth({ keepStep = false } = {}) {
       phoneCode: () => waitInput("code"),
       password: () => waitInput("password"),
       onError: (err) => {
+        if (run !== authRun) return true; // abandoned attempt: stop quietly
         auth.error = err.message;
         broadcast("auth", auth);
-        return false; // keep asking instead of aborting
+        return /API_ID/.test(err.message); // wrong API ID/hash: stop and ask for them again
       },
     });
+    if (run !== authRun) return;
     saveSession(client);
   }
 
   const me = await client.getMe();
+  if (run !== authRun) return;
   auth.me = { name: entityTitle(me), username: me.username || null };
   auth.step = "ready";
   auth.error = null;
@@ -360,11 +424,35 @@ async function startAuth({ keepStep = false } = {}) {
 }
 
 function runAuth(options) {
-  startAuth(options).catch((err) => {
+  const run = ++authRun;
+  startAuth(options, run).catch((err) => {
+    if (run !== authRun) return; // replaced by a newer attempt (e.g. back to the API choice)
+    if (/API_ID/.test(err.message || "")) {
+      const wasBuiltin = readJsonFile(API_FILE, null)?.mode === "builtin";
+      fs.rmSync(API_FILE, { force: true }); // ask again how to connect
+      auth.error = wasBuiltin
+        ? "API trong .env đang không dùng được, hãy tự tạo API ID của bạn"
+        : "API ID / API hash không đúng, hãy nhập lại";
+      return runAuth();
+    }
     auth.step = "error";
     auth.error = err.message;
     broadcast("auth", auth);
   });
+}
+
+/** "← Choose again" on the phone step: forget the chosen API and start over at the choice screen. */
+function backToChoice() {
+  const old = client;
+  const waiting = pendingInput;
+  client = null;
+  pendingInput = null;
+  earlyPhone = null;
+  fs.rmSync(API_FILE, { force: true });
+  Object.assign(auth, { error: null, me: null });
+  runAuth(); // new attempt first, so the old one's rejection below is ignored
+  waiting?.reject(new Error("back to API choice"));
+  old?.destroy().catch(() => {});
 }
 
 /**
@@ -380,7 +468,7 @@ function logout() {
   cancelQueued();
   pendingInput = null;
   earlyPhone = null;
-  Object.assign(auth, { step: "phone", error: null, me: null, phone: process.env.PHONE || "" });
+  Object.assign(auth, { step: "phone", error: null, me: null, phone: envValue("PHONE") || "", apiChoice: !!envCreds() });
   broadcast("auth", auth);
 
   (async () => {
@@ -762,7 +850,11 @@ async function handleApi(req, res, url) {
 
     case "POST /api/login": {
       const { kind, value } = await readJson(req);
-      if (!String(value ?? "").trim()) return sendJson(res, 400, { error: "Value is required" });
+      if (!String(value ?? "").trim()) return sendJson(res, 400, { error: "Vui lòng nhập giá trị" });
+      if (value === BACK && kind === "phone" && envCreds() && auth.step === "phone") {
+        backToChoice();
+        return sendJson(res, 200, { ok: true });
+      }
       if (!pendingInput && kind === "phone" && auth.step === "phone") {
         // Typed while the fresh client is still connecting (just after logout): keep it for later.
         earlyPhone = String(value).trim();

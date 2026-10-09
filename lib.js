@@ -70,24 +70,41 @@ prepareDataDir();
 
 export const SESSION_FILE = dataFile("session.txt");
 
-export function loadEnv() {
+/** Values from the .env file (re-read on every call, so edits apply without restarting), or {}. */
+export function readEnvFile() {
+  const file = process.env.TDL_ENV_FILE || [path.resolve(".env"), path.join(PROJECT_DIR, ".env")].find((f) => fs.existsSync(f));
   try {
-    process.loadEnvFile(".env");
+    return Object.fromEntries(
+      fs.readFileSync(file, "utf8").split(/\r?\n/)
+        .map((line) => /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$/.exec(line))
+        .filter(Boolean)
+        .map((m) => [m[1], m[2].replace(/^["']|["']$/g, "")])
+    );
   } catch {
-    // .env is optional; values may come from the real environment
+    return {};
   }
 }
 
-/** Create a client from API_ID / API_HASH in .env and the saved session (not yet connected). */
-export function createClient() {
-  loadEnv();
-  const apiId = Number(process.env.API_ID);
-  const apiHash = process.env.API_HASH;
-  if (!apiId || !apiHash) {
-    throw new Error("Missing API_ID / API_HASH. Copy .env.example to .env and fill them in (https://my.telegram.org).");
+/** A value from .env, falling back to the real environment. */
+export function envValue(name) {
+  const fromFile = readEnvFile()[name];
+  return fromFile !== undefined ? fromFile : process.env[name];
+}
+
+/** API ID / hash of the built-in app (.env API_ID + API_HASH), or null when missing or malformed. */
+export function envCreds() {
+  const id = Number(envValue("API_ID"));
+  const hash = String(envValue("API_HASH") || "").trim();
+  return Number.isInteger(id) && id > 0 && /^[0-9a-f]{32}$/i.test(hash) ? { id, hash } : null;
+}
+
+/** A client for the given API ID / hash and the saved session (not yet connected). */
+export function createClient(creds = envCreds()) {
+  if (!creds) {
+    throw new Error("Thiếu API_ID / API_HASH trong .env. Tạo ở https://my.telegram.org → API development tools rồi điền vào .env.");
   }
   const saved = fs.existsSync(SESSION_FILE) ? fs.readFileSync(SESSION_FILE, "utf8").trim() : "";
-  const client = new TelegramClient(new StringSession(saved), apiId, apiHash, { connectionRetries: 5 });
+  const client = new TelegramClient(new StringSession(saved), creds.id, creds.hash, { connectionRetries: 5 });
   client.setLogLevel("error");
   return client;
 }

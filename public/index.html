@@ -16,10 +16,15 @@
 </script>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css"
       integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB" crossorigin="anonymous">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flag-icons@7.5.0/css/flag-icons.min.css"
+      integrity="sha384-8olrmTcwXL3OYMeB+2ok8jx9/U/FZxeLnoRWdu1Pyi+lakrkqoI7hfysfQF5Q1Xx" crossorigin="anonymous">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.13.1/font/bootstrap-icons.min.css"
       integrity="sha384-CK2SzKma4jA5H/MXDUU7i1TqZlCFaD4T01vtyDFvPlD97JQyS+IsSh1nI2EFbpyk" crossorigin="anonymous">
 <style>
   body { background: var(--bs-tertiary-bg); }
+  /* Exactly the visible screen: 100vh on mobile Safari/Chrome includes the area behind the address
+     bar, which made the page scroll (and the header slide away) even when everything fits. */
+  .app-body { height: 100vh; height: 100dvh; overflow: hidden; overscroll-behavior: none; }
   .min-w-0 { min-width: 0; }
   /* Icon + label buttons: same spacing and vertical alignment everywhere */
   .btn { display: inline-flex; align-items: center; justify-content: center; gap: .375rem; }
@@ -74,15 +79,22 @@
       z-index: 1045; box-shadow: -8px 0 24px rgba(0,0,0,.3);
       border-left: var(--bs-border-width) solid var(--bs-border-color);
     }
-    .dl-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.4); z-index: 1044; }
+    /* the backdrop only exists while the panel is really shown as an overlay (logged in, panel open) */
+    body:has(#mainView:not(.d-none) #dl:not(.d-none)) .dl-backdrop { display: block; }
   }
-  @media (min-width: 992px) { .dl-backdrop { display: none; } }
+  .dl-backdrop { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.4); z-index: 1044; }
   /* Medium screens: a slightly narrower sidebar + drop the # and status columns so the name has room. */
   @media (max-width: 991.98px) {
     .sidebar { width: 260px; }
     .file-table .col-num, .file-table th.col-state, .file-table td:nth-child(3), .file-table td:nth-child(6) { display: none; }
   }
   .search-files { max-width: 320px; }
+  .phone-code { gap: .3rem; padding-left: .55rem; padding-right: .45rem; font-size: 1rem; color: var(--bs-body-color); }
+  .phone-code.dropdown-toggle::after { margin-left: .1rem; border-top-width: .28em; border-right-width: .28em; border-left-width: .28em; }
+  .phone-code .fi, .phone-menu .fi { width: 1.4em; line-height: 1em; border-radius: 2px; box-shadow: 0 0 0 1px rgba(0,0,0,.15); }
+  .phone-menu { max-height: 280px; overflow-y: auto; }
+  .login-back { position: absolute; top: .6rem; left: .6rem; color: var(--bs-secondary-color); border: 0; }
+  .login-back:hover, .login-back:focus-visible { color: var(--bs-primary); background: var(--bs-tertiary-bg); }
   .choice-btn { display: flex; flex-direction: column; align-items: flex-start; text-align: start; gap: .25rem; }
   .m-meta { display: none; }
   /* Phones: one screen at a time (channels, then files), card-like rows, filters in a bottom sheet. */
@@ -128,7 +140,7 @@
   }
 </style>
 </head>
-<body class="d-flex flex-column vh-100">
+<body class="d-flex flex-column app-body">
 
 <nav class="navbar bg-body border-bottom px-3 py-2 flex-nowrap">
   <span class="navbar-brand fw-bold mb-0 text-truncate"><i class="bi bi-headphones text-primary"></i> Tele Downloader</span>
@@ -144,8 +156,10 @@
 </nav>
 
 <!-- ============ login ============ -->
-<div class="flex-grow-1 d-flex align-items-center justify-content-center p-3" id="loginView">
-  <div class="card shadow-sm w-100" style="max-width: 420px">
+<div class="flex-grow-1 min-h-0 overflow-auto d-flex justify-content-center p-3" id="loginView">
+  <div class="card shadow-sm w-100 position-relative my-auto" style="max-width: 420px">
+    <button type="button" class="btn btn-sm login-back d-none" id="loginBack" title="Quay lại chọn cách kết nối (API có sẵn / tự tạo API ID)">
+      <i class="bi bi-arrow-left"></i> Quay lại</button>
     <div class="card-body p-4">
       <div class="text-center mb-3"><i class="bi bi-telegram text-primary" style="font-size: 3rem"></i></div>
       <h4 class="card-title text-center" id="loginTitle">Đang kết nối…</h4>
@@ -163,30 +177,14 @@
       </div>
       <form id="loginForm" class="d-none">
         <div class="input-group input-group-lg mb-3">
-          <select class="form-select flex-grow-0 w-auto d-none" id="phoneCode" aria-label="Mã quốc gia" title="Mã quốc gia">
-            <option value="84">+84 VN</option>
-            <option value="1">+1 US/CA</option>
-            <option value="44">+44 UK</option>
-            <option value="61">+61 AU</option>
-            <option value="65">+65 SG</option>
-            <option value="66">+66 TH</option>
-            <option value="81">+81 JP</option>
-            <option value="82">+82 KR</option>
-            <option value="86">+86 CN</option>
-            <option value="852">+852 HK</option>
-            <option value="855">+855 KH</option>
-            <option value="856">+856 LA</option>
-            <option value="886">+886 TW</option>
-            <option value="33">+33 FR</option>
-            <option value="49">+49 DE</option>
-            <option value="7">+7 RU</option>
-          </select>
+          <button class="btn btn-outline-secondary dropdown-toggle phone-code d-none" type="button" id="phoneCode"
+            data-bs-toggle="dropdown" aria-expanded="false" title="Mã quốc gia" aria-label="Mã quốc gia">
+            <span class="fi fi-vn" id="phoneFlag"></span><span id="phoneDial">+84</span></button>
+          <ul class="dropdown-menu phone-menu" id="phoneMenu"></ul>
           <input class="form-control" id="loginInput" autocomplete="off" required>
         </div>
         <div class="alert alert-danger py-2 d-none" id="loginError"></div>
         <button class="btn btn-primary btn-lg w-100" type="submit" id="loginBtn">Tiếp tục</button>
-        <button type="button" class="btn btn-link btn-sm w-100 mt-2 text-body-secondary d-none" id="loginBack">
-          <i class="bi bi-arrow-left"></i> Chọn lại cách kết nối</button>
       </form>
     </div>
   </div>
@@ -645,6 +643,7 @@ function renderAuth(auth) {
   $("choiceError").textContent = choosing ? auth.error || "" : "";
   if (choosing) {
     show($("loginForm"), false);
+    show($("loginBack"), false); // first screen: nothing to go back to
     $("loginTitle").textContent = "Kết nối ứng dụng Telegram";
     $("loginDesc").textContent = "Chọn cách kết nối tới Telegram:";
     for (const b of document.querySelectorAll("#loginChoice button")) b.disabled = false;
@@ -654,7 +653,8 @@ function renderAuth(auth) {
   const step = LOGIN_STEPS[auth.step];
   show($("loginForm"), !!step);
   show($("phoneCode"), auth.step === "phone");
-  show($("loginBack"), !!step && !!auth.apiChoice && auth.step.startsWith("api_"));
+  // "← choose again" on the API ID / hash steps and on the phone step (browser build with a built-in API)
+  show($("loginBack"), !!step && !!auth.apiChoice && (auth.step.startsWith("api_") || auth.step === "phone"));
   show($("loginError"), !!auth.error);
   $("loginError").textContent = auth.error || "";
   if (step) {
@@ -698,10 +698,37 @@ $("loginBack").addEventListener("click", () => sendLogin(state.auth.step, "__bac
 
 // ---------- phone number: the country code is fixed in front (+84 by default) ----------
 
-try { $("phoneCode").value = localStorage.getItem("phoneCode") || "84"; } catch {}
-if (!$("phoneCode").value) $("phoneCode").value = "84";
-$("phoneCode").addEventListener("change", () => {
-  try { localStorage.setItem("phoneCode", $("phoneCode").value); } catch {}
+const PHONE_CODES = [
+  ["84", "vn", "Việt Nam"], ["1", "us", "Mỹ / Canada"], ["44", "gb", "Anh"], ["61", "au", "Úc"],
+  ["65", "sg", "Singapore"], ["66", "th", "Thái Lan"], ["81", "jp", "Nhật Bản"], ["82", "kr", "Hàn Quốc"],
+  ["86", "cn", "Trung Quốc"], ["852", "hk", "Hồng Kông"], ["855", "kh", "Campuchia"], ["856", "la", "Lào"],
+  ["886", "tw", "Đài Loan"], ["33", "fr", "Pháp"], ["49", "de", "Đức"], ["7", "ru", "Nga"],
+];
+
+$("phoneMenu").innerHTML = PHONE_CODES.map(([code, cc, name]) =>
+  `<li><button type="button" class="dropdown-item d-flex align-items-center gap-2" data-code="${code}">
+     <span class="fi fi-${cc}"></span><span>${name}</span><span class="ms-auto text-body-secondary small">+${code}</span></button></li>`).join("");
+
+/** The selected country code ("84"), kept on the button. */
+const phoneCode = () => $("phoneCode").dataset.code || "84";
+
+function setPhoneCode(code, remember) {
+  const entry = PHONE_CODES.find(([c]) => c === code) || PHONE_CODES[0];
+  $("phoneCode").dataset.code = entry[0];
+  $("phoneFlag").className = `fi fi-${entry[1]}`;
+  $("phoneDial").textContent = `+${entry[0]}`;
+  $("phoneCode").title = `${entry[2]} (+${entry[0]})`;
+  for (const b of document.querySelectorAll("#phoneMenu [data-code]")) b.classList.toggle("active", b.dataset.code === entry[0]);
+  if (remember) try { localStorage.setItem("phoneCode", entry[0]); } catch {}
+}
+
+let savedCode = "84";
+try { savedCode = localStorage.getItem("phoneCode") || "84"; } catch {}
+setPhoneCode(savedCode);
+$("phoneMenu").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-code]");
+  if (!b) return;
+  setPhoneCode(b.dataset.code, true);
   $("loginInput").focus();
 });
 
@@ -709,10 +736,10 @@ $("phoneCode").addEventListener("change", () => {
 function fillPhone(full) {
   const digits = String(full || "").replace(/\D/g, "");
   if (!digits) return;
-  const codes = [...$("phoneCode").options].map((o) => o.value).sort((a, b) => b.length - a.length);
+  const codes = PHONE_CODES.map(([c]) => c).sort((a, b) => b.length - a.length);
   const code = codes.find((c) => digits.startsWith(c));
   if (code) {
-    $("phoneCode").value = code;
+    setPhoneCode(code);
     $("loginInput").value = digits.slice(code.length);
   }
 }
@@ -745,9 +772,9 @@ $("loginForm").addEventListener("submit", async (e) => {
   e.preventDefault();
   let value = $("loginInput").value;
   if (state.auth.step === "phone") {
-    value = composePhone($("phoneCode").value, value);
+    value = composePhone(phoneCode(), value);
     if (!value) {
-      $("loginError").textContent = $("phoneCode").value === "84"
+      $("loginError").textContent = phoneCode() === "84"
         ? "Số điện thoại Việt Nam gồm 9 số sau +84 (có thể gõ kèm số 0 ở đầu, vd 0912 345 678)."
         : "Số điện thoại không hợp lệ.";
       show($("loginError"), true);

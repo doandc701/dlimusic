@@ -228,7 +228,7 @@ function waitInput(kind) {
   }
   auth.step = kind;
   emit("auth", auth);
-  return new Promise((resolve) => (pendingInput = { kind, resolve }));
+  return new Promise((resolve, reject) => (pendingInput = { kind, resolve, reject }));
 }
 
 /** Own API ID + hash; null when the user goes back to the choice screen. */
@@ -254,7 +254,11 @@ async function askApiCreds() {
   }
 }
 
-async function startAuth({ keepStep = false } = {}) {
+// Each sign-in attempt has a number; going back to the API choice starts a new one, and anything the
+// abandoned attempt does afterwards (errors, prompts, "ready") is ignored.
+let authRun = 0;
+
+async function startAuth({ keepStep = false } = {}, run = authRun) {
   if (!keepStep) auth.step = "connecting";
   auth.error = null;
   auth.me = null;
@@ -275,12 +279,14 @@ async function startAuth({ keepStep = false } = {}) {
       phoneCode: () => waitInput("code"),
       password: () => waitInput("password"),
       onError: (err) => {
+        if (run !== authRun) return true; // abandoned attempt: stop quietly
         auth.error = err.message;
         emit("auth", auth);
         return /API_ID/.test(err.message); // wrong API ID/hash: stop and ask for them again
       },
     });
   }
+  if (run !== authRun) return;
   save(STORE.session, client.session.save());
 
   const me = await client.getMe();
@@ -291,7 +297,9 @@ async function startAuth({ keepStep = false } = {}) {
 }
 
 function runAuth(options) {
-  startAuth(options).catch((err) => {
+  const run = ++authRun;
+  startAuth(options, run).catch((err) => {
+    if (run !== authRun) return; // replaced by a newer attempt (e.g. back to the API choice)
     if (/API_ID/.test(err.message || "")) {
       const wasBuiltin = load(STORE.api, null)?.mode === "builtin";
       save(STORE.api, undefined); // ask again how to connect
@@ -304,6 +312,20 @@ function runAuth(options) {
     auth.error = err.message;
     emit("auth", auth);
   });
+}
+
+/** "← Choose again" on the phone step: forget the chosen API and start over at the choice screen. */
+function backToChoice() {
+  const old = client;
+  const waiting = pendingInput;
+  client = null;
+  pendingInput = null;
+  earlyPhone = null;
+  save(STORE.api, undefined);
+  Object.assign(auth, { error: null, me: null });
+  runAuth(); // new attempt first, so the old one's rejection below is ignored
+  waiting?.reject(new Error("back to API choice"));
+  old?.destroy().catch(() => {});
 }
 
 function logout() {
@@ -806,6 +828,10 @@ async function route(method, url, body) {
     case "POST /api/login": {
       const { kind, value } = body;
       if (!String(value ?? "").trim()) throw httpError(400, "Vui lòng nhập giá trị");
+      if (value === BACK && kind === "phone" && HAS_BAKED && auth.step === "phone") {
+        backToChoice();
+        return { ok: true };
+      }
       if (!pendingInput && kind === "phone" && auth.step === "phone") {
         earlyPhone = String(value).trim();
         auth.step = "waiting";

@@ -17,6 +17,8 @@ Lần chạy đầu sẽ hỏi số điện thoại, mã OTP (và mật khẩu 2
 npm run web        # chạy server và tự mở trình duyệt, đã đăng nhập sẵn (npm run web:server: chỉ chạy server)
 ```
 
+> **Kết nối API khi đăng nhập:** nếu `.env` có đủ `API_ID` + `API_HASH`, màn đăng nhập cho chọn *Dùng API có sẵn* (của `.env`) hoặc *Tự tạo API ID*; nếu `.env` thiếu, tool hỏi thẳng API ID/hash (có link tới my.telegram.org). API tự nhập được lưu ở thư mục dữ liệu riêng (`api.json`, quyền 600), không ghi vào `.env`. Nút *← Chọn lại cách kết nối* có ở các bước nhập API và số điện thoại. `.env` được đọc lại mỗi lần đăng nhập, sửa không cần khởi động lại server.
+>
 > Trình duyệt được mở bằng một **mã dùng một lần** (hết hạn sau 60 giây, dùng xong là vô hiệu) thay vì token thật, nên không lộ token qua dòng lệnh. Muốn mở bằng trình duyệt khác: `TDL_OPEN_CMD=firefox npm run web`, hoặc Ctrl+click link có token in trong terminal (mỗi trình duyệt chỉ cần một lần).
 >
 > Mỗi lần bật máy cần chạy lại `npm run web` (server không tự chạy sau khi khởi động lại).

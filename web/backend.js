@@ -27,6 +27,13 @@ import {
 } from "../core.js";
 
 const STORE = { session: "tdl.session", api: "tdl.api", settings: "tdl.settings", history: "tdl.history" };
+
+// API ID / hash baked in at build time (TG_API_ID / TG_API_HASH, e.g. from the project's .env).
+// When present, users choose between these and their own app from my.telegram.org.
+const BAKED = { id: Number(__TG_API_ID__) || 0, hash: String(__TG_API_HASH__ || "") };
+const HAS_BAKED = !!(BAKED.id && BAKED.hash);
+const BACK = "__back__"; // sent by the "← choose again" link on the API ID / hash steps
+
 const CONCURRENCY = 3;
 const HISTORY_LIMIT = 2000;
 const CHUNK = 512 * 1024; // divides 1 MB, so aligned requests never cross a Telegram 1 MB block
@@ -189,14 +196,28 @@ function removeHistory(ids) {
 // ---------- auth ----------
 
 let client = null;
-const auth = { step: "connecting", error: null, me: null, phone: "" };
+const auth = { step: "connecting", error: null, me: null, phone: "", apiChoice: HAS_BAKED };
 let pendingInput = null;
 let earlyPhone = null;
 
-function apiCreds() {
-  const baked = { id: Number(__TG_API_ID__) || 0, hash: String(__TG_API_HASH__ || "") };
-  if (baked.id && baked.hash) return { ...baked, baked: true };
-  return load(STORE.api, null);
+/** Credentials already chosen in this browser, or null. Saved as { mode: "builtin" } or { id, hash }. */
+function savedCreds() {
+  const saved = load(STORE.api, null);
+  if (saved?.mode === "builtin") return HAS_BAKED ? BAKED : null;
+  return saved?.id && saved?.hash ? saved : null;
+}
+
+/** Ask how to connect: the built-in app or the user's own API ID/hash. */
+async function chooseCreds() {
+  for (;;) {
+    const mode = HAS_BAKED ? await waitInput("api_choice") : "own";
+    if (mode === "builtin") {
+      save(STORE.api, { mode: "builtin" });
+      return BAKED;
+    }
+    const creds = await askApiCreds();
+    if (creds) return creds;
+  }
 }
 
 function waitInput(kind) {
@@ -210,15 +231,18 @@ function waitInput(kind) {
   return new Promise((resolve) => (pendingInput = { kind, resolve }));
 }
 
+/** Own API ID + hash; null when the user goes back to the choice screen. */
 async function askApiCreds() {
   for (;;) {
     const id = String(await waitInput("api_id")).trim();
+    if (id === BACK && HAS_BAKED) return (auth.error = null);
     if (!/^\d{3,12}$/.test(id)) {
       auth.error = "API ID là một dãy số (lấy ở my.telegram.org)";
       continue;
     }
     auth.error = null;
     const hash = String(await waitInput("api_hash")).trim().toLowerCase();
+    if (hash === BACK.toLowerCase() && HAS_BAKED) return (auth.error = null);
     if (!/^[0-9a-f]{32}$/.test(hash)) {
       auth.error = "API hash gồm 32 ký tự 0-9, a-f";
       continue;
@@ -236,8 +260,7 @@ async function startAuth({ keepStep = false } = {}) {
   auth.me = null;
   emit("auth", auth);
 
-  let creds = apiCreds();
-  if (!creds?.id || !creds?.hash) creds = await askApiCreds();
+  const creds = savedCreds() || (await chooseCreds());
 
   client = new TelegramClient(new StringSession(load(STORE.session, "")), creds.id, creds.hash, {
     connectionRetries: 5,
@@ -269,9 +292,12 @@ async function startAuth({ keepStep = false } = {}) {
 
 function runAuth(options) {
   startAuth(options).catch((err) => {
-    if (/API_ID/.test(err.message || "") && !apiCreds()?.baked) {
-      save(STORE.api, undefined); // let the user enter them again
-      auth.error = "API ID / API hash không đúng, hãy nhập lại";
+    if (/API_ID/.test(err.message || "")) {
+      const wasBuiltin = load(STORE.api, null)?.mode === "builtin";
+      save(STORE.api, undefined); // ask again how to connect
+      auth.error = wasBuiltin
+        ? "API có sẵn đang không dùng được, hãy tự tạo API ID của bạn"
+        : "API ID / API hash không đúng, hãy nhập lại";
       return runAuth();
     }
     auth.step = "error";
@@ -291,7 +317,7 @@ function logout() {
   cancelQueued();
   pendingInput = null;
   earlyPhone = null;
-  Object.assign(auth, { step: "phone", error: null, me: null, phone: "" });
+  Object.assign(auth, { step: "phone", error: null, me: null, phone: "", apiChoice: HAS_BAKED });
   emit("auth", auth);
   (async () => {
     try {

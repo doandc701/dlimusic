@@ -83,6 +83,7 @@
     .file-table .col-num, .file-table th.col-state, .file-table td:nth-child(3), .file-table td:nth-child(6) { display: none; }
   }
   .search-files { max-width: 320px; }
+  .choice-btn { display: flex; flex-direction: column; align-items: flex-start; text-align: start; gap: .25rem; }
   .m-meta { display: none; }
   /* Phones: one screen at a time (channels, then files), card-like rows, filters in a bottom sheet. */
   @media (max-width: 575.98px) {
@@ -149,10 +150,23 @@
       <div class="text-center mb-3"><i class="bi bi-telegram text-primary" style="font-size: 3rem"></i></div>
       <h4 class="card-title text-center" id="loginTitle">Đang kết nối…</h4>
       <p class="text-body-secondary text-center" id="loginDesc"><span class="spinner-border spinner-border-sm"></span></p>
+      <div class="alert alert-warning py-2 small d-none" id="choiceError"></div>
+      <div class="d-grid gap-2 d-none" id="loginChoice">
+        <button type="button" class="btn btn-outline-primary choice-btn p-3" data-choice="builtin">
+          <span class="fw-semibold"><i class="bi bi-lightning-charge-fill"></i> Dùng API có sẵn</span>
+          <span class="small text-body-secondary">Nhanh nhất — chỉ cần số điện thoại và mã OTP.</span>
+        </button>
+        <button type="button" class="btn btn-outline-secondary choice-btn p-3" data-choice="own">
+          <span class="fw-semibold"><i class="bi bi-key-fill"></i> Tự tạo API ID của bạn</span>
+          <span class="small text-body-secondary">Dùng ứng dụng Telegram riêng, tạo miễn phí ở my.telegram.org (khoảng 1 phút).</span>
+        </button>
+      </div>
       <form id="loginForm" class="d-none">
         <input class="form-control form-control-lg mb-3" id="loginInput" autocomplete="off" required>
         <div class="alert alert-danger py-2 d-none" id="loginError"></div>
         <button class="btn btn-primary btn-lg w-100" type="submit" id="loginBtn">Tiếp tục</button>
+        <button type="button" class="btn btn-link btn-sm w-100 mt-2 text-body-secondary d-none" id="loginBack">
+          <i class="bi bi-arrow-left"></i> Chọn lại cách kết nối</button>
       </form>
     </div>
   </div>
@@ -571,8 +585,18 @@ $("themeBtn").addEventListener("click", () => {
 // ---------- auth ----------
 
 const LOGIN_STEPS = {
-  api_id: { title: "Kết nối ứng dụng Telegram", desc: "Nhập API ID (dãy số) tạo tại my.telegram.org → API development tools. Chỉ cần nhập một lần.", type: "text", placeholder: "12345678" },
-  api_hash: { title: "Kết nối ứng dụng Telegram", desc: "Nhập API hash (32 ký tự) ở cùng trang.", type: "text", placeholder: "0123456789abcdef0123456789abcdef" },
+  api_id: {
+    title: "Tự tạo API ID",
+    html: `Mở <a href="https://my.telegram.org/apps" target="_blank" rel="noopener noreferrer" class="fw-semibold">my.telegram.org <i class="bi bi-box-arrow-up-right"></i></a>,
+      đăng nhập bằng số điện thoại → <b>API development tools</b> → tạo ứng dụng (tên tuỳ ý), rồi nhập <b>App api_id</b> (dãy số) vào đây.`,
+    type: "text", placeholder: "App api_id, vd 12345678",
+  },
+  api_hash: {
+    title: "Tự tạo API ID",
+    html: `Nhập <b>App api_hash</b> (32 ký tự) ở cùng trang
+      <a href="https://my.telegram.org/apps" target="_blank" rel="noopener noreferrer" class="fw-semibold">my.telegram.org <i class="bi bi-box-arrow-up-right"></i></a>.`,
+    type: "text", placeholder: "App api_hash (32 ký tự)",
+  },
   phone: { title: "Đăng nhập Telegram", desc: "Nhập số điện thoại (định dạng quốc tế).", type: "tel", placeholder: "+84xxxxxxxxx" },
   code: { title: "Nhập mã xác nhận", desc: "Telegram vừa gửi mã vào app Telegram của bạn (không phải SMS).", type: "text", placeholder: "12345" },
   password: { title: "Mật khẩu 2 lớp", desc: "Tài khoản bật xác minh 2 bước, nhập mật khẩu.", type: "password", placeholder: "Mật khẩu" },
@@ -595,13 +619,27 @@ function renderAuth(auth) {
     return;
   }
 
+  const choosing = auth.step === "api_choice";
+  show($("loginChoice"), choosing);
+  show($("choiceError"), choosing && !!auth.error);
+  $("choiceError").textContent = choosing ? auth.error || "" : "";
+  if (choosing) {
+    show($("loginForm"), false);
+    $("loginTitle").textContent = "Kết nối ứng dụng Telegram";
+    $("loginDesc").textContent = "Chọn cách kết nối tới Telegram:";
+    for (const b of document.querySelectorAll("#loginChoice button")) b.disabled = false;
+    return;
+  }
+
   const step = LOGIN_STEPS[auth.step];
   show($("loginForm"), !!step);
+  show($("loginBack"), !!step && !!auth.apiChoice && auth.step.startsWith("api_"));
   show($("loginError"), !!auth.error);
   $("loginError").textContent = auth.error || "";
   if (step) {
     $("loginTitle").textContent = step.title;
-    $("loginDesc").textContent = step.desc;
+    if (step.html) $("loginDesc").innerHTML = step.html; // fixed text from this file, never user data
+    else $("loginDesc").textContent = step.desc;
     const input = $("loginInput");
     if (prev !== auth.step) {
       input.type = step.type;
@@ -618,6 +656,22 @@ function renderAuth(auth) {
     $("loginDesc").innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
   }
 }
+
+async function sendLogin(kind, value) {
+  try {
+    await api("/api/login", { kind, value });
+  } catch (err) {
+    toast(err.message);
+  }
+}
+
+$("loginChoice").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-choice]");
+  if (!b) return;
+  for (const x of document.querySelectorAll("#loginChoice button")) x.disabled = true;
+  sendLogin("api_choice", b.dataset.choice);
+});
+$("loginBack").addEventListener("click", () => sendLogin(state.auth.step, "__back__"));
 
 $("loginForm").addEventListener("submit", async (e) => {
   e.preventDefault();

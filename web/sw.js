@@ -51,7 +51,7 @@ const safeType = (mime) => (SAFE_MEDIA.test(String(mime || "").trim()) ? String(
 
 async function serve(event, url, download) {
   const port = await providerFor(event.clientId || url.searchParams.get("c"));
-  if (!port) return new Response("Trang Tele Downloader không còn mở, hãy tải lại trang.", { status: 503, headers: SAFE_HEADERS });
+  if (!port) return new Response("Trang DLiMusic không còn mở, hãy tải lại trang.", { status: 503, headers: SAFE_HEADERS });
 
   const channel = new MessageChannel();
   const next = (ms) =>

@@ -1,4 +1,6 @@
-# Telegram file downloader (Node.js)
+# DLiMusic — Chạm là nghe, nhấn là tải
+
+Nghe thử và tải nhạc & file từ Telegram (Node.js).
 
 Tải toàn bộ file (nhạc, video, ảnh, tài liệu, voice) từ một chat / group / channel Telegram, dùng tài khoản người dùng qua [GramJS](https://gram.js.org) — không bị giới hạn 20MB như Bot API.
 
@@ -24,12 +26,14 @@ npm run web        # chạy server và tự mở trình duyệt, đã đăng nh�
 > Mỗi lần bật máy cần chạy lại `npm run web` (server không tự chạy sau khi khởi động lại).
 > **Đừng mở `public/index.html` bằng Live Server của VS Code hay mở file trực tiếp** — trang sẽ không kết nối được.
 
+Mã giao diện (dùng chung cho bản chạy trên máy và bản Vercel): `public/index.html` (HTML), `public/css/styles.css` (CSS), `public/js/ui.js` (logic giao diện), `public/js/theme.js` (sáng/tối, chạy trước khi vẽ trang).
+
 Terminal sẽ in một **link kèm token**, dạng `http://127.0.0.1:3000/?token=…`. **Mở đúng link đó** trên trình duyệt (token được lưu vào cookie, các lần sau chỉ cần vào `http://127.0.0.1:3000`). Token ngăn người dùng khác hoặc chương trình khác trên cùng máy truy cập tài khoản Telegram của bạn:
 
 1. Đăng nhập (lần đầu): nhập số điện thoại → mã trong app Telegram → mật khẩu 2FA nếu có.
 2. Chọn kênh ở cột trái (hoặc dán link `t.me/...` / username rồi Enter).
 3. Chọn loại file (Nhạc, Video, Ảnh…), tìm theo tên, lọc *Chưa tải / Đã tải*.
-4. Bấm vào dòng để chọn; **Shift + bấm** để chọn cả đoạn; *Chọn tất cả* chọn mọi bài đang hiện.
+4. Bấm vào dòng để chọn; **Shift + bấm** để chọn cả đoạn; ô tích ở hàng tiêu đề bảng chọn / bỏ chọn mọi bài đang hiện.
 5. **Tải xuống** → kiểm tra danh sách trong hộp xác nhận → **Bắt đầu tải**.
 6. Theo dõi tiến độ ở cột bên phải; 📂 mở thư mục lưu.
 
@@ -38,6 +42,10 @@ Terminal sẽ in một **link kèm token**, dạng `http://127.0.0.1:3000/?token
 **Xem trước ảnh / video:** ảnh có nút 👁, video có nút ▶ (màn hình) thay cho nút phát nhạc. Bấm để mở hộp xem trước: ảnh hiện lớn, video phát trực tiếp từ Telegram (tua được, không lưu xuống máy). Trong hộp có **‹ Trước / Sau ›** (phím ← →) để lướt qua các ảnh/video đang hiện trong danh sách, và **Chọn để tải** để tick luôn. Video định dạng trình duyệt không hỗ trợ (vd. một số .mkv) sẽ báo không xem được nhưng vẫn tải về bình thường.
 
 **Thư mục tải xuống:** lần đầu bấm *Bắt đầu tải* mà chưa cài đặt, tool sẽ hỏi thư mục (duyệt thư mục, lối tắt Home / Music / Downloads, tạo thư mục mới) kèm ô *Ghi nhớ làm thư mục mặc định*. Đổi bất cứ lúc nào ở **⚙ Cài đặt**: thư mục mặc định (hoặc bỏ để lần nào cũng hỏi) và bật/tắt *Tạo thư mục con theo tên kênh*. Khi đã có thư mục mặc định, hộp xác nhận tải không hỏi thư mục nữa (file vào thẳng thư mục mặc định); muốn đổi thì vào ⚙ Cài đặt. Cài đặt lưu ở `settings.json`.
+
+**Hội thoại hiển thị:** bấm **Chọn hiển thị** trên thanh ngay dưới ô tìm kênh (hoặc ⚙ Cài đặt → *Hội thoại hiển thị*) để tích những hội thoại muốn thấy trong danh sách. Danh sách lưu **riêng cho từng tài khoản Telegram** (`visible-chats.json`; bản trình duyệt lưu trong trình duyệt), giữ nguyên khi đăng xuất / đăng nhập lại. Chưa chọn thì hiện tất cả; *Hiện tất cả* để bỏ lọc.
+
+**Bài hát yêu thích ♥:** bấm trái tim ở cuối mỗi dòng để thêm / bỏ một bài. Mục **♥ Bài hát yêu thích** ở đầu cột kênh mở danh sách **tất cả** bài đã thả tim, từ mọi kênh (mới thả tim nhất ở trên, mỗi bài ghi tên kênh của nó); nghe thử, xem trước, tải xuống như trong một kênh, file tải về vào thư mục của kênh gốc. Thanh **▶ Phát** ở đầu danh sách: chọn *Tất cả kênh — theo danh sách* (mặc định) hoặc một kênh (danh sách chỉ còn bài của kênh đó) rồi bấm **Phát**; hết bài sẽ tự phát bài kế tiếp theo đúng thứ tự đang hiện (bỏ qua video / ảnh / tài liệu). Tự phát bài kế tiếp cũng áp dụng trong từng kênh. Lưu riêng cho từng tài khoản Telegram (`favorites.json`; bản trình duyệt lưu trong trình duyệt).
 
 **Lịch sử tải:** nút **Lịch sử** trên thanh trên cùng bật/tắt cột lịch sử (lưu ở `history.json`, còn nguyên sau khi tắt server). Mỗi mục có 📂 mở thư mục chứa file và 🗑 xoá khỏi lịch sử; có nút *Xoá toàn bộ lịch sử*. Xoá lịch sử **không xoá file** trên máy.
 
@@ -136,7 +144,7 @@ Tool giữ phiên đăng nhập Telegram (toàn quyền tài khoản) nên đư�
 - **Token truy cập**: mọi request phải kèm token (lưu trong cookie `HttpOnly`, `SameSite=Strict`). Người/chương trình khác trên cùng máy gọi `127.0.0.1:3000` sẽ bị từ chối (401). Token nằm ở `.ui-token` trong thư mục dữ liệu riêng (quyền 600). Đặt token cố định qua biến `UI_TOKEN=...` nếu muốn.
 - **Chống trang web độc hại**: kiểm tra Host/Origin (chống DNS-rebinding), CSP chặt (script chỉ chạy từ chính trang + CDN đã ghim), `X-Frame-Options: DENY` (không nhúng iframe được), cookie `SameSite=Strict`.
 - **Nội dung từ Telegram được coi là không tin cậy**: tên kênh/tên file được làm sạch (không thể chứa `..`, `/`, ký tự điều khiển hay ký tự đảo chiều để thoát thư mục); mọi dữ liệu hiển thị đều escape (chống XSS); loại file (Content-Type) chỉ nhận nhạc/video/ảnh, còn lại tải về dạng tệp thường (chống XSS lưu trữ).
-- **Dữ liệu bí mật nằm ngoài thư mục dự án**: `session.txt`, `.ui-token`, `settings.json`, `history.json` được lưu ở `~/.config/tele-downloader/` (macOS: `~/Library/Application Support/tele-downloader`, Windows: `%APPDATA%\tele-downloader`; đổi bằng `TDL_DATA_DIR=...`), thư mục quyền 700, file quyền 600. Nhờ vậy dù thư mục dự án bị phục vụ (Live Server, `npx serve`), đẩy lên Git hay upload đi đâu, phiên Telegram cũng không lộ. Phiên bản cũ để các file này trong thư mục dự án sẽ được tự chuyển sang khi khởi động.
+- **Dữ liệu bí mật nằm ngoài thư mục dự án**: `session.txt`, `.ui-token`, `settings.json`, `history.json`, `visible-chats.json`, `favorites.json` được lưu ở `~/.config/tele-downloader/` (macOS: `~/Library/Application Support/tele-downloader`, Windows: `%APPDATA%\tele-downloader`; đổi bằng `TDL_DATA_DIR=...`), thư mục quyền 700, file quyền 600. Nhờ vậy dù thư mục dự án bị phục vụ (Live Server, `npx serve`), đẩy lên Git hay upload đi đâu, phiên Telegram cũng không lộ. Phiên bản cũ để các file này trong thư mục dự án sẽ được tự chuyển sang khi khởi động.
 - Body request giới hạn 1MB; lỗi ở một request không làm sập server.
 
 Giữ bí mật `session.txt` và `.ui-token` (trong thư mục dữ liệu riêng ở trên) — ai có chúng là truy cập được tài khoản Telegram của bạn. Nếu nghi bị lộ: Telegram → Cài đặt → Thiết bị → kết thúc phiên của tool, rồi đăng nhập lại.

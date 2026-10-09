@@ -171,3 +171,21 @@ export async function resolveChat(client, chat) {
 export function entityTitle(entity) {
   return entity.title || [entity.firstName, entity.lastName].filter(Boolean).join(" ") || entity.username || String(entity.id);
 }
+
+/**
+ * The list of chats an account chose to show, as sent by the UI: null = show every chat, otherwise
+ * Telegram chat ids (as strings, deduplicated). Returns undefined when the value is not valid.
+ */
+export function normalizeChatIds(value) {
+  if (value === null) return null;
+  if (!Array.isArray(value) || value.length > 10000) return undefined;
+  const ids = value.map((v) => (typeof v === "number" && Number.isSafeInteger(v) ? String(v) : v));
+  if (!ids.every((v) => typeof v === "string" && /^-?\d{1,20}$/.test(v))) return undefined;
+  return [...new Set(ids)];
+}
+
+/** Id of a favourite file: "<chat id>|<message id>" (stays the same across rescans and file types). */
+export function isFavoriteId(value) {
+  return typeof value === "string" && /^-?\d{1,20}\|\d{1,12}$/.test(value);
+}
+export const FAVORITES_LIMIT = 20000;

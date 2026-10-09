@@ -9,7 +9,7 @@ const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..")
 const DIST = path.join(ROOT, "dist");
 const PORT = Number(process.env.PORT) || 4173;
 const config = JSON.parse(fs.readFileSync(path.join(ROOT, "vercel.json"), "utf8"));
-const TYPES = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".json": "application/json" };
+const TYPES = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".png": "image/png", ".json": "application/json" };
 
 // vercel.json "source" patterns are path-to-regexp; the few used here translate directly.
 const rules = config.headers.map((h) => ({ re: new RegExp(`^${h.source.replace(/\(\.\*\)/g, ".*")}$`), headers: h.headers }));

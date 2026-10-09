@@ -27,7 +27,7 @@
       ]
     },
     {
-      "source": "/(index.html|app.js|ui.js|theme.js)?",
+      "source": "/(index.html|app.js|js/ui.js|js/theme.js|css/styles.css)?",
       "headers": [{ "key": "Cache-Control", "value": "no-cache" }]
     }
   ]

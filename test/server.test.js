@@ -99,7 +99,7 @@ before(async () => {
   server = spawn(process.execPath, ["server.js", "--open"], {
     cwd: ROOT,
     // Isolated settings/history, and no DOWNLOAD_DIR: the server starts with no download folder.
-    env: { ...process.env, PORT: String(port), DOWNLOAD_DIR: "", SETTINGS_FILE: path.join(TMP, "settings.json"), HISTORY_FILE: path.join(TMP, "history.json"), UI_TOKEN: TOKEN, TOKEN_FILE: path.join(TMP, ".ui-token"), TDL_OPEN_CMD: OPENER, API_FILE: path.join(TMP, "api.json") },
+    env: { ...process.env, PORT: String(port), DOWNLOAD_DIR: "", SETTINGS_FILE: path.join(TMP, "settings.json"), HISTORY_FILE: path.join(TMP, "history.json"), UI_TOKEN: TOKEN, TOKEN_FILE: path.join(TMP, ".ui-token"), TDL_OPEN_CMD: OPENER, API_FILE: path.join(TMP, "api.json"), VISIBLE_CHATS_FILE: path.join(TMP, "visible-chats.json"), FAVORITES_FILE: path.join(TMP, "favorites.json") },
     stdio: ["ignore", "pipe", "pipe"],
   });
   await new Promise((resolve, reject) => {
@@ -240,21 +240,36 @@ describe("security hardening (R1-R7)", () => {
     }
   });
 
-  test("R2: the page sends CSP (no inline script except ours, no framing) and safety headers", async () => {
+  test("R2: the page sends CSP (only our script files, no inline script, no framing) and safety headers", async () => {
     const res = await authed(base + "/");
     const csp = res.headers.get("content-security-policy");
     assert.match(csp, /default-src 'none'/);
     assert.match(csp, /frame-ancestors 'none'/);
-    assert.match(csp, /script-src 'self' https:\/\/cdn\.jsdelivr\.net 'sha256-/);
+    assert.match(csp, /script-src 'self' https:\/\/cdn\.jsdelivr\.net(;|$)/);
     assert.ok(!/script-src[^;]*'unsafe-inline'/.test(csp), "no unsafe-inline for scripts");
     assert.equal(res.headers.get("x-frame-options"), "DENY");
     assert.equal(res.headers.get("x-content-type-options"), "nosniff");
     assert.equal(res.headers.get("referrer-policy"), "no-referrer");
     assert.equal(res.headers.get("cross-origin-resource-policy"), "same-origin");
-    // every inline <script> on the page is covered by a hash in the CSP
     const html = await res.text();
-    for (const [, js] of html.matchAll(/<script>([\s\S]*?)<\/script>/g)) {
-      assert.ok(csp.includes(crypto.createHash("sha256").update(js).digest("base64")), "inline script allowed by hash");
+    assert.ok(!/<script>/.test(html), "no inline <script> on the page");
+  });
+
+  test("the page's css/js files are served (with a token), nothing else from public/", async () => {
+    for (const [p, type] of [["/css/styles.css", /text\/css/], ["/js/theme.js", /javascript/], ["/js/ui.js", /javascript/]]) {
+      const res = await authed(base + p);
+      assert.equal(res.status, 200, p);
+      assert.match(res.headers.get("content-type"), type, p);
+      assert.equal(res.headers.get("x-content-type-options"), "nosniff", p);
+      assert.equal(await res.text(), fs.readFileSync(path.join(ROOT, "public", p), "utf8"), p);
+      assert.equal((await fetch(base + p)).status, 404, `${p} without the token`);
+    }
+    const logo = await authed(base + "/img/logo-192.png");
+    assert.equal(logo.status, 200);
+    assert.equal(logo.headers.get("content-type"), "image/png");
+    assert.ok(Buffer.from(await logo.arrayBuffer()).equals(fs.readFileSync(path.join(ROOT, "public/img/logo-192.png"))));
+    for (const p of ["/index.html/../server.js", "/js/../../.env", "/js/", "/css/x.css", "/public/index.html"]) {
+      assert.equal((await authed(base + p)).status, 404, p);
     }
   });
 
@@ -275,6 +290,16 @@ describe("security hardening (R1-R7)", () => {
 });
 
 describe("validation", () => {
+  test("cancel by chat: keys must be a list of strings; unknown keys cancel nothing", async () => {
+    for (const keys of ["x", [1], [{}], Array(1001).fill("k"), ["k".repeat(201)]]) {
+      assert.equal((await api("/api/cancel", { method: "POST", body: { keys } })).status, 400, JSON.stringify(keys).slice(0, 30));
+    }
+    const r = await api("/api/cancel", { method: "POST", body: { keys: ["123|music"] } });
+    assert.equal(r.status, 200);
+    assert.deepEqual(r.data, { cancelled: 0 });
+    assert.deepEqual((await api("/api/cancel", { method: "POST", body: {} })).data, { cancelled: 0 }, "no keys: all queued, as before");
+  });
+
   test("media for an unknown scan is 404", async () => {
     assert.equal((await api("/api/media?key=nope&id=1")).status, 404);
   });
@@ -369,6 +394,75 @@ describe("telegram (real account)", () => {
       assert.equal(typeof d.id, "string");
       assert.ok(["channel", "group", "user"].includes(d.type));
     }
+  });
+
+  test("visible chats: saved per account, validated, null = show all", async (t) => {
+    if (!ready) return t.skip("no logged-in session.txt");
+    const me = (await api("/api/status")).data.me;
+    assert.match(me.id, /^\d+$/, "status tells which account is signed in");
+    assert.deepEqual((await api("/api/visible-chats")).data, { ids: null }, "nothing chosen yet: show all");
+    const ids = (await api("/api/dialogs")).data.slice(0, 2).map((d) => d.id);
+    assert.deepEqual((await api("/api/visible-chats", { method: "POST", body: { ids: [...ids, ids[0]] } })).data, { ids }, "deduplicated");
+    assert.deepEqual((await api("/api/visible-chats")).data, { ids });
+    const stored = JSON.parse(fs.readFileSync(path.join(TMP, "visible-chats.json"), "utf8"));
+    assert.deepEqual(stored, { [me.id]: ids }, "kept under the account id");
+    assert.equal(fs.statSync(path.join(TMP, "visible-chats.json")).mode & 0o777, 0o600);
+    for (const bad of ["1", [1.5], ["abc"], ["1; rm"], [{}], Array(10001).fill("1")]) {
+      assert.equal((await api("/api/visible-chats", { method: "POST", body: { ids: bad } })).status, 400, JSON.stringify(bad).slice(0, 30));
+    }
+    assert.deepEqual((await api("/api/visible-chats", { method: "POST", body: { ids: null } })).data, { ids: null });
+    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(TMP, "visible-chats.json"), "utf8")), {});
+  });
+
+  test("leaving a chat mid-scan stops reading it from Telegram", { timeout: 60_000 }, async (t) => {
+    if (!ready) return t.skip("no logged-in session.txt");
+    // needs a chat that takes several seconds to scan (thousands of files), else it ends before we leave
+    const chat = process.env.TEST_BIG_CHAT || "KenhNhacThanhPho";
+    if (!(await api("/api/dialogs")).data.some((d) => d.username === chat || d.id === chat)) return t.skip(`not a member of ${chat}`);
+    const counts = [];
+    const first = await listen((ev, d) => {
+      if (ev === "scan" && d.chat === chat) counts.push(d);
+      return counts.length === 1;
+    }, 40_000);
+    const ctrl = new AbortController();
+    const req = authed(`${base}/api/files?chat=${chat}&type=all&scan=tab1-7`, { signal: ctrl.signal }).catch((e) => e);
+    await first.done;
+    assert.equal(counts[0].scanId, "tab1-7", "progress carries the id of its scan (the UI ignores other scans)");
+    ctrl.abort(); // what the UI does when another chat is opened
+    assert.equal((await req).name, "AbortError");
+    // keep listening: a scan that went on would report every 50 files
+    const later = await listen((ev, d) => ev === "scan" && d.chat === chat, 5_000);
+    await assert.rejects(later.done, /Timed out/, "no more progress for the abandoned chat");
+  });
+
+  test("a scan id that is not short and plain is dropped from the progress events", { timeout: 60_000 }, async (t) => {
+    if (!ready) return t.skip("no logged-in session.txt");
+    const chat = process.env.TEST_BIG_CHAT || "KenhNhacThanhPho";
+    if (!(await api("/api/dialogs")).data.some((d) => d.username === chat || d.id === chat)) return t.skip(`not a member of ${chat}`);
+    const first = await listen((ev, d) => ev === "scan" && d.chat === chat, 40_000);
+    const ctrl = new AbortController();
+    const req = authed(`${base}/api/files?chat=${chat}&type=all&scan=${encodeURIComponent("<img src=x>")}`, { signal: ctrl.signal }).catch((e) => e);
+    assert.equal((await first.done).scanId, null);
+    ctrl.abort();
+    await req;
+  });
+
+  test("favourites: added / removed per account, newest first, validated", async (t) => {
+    if (!ready) return t.skip("no logged-in session.txt");
+    const me = (await api("/api/status")).data.me;
+    const post = (body) => api("/api/favorites", { method: "POST", body });
+    assert.deepEqual((await api("/api/favorites")).data, { ids: [] });
+    assert.deepEqual((await post({ id: "-1001|5", on: true })).data, { ids: ["-1001|5"] });
+    assert.deepEqual((await post({ id: "42|7", on: true })).data, { ids: ["42|7", "-1001|5"] }, "newest first");
+    assert.deepEqual((await post({ id: "42|7", on: true })).data, { ids: ["42|7", "-1001|5"] }, "no duplicates");
+    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(TMP, "favorites.json"), "utf8")), { [me.id]: ["42|7", "-1001|5"] });
+    assert.equal(fs.statSync(path.join(TMP, "favorites.json")).mode & 0o777, 0o600);
+    for (const bad of [{ id: "42", on: true }, { id: "a|1", on: true }, { id: "1|2", on: "yes" }, { id: ["1|2"], on: true }, { id: "1|2|3", on: true }]) {
+      assert.equal((await post(bad)).status, 400, JSON.stringify(bad));
+    }
+    assert.deepEqual((await post({ id: "42|7", on: false })).data, { ids: ["-1001|5"] });
+    assert.deepEqual((await post({ id: "-1001|5", on: false })).data, { ids: [] });
+    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(TMP, "favorites.json"), "utf8")), {}, "empty lists are not kept");
   });
 
   test("scans a chat for music", async (t) => {
@@ -531,6 +625,44 @@ describe("telegram (real account)", () => {
     assert.equal(await flag(), true);
   });
 
+  test("hiding a chat stops its running download and removes the partial file", { timeout: 120_000 }, async (t) => {
+    if (!scan || !outDir) return t.skip("nothing downloaded");
+    const big = scan.files.find((f) => f.id !== file.id && f.size > 8 * 1024 ** 2);
+    if (!big) return t.skip("no file big enough to stop half-way");
+    const started = await listen((ev, d) => ev === "job" && d.msgId === big.id && d.status === "downloading" && d.received > 0, 60_000);
+    const ended = await listen((ev, d) => ev === "job" && d.msgId === big.id && ["cancelled", "done", "failed"].includes(d.status), 110_000);
+    assert.equal((await api("/api/download", { method: "POST", body: { key: scan.key, ids: [big.id] } })).data.added, 1);
+    await started.done;
+    assert.deepEqual((await api("/api/cancel", { method: "POST", body: { keys: [scan.key] } })).data, { cancelled: 1 });
+    const job = await ended.done;
+    assert.equal(job.status, "cancelled", job.error);
+    const left = fs.readdirSync(outDir).filter((n) => n.startsWith(path.parse(big.name).name));
+    assert.deepEqual(left, [], "neither the file nor its .part is left behind");
+  });
+
+  test("Bài hát yêu thích: favourites from the chat come back as one list that can be played", { timeout: 60_000 }, async (t) => {
+    if (!scan || !file) return t.skip("scan did not run");
+    const favId = `${scan.key.split("|")[0]}|${file.id}`;
+    await api("/api/favorites", { method: "POST", body: { id: favId, on: true } });
+    try {
+      const { status, data } = await api("/api/favorites/files");
+      assert.equal(status, 200, data.error);
+      assert.equal(data.key, "fav");
+      assert.equal(data.fav, true);
+      assert.equal(data.missing, 0);
+      const f = data.files.find((x) => x.fav === favId);
+      assert.ok(f, "the favourite is in the list");
+      assert.equal(f.chat, scan.title, "with the name of its chat");
+      assert.equal(f.size, file.size);
+      const res = await authed(`${base}/api/media?key=fav&id=${f.id}`, { headers: { Range: "bytes=0-99" } });
+      assert.equal(res.status, 206, "plays through the list's own id");
+      assert.equal((await res.arrayBuffer()).byteLength, 100);
+    } finally {
+      await api("/api/favorites", { method: "POST", body: { id: favId, on: false } });
+    }
+    assert.deepEqual((await api("/api/favorites/files")).data.files, [], "empty once the heart is removed");
+  });
+
   test("clear removes finished jobs", async (t) => {
     if (!scan || !file) return t.skip("nothing downloaded");
     // Skip the snapshot sent on connect; wait for the broadcast triggered by /api/clear.
@@ -603,6 +735,10 @@ describe("API choice on the login screen", () => {
     assert.equal((await s.call("/api/login", { kind: "api_id", value: "__back__" })).ok, true);
     assert.equal((await s.waitStep("api_id")).step, "api_id", "no way back when there is no built-in API");
     assert.ok(!fs.existsSync(path.join(data, "api.json")), "nothing saved yet");
+    // signed out: the chat list setting is not reachable
+    assert.match((await s.call("/api/visible-chats")).error, /Not logged in/);
+    assert.match((await s.call("/api/visible-chats", { ids: null })).error, /Not logged in/);
+    assert.match((await s.call("/api/favorites")).error, /Not logged in/);
   });
 
   test("API in .env and not signed in: offers the choice; own API can go back to it", async () => {

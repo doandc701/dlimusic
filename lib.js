@@ -21,6 +21,9 @@ export {
   dialogType,
   resolveChat,
   entityTitle,
+  normalizeChatIds,
+  isFavoriteId,
+  FAVORITES_LIMIT,
 } from "./core.js";
 
 // ---------- private data folder ----------

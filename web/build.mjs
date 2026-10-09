@@ -78,16 +78,16 @@ await build({
   bundle: true, platform: "browser", format: "iife", target: ["es2022"], minify: true, outdir: OUT, logLevel: "warning",
 });
 
-// The UI is the same page as the local version; inline scripts move to files so CSP can be script-src 'self'.
+// The UI is the same page as the local version (public/): copy its files; the browser backend (app.js)
+// is loaded right before ui.js.
 let html = fs.readFileSync(path.join(ROOT, "public/index.html"), "utf8");
-const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)];
-const names = ["theme.js", "ui.js"];
-scripts.forEach((m, i) => {
-  fs.writeFileSync(path.join(OUT, names[i]), m[1]);
-  html = html.replace(m[0], i === 1 ? `<script src="app.js"></script>\n<script src="ui.js"></script>` : `<script src="${names[i]}"></script>`);
-});
-if (scripts.length !== 2) throw new Error(`expected 2 inline scripts, found ${scripts.length}`);
+if (/<script>/.test(html)) throw new Error("public/index.html must not contain inline scripts (CSP is script-src 'self')");
+const UI_TAG = '<script src="js/ui.js"></script>';
+if (!html.includes(UI_TAG)) throw new Error(`${UI_TAG} not found in public/index.html`);
+html = html.replace(UI_TAG, `<script src="app.js"></script>\n${UI_TAG}`);
 fs.writeFileSync(path.join(OUT, "index.html"), html);
+for (const dir of ["css", "js", "img"]) fs.cpSync(path.join(ROOT, "public", dir), path.join(OUT, dir), { recursive: true });
 
 const size = (f) => (fs.statSync(path.join(OUT, f)).size / 1024).toFixed(0) + " KB";
-console.log(`dist/: ${fs.readdirSync(OUT).map((f) => `${f} (${size(f)})`).join(", ")}`);
+const files = fs.readdirSync(OUT, { recursive: true }).filter((f) => fs.statSync(path.join(OUT, f)).isFile());
+console.log(`dist/: ${files.map((f) => `${f} (${size(f)})`).join(", ")}`);

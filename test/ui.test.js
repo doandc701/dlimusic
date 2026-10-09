@@ -1,4 +1,4 @@
-// Static checks of the single-page UI (public/index.html), shared by the local and the browser build.
+// Static checks of the single-page UI (public/index.html + public/js/ui.js), shared by the local and the browser build.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -6,10 +6,8 @@ import fs from "node:fs";
 import path from "node:path";
 
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
-const html = fs.readFileSync(path.join(ROOT, "public/index.html"), "utf8");
-const scriptStart = html.indexOf("<script>\nconst $");
-const markup = html.slice(0, scriptStart);
-const script = html.slice(scriptStart);
+const markup = fs.readFileSync(path.join(ROOT, "public/index.html"), "utf8");
+const script = fs.readFileSync(path.join(ROOT, "public/js/ui.js"), "utf8");
 
 test("every element id is unique (a duplicate made the ‹ button also rewind the player)", () => {
   const ids = [...markup.matchAll(/\bid="([^"]+)"/g)].map((m) => m[1]);
@@ -37,4 +35,19 @@ test("phone numbers: +84 is fixed in front and common ways of typing are underst
     ["84", "+6591234567", "+6591234567"], ["1", "4155552671", "+14155552671"], ["65", "9123 4567", "+6591234567"],
   ];
   for (const [code, typed, want] of cases) assert.equal(composePhone(code, typed), want, `+${code} "${typed}"`);
+});
+
+test("© year is filled in from the clock, never written in the page", () => {
+  assert.ok(!/©\s*(<[^>]+>)?\s*\d{4}/.test(markup), "no fixed year after ©");
+  assert.match(markup, /class="copy-year"><\/span>/);
+  assert.match(script, /\.copy-year[\s\S]{0,80}new Date\(\)\.getFullYear\(\)/);
+});
+
+test("each show filter group (desktop bar, phone sheet) has every filter exactly once", () => {
+  for (const group of ["showSeg", "showSegM"]) {
+    const start = markup.indexOf(`id="${group}"`);
+    const block = markup.slice(start, markup.indexOf("</div>", start));
+    const shows = [...block.matchAll(/data-show="(\w+)"/g)].map((m) => m[1]);
+    assert.deepEqual(shows, ["all", "new", "done"], group);
+  }
 });

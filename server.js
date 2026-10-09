@@ -38,6 +38,9 @@ import {
   dialogType,
   resolveChat,
   entityTitle,
+  normalizeChatIds,
+  isFavoriteId,
+  FAVORITES_LIMIT,
 } from "./lib.js";
 
 const PORT = Number(process.env.PORT) || 3000;
@@ -45,8 +48,22 @@ const HOST = "127.0.0.1";
 const CONCURRENCY = Math.max(1, Number(process.env.CONCURRENCY) || 3);
 const ROOT_DIR = path.dirname(new URL(import.meta.url).pathname);
 const PUBLIC_DIR = path.join(ROOT_DIR, "public");
+// The page's own files, by exact path (nothing else under public/ is served).
+const PUBLIC_ASSETS = {
+  "/css/styles.css": "text/css; charset=utf-8",
+  "/js/theme.js": "text/javascript; charset=utf-8",
+  "/js/ui.js": "text/javascript; charset=utf-8",
+  "/img/logo-64.png": "image/png",
+  "/img/logo-192.png": "image/png",
+  "/img/apple-touch-icon.png": "image/png",
+  "/img/cat-headphones.webp": "image/webp",
+};
 const SETTINGS_FILE = path.resolve(process.env.SETTINGS_FILE || dataFile("settings.json"));
 const HISTORY_FILE = path.resolve(process.env.HISTORY_FILE || dataFile("history.json"));
+// Chats each Telegram account chose to show in the list: { "<account id>": ["<chat id>", …] }.
+const VISIBLE_FILE = path.resolve(process.env.VISIBLE_CHATS_FILE || dataFile("visible-chats.json"));
+// Favourite files of each Telegram account: { "<account id>": ["<chat id>|<message id>", …] }.
+const FAVORITES_FILE = path.resolve(process.env.FAVORITES_FILE || dataFile("favorites.json"));
 const HISTORY_LIMIT = 2000;
 
 const httpError = (status, message, extra = {}) => Object.assign(new Error(message), { status, ...extra });
@@ -66,7 +83,7 @@ function writeJsonFile(file, data) {
 }
 
 /** Settings, history, session and token are private to the account running the server. */
-for (const file of [SETTINGS_FILE, HISTORY_FILE, SESSION_FILE]) {
+for (const file of [SETTINGS_FILE, HISTORY_FILE, VISIBLE_FILE, FAVORITES_FILE, SESSION_FILE]) {
   try {
     fs.chmodSync(file, 0o600);
   } catch {
@@ -143,14 +160,11 @@ const BASE_HEADERS = {
   "Cross-Origin-Resource-Policy": "same-origin", // other sites cannot embed our media / API responses
 };
 
-/** CSP for the page: only our own inline scripts (by hash) and the pinned CDN files may run. */
-function pageCsp(html) {
-  const hashes = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(
-    (m) => `'sha256-${crypto.createHash("sha256").update(m[1]).digest("base64")}'`
-  );
+/** CSP for the page: only our own script files (public/js) and the pinned CDN files may run. */
+function pageCsp() {
   return [
     "default-src 'none'",
-    `script-src 'self' https://cdn.jsdelivr.net ${hashes.join(" ")}`,
+    "script-src 'self' https://cdn.jsdelivr.net",
     "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net",
     "font-src https://cdn.jsdelivr.net",
     "img-src 'self' data: blob: https://cdn.jsdelivr.net",
@@ -163,7 +177,7 @@ function pageCsp(html) {
   ].join("; ");
 }
 
-const LOCKED_PAGE = `<!doctype html><meta charset="utf-8"><title>Tele Downloader</title>
+const LOCKED_PAGE = `<!doctype html><meta charset="utf-8"><title>DLiMusic · Chạm là nghe, nhấn là tải</title>
 <body style="font:15px system-ui;max-width:560px;margin:15vh auto;padding:0 16px;line-height:1.5">
 <h2>🔒 Cần mở bằng link có token</h2>
 <p>Để người khác trên máy này không dùng được tài khoản Telegram của bạn, giao diện chỉ mở được bằng
@@ -228,6 +242,20 @@ function chatDir(baseDir, title) {
 // ---------- download history (persisted; removing entries never touches the files) ----------
 
 let history = readJsonFile(HISTORY_FILE, []);
+
+// ---------- chats shown in the list, per Telegram account ----------
+
+const visibleChats = (() => {
+  const data = readJsonFile(VISIBLE_FILE, {});
+  return data && typeof data === "object" && !Array.isArray(data) ? data : {};
+})();
+
+// ---------- favourite files, per Telegram account ----------
+
+const favorites = (() => {
+  const data = readJsonFile(FAVORITES_FILE, {});
+  return data && typeof data === "object" && !Array.isArray(data) ? data : {};
+})();
 let historySeq = history.reduce((max, h) => Math.max(max, h.id || 0), 0);
 
 function addHistory(job, status) {
@@ -417,7 +445,7 @@ async function startAuth({ keepStep = false } = {}, run = authRun) {
 
   const me = await client.getMe();
   if (run !== authRun) return;
-  auth.me = { name: entityTitle(me), username: me.username || null };
+  auth.me = { id: String(me.id), name: entityTitle(me), username: me.username || null };
   auth.step = "ready";
   auth.error = null;
   broadcast("auth", auth);
@@ -488,18 +516,27 @@ function logout() {
 // key -> { key, chat, type, title, items: Map<msgId, { msg, info }> }
 const scans = new Map();
 
-async function scanChat(chat, type) {
+/** Id the UI gives a scan so it can match the progress events to it (short, harmless characters only). */
+const scanIdParam = (url) => (/^[\w-]{1,40}$/.test(url.searchParams.get("scan") || "") ? url.searchParams.get("scan") : null);
+
+/** The UI moved to another chat (request closed): stop reading this one from Telegram. */
+const scanStopped = () => Object.assign(new Error("Đã dừng quét kênh"), { status: 499, stopped: true });
+
+async function scanChat(chat, type, signal, scanId = null) {
   const entity = await resolveChat(client, chat);
+  if (signal?.aborted) throw scanStopped();
   const title = entityTitle(entity);
   const key = `${entity.id}|${type}`;
   const Filter = FILTERS[type];
 
   const items = new Map();
   for await (const msg of client.iterMessages(entity, { filter: Filter ? new Filter() : undefined })) {
+    if (signal?.aborted) throw scanStopped(); // leaving the loop also stops the message requests
     const info = fileInfo(msg);
     if (!info) continue;
     items.set(msg.id, { msg, info });
-    if (items.size % 50 === 0) broadcast("scan", { chat, count: items.size });
+    // scanId (from the UI) tells this scan's progress apart from an earlier scan of the same chat
+    if (items.size % 50 === 0) broadcast("scan", { chat, scanId, count: items.size });
   }
 
   const scan = { key, chat, type, title, items };
@@ -507,6 +544,38 @@ async function scanChat(chat, type) {
   return scan;
 }
 
+
+// ---------- "Bài hát yêu thích": every favourite file, from all chats, as one list ----------
+
+/** The favourites of this account, fetched from Telegram as one scan (key "fav"). */
+async function favoritesScan(ids, signal) {
+  const byChat = new Map(); // chat id -> [message id…]
+  for (const id of ids) {
+    const [chat, msg] = id.split("|");
+    if (!byChat.has(chat)) byChat.set(chat, []);
+    byChat.get(chat).push(Number(msg));
+  }
+  const entities = new Map();
+  if (byChat.size) for (const d of await client.getDialogs({})) if (d.entity) entities.set(String(d.entity.id), d.entity);
+  const found = new Map(); // fav id -> item
+  for (const [chat, msgIds] of byChat) {
+    const entity = entities.get(chat);
+    if (!entity) continue; // left that chat
+    for (let i = 0; i < msgIds.length; i += 100) {
+      if (signal?.aborted) throw scanStopped();
+      for (const msg of await client.getMessages(entity, { ids: msgIds.slice(i, i + 100) })) {
+        const info = msg && fileInfo(msg);
+        if (info) found.set(`${chat}|${msg.id}`, { msg, info, chatTitle: entityTitle(entity), fav: `${chat}|${msg.id}` });
+      }
+    }
+  }
+  // Message ids repeat across chats, so the list uses its own ids (1, 2, …) in favourite order (newest first).
+  const items = new Map();
+  for (const id of ids) if (found.has(id)) items.set(items.size + 1, found.get(id));
+  const scan = { key: "fav", chat: "fav", type: "all", title: "Bài hát yêu thích", fav: true, items, missing: ids.length - items.size };
+  scans.set(scan.key, scan);
+  return scan;
+}
 
 /** Paths of finished downloads recorded in the history for one scan: msgId -> path. */
 function historyPaths(scanKey) {
@@ -520,7 +589,7 @@ function historyPaths(scanKey) {
 /** Path of a complete local copy of an item (default folder first, then the history), or null. */
 function localCopy(scan, item, fromHistory = historyPaths(scan.key)) {
   if (settings.downloadDir) {
-    const t = resolveTarget(chatDir(settings.downloadDir, scan.title), item.info.name, item.info.size, item.msg.id);
+    const t = resolveTarget(chatDir(settings.downloadDir, item.chatTitle ?? scan.title), item.info.name, item.info.size, item.msg.id);
     if (t.skip) return t.filePath;
   }
   const p = fromHistory.get(item.msg.id);
@@ -537,9 +606,11 @@ function describeScan(scan) {
   return {
     key: scan.key,
     title: scan.title,
-    outDir: settings.downloadDir ? chatDir(settings.downloadDir, scan.title) : null,
-    files: [...scan.items.values()].map((item) => ({
-      id: item.msg.id,
+    outDir: settings.downloadDir ? (scan.fav ? settings.downloadDir : chatDir(settings.downloadDir, scan.title)) : null,
+    ...(scan.fav && { fav: true, missing: scan.missing }),
+    files: [...scan.items].map(([id, item]) => ({
+      id,
+      ...(item.fav && { fav: item.fav, chat: item.chatTitle }),
       name: item.info.name,
       kind: mediaKind(item.msg),
       title: item.info.title || null,
@@ -569,12 +640,12 @@ function updateJob(job, patch) {
 }
 
 function enqueue(scan, ids, baseDir) {
-  const outDir = chatDir(baseDir, scan.title);
-  fs.mkdirSync(outDir, { recursive: true });
   let added = 0;
   for (const id of ids) {
     const item = scan.items.get(Number(id));
     if (!item) continue;
+    const outDir = chatDir(baseDir, item.chatTitle ?? scan.title); // favourites: each file goes to its own chat's folder
+    fs.mkdirSync(outDir, { recursive: true });
     const jobId = `${scan.key}|${id}`;
     const existing = jobs.get(jobId);
     if (existing && ["queued", "downloading"].includes(existing.status)) continue;
@@ -585,7 +656,7 @@ function enqueue(scan, ids, baseDir) {
       msgId: item.msg.id,
       name: item.info.name,
       display: displayName(item.info),
-      chat: scan.title,
+      chat: item.chatTitle ?? scan.title,
       outDir,
       size: item.info.size,
       received: 0,
@@ -629,6 +700,7 @@ async function runJob(job) {
   let lastSent = 0;
   try {
     const size = await downloadFile(client, job.msg, filePath, (received, total) => {
+      if (job.abort) throw cancelledError(); // stops the transfer; downloadFile removes the .part file
       job.received = received;
       if (total) job.size = total;
       const now = Date.now();
@@ -640,7 +712,9 @@ async function runJob(job) {
     updateJob(job, { status: "done", received: size, size, file: path.basename(filePath) });
     addHistory(job, "done");
   } catch (err) {
-    if (err.seconds) {
+    if (err.cancelled) {
+      updateJob(job, { status: "cancelled", received: 0 });
+    } else if (err.seconds) {
       // FLOOD_WAIT: Telegram wants us to slow down; retry after the wait.
       updateJob(job, { status: "queued", received: 0, error: `Flood wait ${err.seconds}s` });
       await new Promise((r) => setTimeout(r, err.seconds * 1000));
@@ -664,6 +738,36 @@ function cancelQueued() {
     }
   }
   return n;
+}
+
+/**
+ * Stop the downloads that came from some scans (chats just hidden from the list): queued ones are
+ * dropped, running ones are aborted at their next chunk (the partial file is removed).
+ */
+function cancelScans(keys) {
+  const wanted = new Set(keys);
+  let n = 0;
+  for (const job of jobs.values()) {
+    if (!wanted.has(job.scanKey)) continue;
+    if (job.status === "queued") {
+      updateJob(job, { status: "cancelled" });
+      n++;
+    } else if (job.status === "downloading" && !job.abort) {
+      job.abort = true;
+      n++;
+    }
+  }
+  for (let i = queue.length - 1; i >= 0; i--) if (jobs.get(queue[i])?.status !== "queued") queue.splice(i, 1);
+  return n;
+}
+
+const cancelledError = () => Object.assign(new Error("Đã huỷ"), { cancelled: true });
+
+/** Scan keys sent by the UI for POST /api/cancel: undefined = all queued downloads. */
+function cancelKeys(value) {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value) || value.length > 1000 || !value.every((k) => typeof k === "string" && k.length <= 200)) return null;
+  return value;
 }
 
 function clearFinished() {
@@ -756,7 +860,7 @@ const photoCache = new Map(); // "scanKey|msgId" -> Buffer, most recent last
 const PHOTO_CACHE_MAX = 40;
 
 async function sendPhoto(res, scan, item) {
-  const key = `${scan.key}|${item.msg.id}`;
+  const key = `${item.msg.chatId}|${item.msg.id}`; // message ids repeat across chats
   let buf = photoCache.get(key);
   if (!buf) {
     buf = await client.downloadMedia(item.msg);
@@ -893,13 +997,57 @@ async function handleApi(req, res, url) {
       );
     }
 
+    case "GET /api/visible-chats":
+      requireReady();
+      return sendJson(res, 200, { ids: visibleChats[auth.me.id] || null });
+
+    case "POST /api/visible-chats": {
+      requireReady();
+      const ids = normalizeChatIds((await readJson(req)).ids);
+      if (ids === undefined) return sendJson(res, 400, { error: "Danh sách hội thoại không hợp lệ" });
+      if (ids === null) delete visibleChats[auth.me.id];
+      else visibleChats[auth.me.id] = ids;
+      writeJsonFile(VISIBLE_FILE, visibleChats);
+      return sendJson(res, 200, { ids });
+    }
+
+    case "GET /api/favorites":
+      requireReady();
+      return sendJson(res, 200, { ids: favorites[auth.me.id] || [] });
+
+    case "GET /api/favorites/files": {
+      requireReady();
+      const ctrl = new AbortController();
+      res.on("close", () => !res.writableEnded && ctrl.abort());
+      return sendJson(res, 200, describeScan(await favoritesScan(favorites[auth.me.id] || [], ctrl.signal)));
+    }
+
+    case "POST /api/favorites": {
+      // { id: "<chat id>|<message id>", on: true|false } adds / removes one favourite
+      requireReady();
+      const { id, on } = await readJson(req);
+      if (!isFavoriteId(id) || typeof on !== "boolean") return sendJson(res, 400, { error: "Yêu thích không hợp lệ" });
+      const list = (favorites[auth.me.id] ||= []).filter((x) => x !== id);
+      if (on) {
+        if (list.length >= FAVORITES_LIMIT) return sendJson(res, 400, { error: `Tối đa ${FAVORITES_LIMIT} file yêu thích` });
+        list.unshift(id); // newest first
+      }
+      if (list.length) favorites[auth.me.id] = list;
+      else delete favorites[auth.me.id];
+      writeJsonFile(FAVORITES_FILE, favorites);
+      return sendJson(res, 200, { ids: list });
+    }
+
     case "GET /api/files": {
       requireReady();
       const chat = (url.searchParams.get("chat") || "").trim();
       const type = url.searchParams.get("type") || "music";
       if (!chat) return sendJson(res, 400, { error: "chat is required" });
       if (!(type in FILTERS)) return sendJson(res, 400, { error: `Invalid type "${type}"` });
-      const scan = await scanChat(chat, type);
+      // Switching to another chat aborts this request in the browser: stop scanning when it closes.
+      const ctrl = new AbortController();
+      res.on("close", () => !res.writableEnded && ctrl.abort());
+      const scan = await scanChat(chat, type, ctrl.signal, scanIdParam(url));
       return sendJson(res, 200, describeScan(scan));
     }
 
@@ -913,7 +1061,7 @@ async function handleApi(req, res, url) {
       if (!base) throw httpError(409, "Chưa chọn thư mục tải xuống", { code: "NEED_DIR" });
       if (!dir) base = checkDir(base); // the saved folder may have been removed since
       if (dir && remember) saveSettings({ downloadDir: base });
-      return sendJson(res, 200, { added: enqueue(scan, ids, base), outDir: chatDir(base, scan.title) });
+      return sendJson(res, 200, { added: enqueue(scan, ids, base), outDir: scan.fav ? base : chatDir(base, scan.title) });
     }
 
     case "GET /api/scan":
@@ -952,8 +1100,12 @@ async function handleApi(req, res, url) {
     case "POST /api/history/clear":
       return sendJson(res, 200, { removed: removeHistory(history.map((h) => h.id)) });
 
-    case "POST /api/cancel":
-      return sendJson(res, 200, { cancelled: cancelQueued() });
+    case "POST /api/cancel": {
+      // { keys: [scan key…] } stops the downloads of those scans (queued and running); no keys = all queued.
+      const keys = cancelKeys((await readJson(req)).keys);
+      if (keys === null) return sendJson(res, 400, { error: "Danh sách không hợp lệ" });
+      return sendJson(res, 200, { cancelled: keys ? cancelScans(keys) : cancelQueued() });
+    }
 
     case "POST /api/clear":
       clearFinished();
@@ -1027,8 +1179,13 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === "GET" && (url.pathname === "/" || url.pathname === "/index.html")) {
       const html = fs.readFileSync(path.join(PUBLIC_DIR, "index.html"), "utf8");
-      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", "Content-Security-Policy": pageCsp(html) });
+      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", "Content-Security-Policy": pageCsp() });
       return res.end(html);
+    }
+    const asset = req.method === "GET" && PUBLIC_ASSETS[url.pathname];
+    if (asset) {
+      res.writeHead(200, { "Content-Type": asset, "Cache-Control": "no-store" });
+      return res.end(fs.readFileSync(path.join(PUBLIC_DIR, url.pathname)));
     }
     sendJson(res, 404, { error: "Not found" });
   } catch (err) {

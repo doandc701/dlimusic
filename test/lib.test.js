@@ -6,7 +6,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { Api } from "telegram";
-import { sanitize, safeMediaType, formatBytes, fileInfo, mediaKind, resolveTarget, claimTarget, FILTERS } from "../lib.js";
+import { sanitize, safeMediaType, formatBytes, fileInfo, mediaKind, resolveTarget, claimTarget, FILTERS, normalizeChatIds, isFavoriteId } from "../lib.js";
 import { parseSelection } from "../index.js";
 
 function docMessage(id, { mimeType = "audio/mpeg", size = 1000, attributes = [] } = {}) {
@@ -221,4 +221,18 @@ describe("parseSelection (CLI picker)", () => {
 
 test("FILTERS covers every type offered in the UI", () => {
   for (const t of ["all", "music", "video", "photo", "document", "voice"]) assert.ok(t in FILTERS, t);
+});
+
+test("normalizeChatIds: null = all, ids as strings, rejects anything else", () => {
+  assert.equal(normalizeChatIds(null), null);
+  assert.deepEqual(normalizeChatIds([]), []);
+  assert.deepEqual(normalizeChatIds(["123", "-1001234567890", 42, "123"]), ["123", "-1001234567890", "42"]);
+  for (const bad of [undefined, "123", {}, [1.5], ["abc"], ["12 3"], [null], ["1".repeat(21)], Array(10001).fill("1")]) {
+    assert.equal(normalizeChatIds(bad), undefined, JSON.stringify(bad)?.slice(0, 30));
+  }
+});
+
+test("isFavoriteId: <chat id>|<message id> only", () => {
+  for (const ok of ["1|2", "-1001234567890|123456"]) assert.ok(isFavoriteId(ok), ok);
+  for (const bad of ["1", "|2", "1|", "a|2", "1|2|3", "1 |2", 12, null, "1".repeat(21) + "|2"]) assert.ok(!isFavoriteId(bad), String(bad));
 });

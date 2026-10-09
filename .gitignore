@@ -1,0 +1,19 @@
+# dependencies / build output
+node_modules/
+dist/
+
+# secrets and local data — never commit (the app keeps them in ~/.config/tele-downloader)
+.env
+.env.*
+!.env.example
+session.txt
+.ui-token
+settings.json
+history.json
+*.tmp
+
+# downloaded media
+downloads/
+
+# Vercel CLI link + its local token file
+.vercel

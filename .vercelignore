@@ -1,0 +1,15 @@
+# Only the source needed to build the browser version is uploaded to Vercel.
+# Never upload the local version's secrets or data:
+session.txt
+.env
+.ui-token
+settings.json
+history.json
+*.tmp
+downloads/
+node_modules/
+dist/
+test/
+.env.local
+.env.*.local
+.vercel/

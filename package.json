@@ -1,0 +1,32 @@
+{
+  "name": "download-music-tele",
+  "version": "1.0.0",
+  "description": "Download all files (music, video, photo, document) from a Telegram chat/channel",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "web": "node server.js --open",
+    "start": "node index.js",
+    "list": "node index.js --list",
+    "test": "node --test \"test/*.test.js\"",
+    "test:unit": "node --test test/lib.test.js test/ui.test.js",
+    "build:web": "node web/build.mjs",
+    "preview:web": "node web/build.mjs && node web/preview.mjs",
+    "web:server": "node server.js"
+  },
+  "engines": {
+    "node": ">=20.12"
+  },
+  "dependencies": {
+    "big-integer": "^1.6.52",
+    "telegram": "^2.26.0"
+  },
+  "devDependencies": {
+    "buffer": "^6.0.3",
+    "esbuild": "^0.28.2",
+    "events": "^3.3.0",
+    "path-browserify": "^1.0.1",
+    "process": "^0.11.10",
+    "util": "^0.12.5"
+  }
+}

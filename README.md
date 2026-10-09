@@ -103,7 +103,13 @@ npm run preview:web      # build vào dist/ và chạy thử ở http://127.0.0.
 
 **Đang chạy công khai tại: https://tele-downloader.vercel.app** (dự án Vercel `tele-downloader`).
 
-Cập nhật sau khi sửa code: `npx vercel --prod` (hoặc `npx vercel` để tạo bản xem thử trước).
+Mã nguồn: https://github.com/doandc701/tele-downloader (riêng tư). Dự án Vercel đã nối với repo này nên **không cần deploy tay**:
+
+- `git push` lên nhánh **`main`** → Vercel tự build và cập nhật https://tele-downloader.vercel.app
+- push lên **nhánh khác** (hoặc mở Pull Request) → Vercel tạo **bản xem thử** riêng, có link để thử trước khi gộp vào `main`
+- build lỗi thì trang chính giữ nguyên bản cũ; xem lỗi ở Vercel → Deployments
+
+Vẫn có thể deploy tay khi cần: `npx vercel --prod`.
 
 > Một số mạng (công ty / nhà mạng) chặn dải IP mới của `*.vercel.app` nên trang không mở được. Cách khắc phục bền vững là gắn tên miền riêng cho dự án trên Vercel (*Settings → Domains*).
 

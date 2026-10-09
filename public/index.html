@@ -162,7 +162,27 @@
         </button>
       </div>
       <form id="loginForm" class="d-none">
-        <input class="form-control form-control-lg mb-3" id="loginInput" autocomplete="off" required>
+        <div class="input-group input-group-lg mb-3">
+          <select class="form-select flex-grow-0 w-auto d-none" id="phoneCode" aria-label="Mã quốc gia" title="Mã quốc gia">
+            <option value="84">+84 VN</option>
+            <option value="1">+1 US/CA</option>
+            <option value="44">+44 UK</option>
+            <option value="61">+61 AU</option>
+            <option value="65">+65 SG</option>
+            <option value="66">+66 TH</option>
+            <option value="81">+81 JP</option>
+            <option value="82">+82 KR</option>
+            <option value="86">+86 CN</option>
+            <option value="852">+852 HK</option>
+            <option value="855">+855 KH</option>
+            <option value="856">+856 LA</option>
+            <option value="886">+886 TW</option>
+            <option value="33">+33 FR</option>
+            <option value="49">+49 DE</option>
+            <option value="7">+7 RU</option>
+          </select>
+          <input class="form-control" id="loginInput" autocomplete="off" required>
+        </div>
         <div class="alert alert-danger py-2 d-none" id="loginError"></div>
         <button class="btn btn-primary btn-lg w-100" type="submit" id="loginBtn">Tiếp tục</button>
         <button type="button" class="btn btn-link btn-sm w-100 mt-2 text-body-secondary d-none" id="loginBack">
@@ -597,7 +617,7 @@ const LOGIN_STEPS = {
       <a href="https://my.telegram.org/apps" target="_blank" rel="noopener noreferrer" class="fw-semibold">my.telegram.org <i class="bi bi-box-arrow-up-right"></i></a>.`,
     type: "text", placeholder: "App api_hash (32 ký tự)",
   },
-  phone: { title: "Đăng nhập Telegram", desc: "Nhập số điện thoại (định dạng quốc tế).", type: "tel", placeholder: "+84xxxxxxxxx" },
+  phone: { title: "Đăng nhập Telegram", desc: "Nhập số điện thoại Telegram của bạn.", type: "tel", placeholder: "912 345 678" },
   code: { title: "Nhập mã xác nhận", desc: "Telegram vừa gửi mã vào app Telegram của bạn (không phải SMS).", type: "text", placeholder: "12345" },
   password: { title: "Mật khẩu 2 lớp", desc: "Tài khoản bật xác minh 2 bước, nhập mật khẩu.", type: "password", placeholder: "Mật khẩu" },
 };
@@ -633,6 +653,7 @@ function renderAuth(auth) {
 
   const step = LOGIN_STEPS[auth.step];
   show($("loginForm"), !!step);
+  show($("phoneCode"), auth.step === "phone");
   show($("loginBack"), !!step && !!auth.apiChoice && auth.step.startsWith("api_"));
   show($("loginError"), !!auth.error);
   $("loginError").textContent = auth.error || "";
@@ -644,7 +665,9 @@ function renderAuth(auth) {
     if (prev !== auth.step) {
       input.type = step.type;
       input.placeholder = step.placeholder;
-      input.value = auth.step === "phone" ? auth.phone || "" : "";
+      input.value = "";
+      if (auth.step === "phone") fillPhone(auth.phone);
+      input.inputMode = auth.step === "phone" || auth.step === "code" || auth.step === "api_id" ? "numeric" : "text";
       setTimeout(() => input.focus(), 0);
     }
     $("loginBtn").disabled = false;
@@ -673,11 +696,68 @@ $("loginChoice").addEventListener("click", (e) => {
 });
 $("loginBack").addEventListener("click", () => sendLogin(state.auth.step, "__back__"));
 
+// ---------- phone number: the country code is fixed in front (+84 by default) ----------
+
+try { $("phoneCode").value = localStorage.getItem("phoneCode") || "84"; } catch {}
+if (!$("phoneCode").value) $("phoneCode").value = "84";
+$("phoneCode").addEventListener("change", () => {
+  try { localStorage.setItem("phoneCode", $("phoneCode").value); } catch {}
+  $("loginInput").focus();
+});
+
+/** Show a known full number (e.g. "+84912345678" from .env) as code + local part. */
+function fillPhone(full) {
+  const digits = String(full || "").replace(/\D/g, "");
+  if (!digits) return;
+  const codes = [...$("phoneCode").options].map((o) => o.value).sort((a, b) => b.length - a.length);
+  const code = codes.find((c) => digits.startsWith(c));
+  if (code) {
+    $("phoneCode").value = code;
+    $("loginInput").value = digits.slice(code.length);
+  }
+}
+
+/**
+ * "+<code><number>" from what was typed. Accepts the usual ways of writing it: with the national
+ * leading 0 (0912 345 678), with spaces/dots/dashes, or pasted with the country code (+84912..., 84912...).
+ * Returns null when it cannot be a phone number.
+ */
+function composePhone(code, typed) {
+  let digits = String(typed || "").replace(/[\s.\-()]/g, "");
+  if (digits.startsWith("+")) {
+    digits = digits.slice(1);
+    if (digits.startsWith(code)) digits = digits.slice(code.length); // pasted with the same country code
+    else return /^\d{7,15}$/.test(digits) ? `+${digits}` : null; // another country's full number
+  } else if (digits.startsWith("00" + code)) {
+    digits = digits.slice(2 + code.length);
+  } else if (digits.startsWith(code) && digits.length - code.length >= 8) {
+    digits = digits.slice(code.length); // typed the code again without "+"
+  }
+  digits = digits.replace(/^0+/, ""); // national trunk prefix: 0382... -> 382...
+  if (!/^\d+$/.test(digits)) return null;
+  const total = code.length + digits.length;
+  if (digits.length < 6 || total > 15) return null;
+  if (code === "84" && digits.length !== 9) return null; // Vietnamese mobile numbers: +84 + 9 digits
+  return `+${code}${digits}`;
+}
+
 $("loginForm").addEventListener("submit", async (e) => {
   e.preventDefault();
+  let value = $("loginInput").value;
+  if (state.auth.step === "phone") {
+    value = composePhone($("phoneCode").value, value);
+    if (!value) {
+      $("loginError").textContent = $("phoneCode").value === "84"
+        ? "Số điện thoại Việt Nam gồm 9 số sau +84 (có thể gõ kèm số 0 ở đầu, vd 0912 345 678)."
+        : "Số điện thoại không hợp lệ.";
+      show($("loginError"), true);
+      $("loginInput").focus();
+      return;
+    }
+  }
   $("loginBtn").disabled = true;
   try {
-    await api("/api/login", { kind: state.auth.step, value: $("loginInput").value });
+    await api("/api/login", { kind: state.auth.step, value });
   } catch (err) {
     $("loginError").textContent = err.message;
     show($("loginError"), true);

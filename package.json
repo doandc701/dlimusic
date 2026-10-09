@@ -11,7 +11,7 @@
     "test": "node --test \"test/*.test.js\"",
     "test:unit": "node --test test/lib.test.js test/ui.test.js",
     "build:web": "node web/build.mjs",
-    "preview:web": "node web/build.mjs && node web/preview.mjs",
+    "preview:web": "node web/build.mjs && node web/preview.mjs --open",
     "web:server": "node server.js"
   },
   "engines": {

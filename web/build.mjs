@@ -6,6 +6,26 @@ import fs from "node:fs";
 import path from "node:path";
 
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
+
+// Local builds take the API ID/hash from the project's .env (API_ID / API_HASH) unless TG_API_ID /
+// TG_API_HASH are set. On Vercel there is no .env (it is never uploaded): its env vars are used.
+if (!process.env.TG_API_ID && !process.env.TG_API_HASH) {
+  try {
+    const env = Object.fromEntries(
+      fs.readFileSync(path.join(ROOT, ".env"), "utf8").split(/\r?\n/)
+        .map((l) => /^\s*([A-Z_]+)\s*=\s*(.*?)\s*$/.exec(l))
+        .filter(Boolean)
+        .map((m) => [m[1], m[2].replace(/^["']|["']$/g, "")])
+    );
+    if (env.API_ID && env.API_HASH) {
+      process.env.TG_API_ID = env.API_ID;
+      process.env.TG_API_HASH = env.API_HASH;
+      console.log("Dùng API ID/hash từ .env (lựa chọn \"Dùng API có sẵn\").");
+    }
+  } catch {
+    // no .env: users enter their own API ID
+  }
+}
 const OUT = path.join(ROOT, "dist");
 const req = (p) => path.join(ROOT, "node_modules", p);
 const STUB = path.join(ROOT, "web/stubs.js");

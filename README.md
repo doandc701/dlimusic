@@ -98,7 +98,8 @@ Vercel không chạy được `server.js` (response tối đa 4,5 MB, function s
 - Nghe/xem trước, tua, sắp xếp, lịch sử… giống bản local. Không có: nút mở thư mục trên máy.
 
 ```bash
-npm run preview:web      # build vào dist/ và chạy thử ở http://127.0.0.1:4173 (header giống Vercel)
+npm run preview:web      # build vào dist/, chạy thử ở http://127.0.0.1:4173 (header giống Vercel) và tự mở trình duyệt
+                         # build trên máy tự lấy API_ID / API_HASH trong .env cho lựa chọn "Dùng API có sẵn"
 ```
 
 **Đang chạy công khai tại: https://tele-downloader.vercel.app** (dự án Vercel `tele-downloader`).

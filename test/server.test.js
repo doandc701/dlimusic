@@ -99,7 +99,7 @@ before(async () => {
   server = spawn(process.execPath, ["server.js", "--open"], {
     cwd: ROOT,
     // Isolated settings/history, and no DOWNLOAD_DIR: the server starts with no download folder.
-    env: { ...process.env, PORT: String(port), DOWNLOAD_DIR: "", SETTINGS_FILE: path.join(TMP, "settings.json"), HISTORY_FILE: path.join(TMP, "history.json"), UI_TOKEN: TOKEN, TOKEN_FILE: path.join(TMP, ".ui-token"), TDL_OPEN_CMD: OPENER, API_FILE: path.join(TMP, "api.json"), VISIBLE_CHATS_FILE: path.join(TMP, "visible-chats.json"), FAVORITES_FILE: path.join(TMP, "favorites.json") },
+    env: { ...process.env, PORT: String(port), DOWNLOAD_DIR: "", SETTINGS_FILE: path.join(TMP, "settings.json"), HISTORY_FILE: path.join(TMP, "history.json"), UI_TOKEN: TOKEN, TOKEN_FILE: path.join(TMP, ".ui-token"), TDL_OPEN_CMD: OPENER, API_FILE: path.join(TMP, "api.json"), VISIBLE_CHATS_FILE: path.join(TMP, "visible-chats.json"), FAVORITES_FILE: path.join(TMP, "favorites.json"), MONGODB_URI: "" },
     stdio: ["ignore", "pipe", "pipe"],
   });
   await new Promise((resolve, reject) => {
@@ -683,7 +683,7 @@ async function startServer(env) {
   const port = await freePort();
   const proc = spawn(process.execPath, ["server.js"], {
     cwd: ROOT,
-    env: { ...process.env, PORT: String(port), UI_TOKEN: TOKEN, ...env },
+    env: { ...process.env, PORT: String(port), UI_TOKEN: TOKEN, MONGODB_URI: "", ...env },
     stdio: ["ignore", "pipe", "pipe"],
   });
   await new Promise((resolve, reject) => {

@@ -42,6 +42,7 @@ import {
   isFavoriteId,
   FAVORITES_LIMIT,
 } from "./lib.js";
+import { createMirror } from "./cloud/mirror.js";
 
 const PORT = Number(process.env.PORT) || 3000;
 const HOST = "127.0.0.1";
@@ -64,6 +65,8 @@ const HISTORY_FILE = path.resolve(process.env.HISTORY_FILE || dataFile("history.
 const VISIBLE_FILE = path.resolve(process.env.VISIBLE_CHATS_FILE || dataFile("visible-chats.json"));
 // Favourite files of each Telegram account: { "<account id>": ["<chat id>|<message id>", …] }.
 const FAVORITES_FILE = path.resolve(process.env.FAVORITES_FILE || dataFile("favorites.json"));
+// Which Telegram app (API ID / hash) to use: the built-in one from .env, or the user's own (see chosenCreds).
+const API_FILE = path.resolve(process.env.API_FILE || dataFile("api.json"));
 const HISTORY_LIMIT = 2000;
 
 const httpError = (status, message, extra = {}) => Object.assign(new Error(message), { status, ...extra });
@@ -80,7 +83,38 @@ function writeJsonFile(file, data) {
   const tmp = `${file}.tmp`;
   fs.writeFileSync(tmp, JSON.stringify(data, null, 2), { mode: 0o600 });
   fs.renameSync(tmp, file); // atomic replace, never leaves a half-written file; result is owner-only (600)
+  mirror.changed(file);
 }
+
+/** Remove a private file (and its copy in MongoDB). */
+function removeDataFile(file) {
+  fs.rmSync(file, { force: true });
+  mirror.changed(file);
+}
+
+// ---------- MongoDB copy of the private files (optional: MONGODB_URI in .env) ----------
+// The files above stay the working copy; MongoDB is brought up to date on every change and is the source
+// of truth when the server starts (so another computer with the same MONGODB_URI + TDL_SECRET shares it).
+
+// MONGODB_URI set in the real environment wins over .env (tests set it to "" so they never touch real data)
+const cloudSetting = (name) => (process.env[name] !== undefined ? process.env[name] : envValue(name));
+const mirror = createMirror({
+  uri: cloudSetting("MONGODB_URI")?.trim() || null,
+  dbName: cloudSetting("MONGODB_DB")?.trim() || undefined,
+  instance: cloudSetting("TDL_CLOUD_INSTANCE")?.trim() || "default",
+  secret: cloudSetting("TDL_SECRET") || null,
+  keyFile: dataFile(".cloud-key"),
+  timeoutMs: Number(process.env.TDL_MONGO_TIMEOUT_MS) || undefined, // how long startup waits for the cluster
+  files: {
+    [SETTINGS_FILE]: { name: "settings.json" },
+    [HISTORY_FILE]: { name: "history.json" },
+    [VISIBLE_FILE]: { name: "visible-chats.json" },
+    [FAVORITES_FILE]: { name: "favorites.json" },
+    [API_FILE]: { name: "api.json", secret: true }, // may hold the user's own API hash
+    [SESSION_FILE]: { name: "session.txt", secret: true },
+  },
+});
+await mirror.start(); // before the files are read below
 
 /** Settings, history, session and token are private to the account running the server. */
 for (const file of [SETTINGS_FILE, HISTORY_FILE, VISIBLE_FILE, FAVORITES_FILE, SESSION_FILE]) {
@@ -351,7 +385,6 @@ let earlyPhone = null; // phone typed on the login screen before the fresh clien
 
 // Which Telegram app (API ID / hash) to use: the built-in one from .env, or the user's own, chosen on the
 // login screen like in the browser build. The choice / own credentials live in the private data folder.
-const API_FILE = path.resolve(process.env.API_FILE || dataFile("api.json"));
 const BACK = "__back__"; // "← choose again" on the login screen
 
 function waitInput(kind) {
@@ -441,6 +474,7 @@ async function startAuth({ keepStep = false } = {}, run = authRun) {
     });
     if (run !== authRun) return;
     saveSession(client);
+    mirror.changed(SESSION_FILE);
   }
 
   const me = await client.getMe();
@@ -457,7 +491,7 @@ function runAuth(options) {
     if (run !== authRun) return; // replaced by a newer attempt (e.g. back to the API choice)
     if (/API_ID/.test(err.message || "")) {
       const wasBuiltin = readJsonFile(API_FILE, null)?.mode === "builtin";
-      fs.rmSync(API_FILE, { force: true }); // ask again how to connect
+      removeDataFile(API_FILE); // ask again how to connect
       auth.error = wasBuiltin
         ? "API trong .env đang không dùng được, hãy tự tạo API ID của bạn"
         : "API ID / API hash không đúng, hãy nhập lại";
@@ -476,7 +510,7 @@ function backToChoice() {
   client = null;
   pendingInput = null;
   earlyPhone = null;
-  fs.rmSync(API_FILE, { force: true });
+  removeDataFile(API_FILE);
   Object.assign(auth, { error: null, me: null });
   runAuth(); // new attempt first, so the old one's rejection below is ignored
   waiting?.reject(new Error("back to API choice"));
@@ -490,7 +524,7 @@ function backToChoice() {
  */
 function logout() {
   const old = client;
-  fs.rmSync(SESSION_FILE, { force: true });
+  removeDataFile(SESSION_FILE);
   scans.clear();
   photoCache.clear();
   cancelQueued();
@@ -951,6 +985,10 @@ async function handleApi(req, res, url) {
 
     case "GET /api/status":
       return sendJson(res, 200, auth);
+
+    case "GET /api/cloud":
+      // { enabled, connected, host, error, lastSync } of the MongoDB copy (never the connection string)
+      return sendJson(res, 200, { ...mirror.status, kind: "local" });
 
     case "POST /api/login": {
       const { kind, value } = await readJson(req);

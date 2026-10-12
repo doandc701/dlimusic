@@ -136,6 +136,23 @@ Vẫn có thể deploy tay khi cần: `npx vercel --prod`.
 
 `.vercelignore` đảm bảo `session.txt`, `.env`, `.ui-token`, lịch sử, cài đặt và thư mục `downloads/` **không bao giờ** bị tải lên Vercel.
 
+## Lưu dữ liệu lên MongoDB Atlas (tuỳ chọn)
+
+Mặc định dữ liệu chỉ nằm trên máy (bản chạy trên máy) hoặc trong trình duyệt (bản Vercel). Bật MongoDB thì **cài đặt, lịch sử tải, hội thoại hiển thị, yêu thích, cách kết nối API và phiên đăng nhập Telegram** được lưu thêm lên MongoDB. Phiên Telegram và API hash tự tạo được **mã hoá AES-256-GCM** trước khi lưu. Mất kết nối MongoDB thì app vẫn chạy bằng dữ liệu cục bộ và tự đồng bộ lại sau. Trạng thái xem ở **⚙ Cài đặt → Lưu trữ đám mây**.
+
+1. Tạo cluster miễn phí ở [MongoDB Atlas](https://www.mongodb.com/atlas) → *Database Access*: tạo user · *Network Access*: cho phép IP của máy (bản Vercel: `0.0.0.0/0`, vì Vercel không có IP cố định) → *Connect → Drivers*: copy chuỗi kết nối `mongodb+srv://…`.
+2. **Bản chạy trên máy:** điền vào `.env` (xem `.env.example`):
+   ```
+   MONGODB_URI=mongodb+srv://user:matkhau@cluster0.xxxxx.mongodb.net/
+   TDL_SECRET=mot-chuoi-bi-mat-dai-it-nhat-16-ky-tu
+   ```
+   rồi chạy lại `npm run web`. Lần đầu dữ liệu trên máy được đẩy lên; từ đó MongoDB là bản chính khi khởi động — máy khác có cùng `MONGODB_URI` + `TDL_SECRET` dùng chung được (kể cả phiên đăng nhập).
+3. **Bản Vercel:** Project → Settings → Environment Variables, thêm `MONGODB_URI` và `TDL_SECRET` (16+ ký tự) rồi deploy lại. Sau khi đăng nhập Telegram, máy chủ hỏi Telegram xem phiên thuộc tài khoản nào rồi mới cấp **mã thiết bị**; dữ liệu được tách theo từng tài khoản Telegram. Đăng nhập lại ở thiết bị khác (vẫn cần mã OTP) sẽ thấy cài đặt, lịch sử, yêu thích của mình. Đăng xuất xoá phiên trên MongoDB và thu hồi mã thiết bị.
+
+Trong MongoDB: collection `kv` (mỗi mục một document: `local:<máy>:<file>` cho bản chạy trên máy, `acct:<id tài khoản>:<mục>` cho bản Vercel) và `tokens` (chỉ lưu bản băm của mã thiết bị, tự xoá sau 400 ngày không dùng).
+
+> `MONGODB_URI` chứa mật khẩu database, `TDL_SECRET` mở khoá các phiên Telegram — đừng đưa lên Git hay chia sẻ. Lộ cả hai = lộ tài khoản Telegram của mọi người dùng đã lưu.
+
 ## Bảo mật
 
 Tool giữ phiên đăng nhập Telegram (toàn quyền tài khoản) nên được khoá nhiều lớp:
@@ -158,4 +175,4 @@ npm run test:unit   # chỉ unit test, không cần mạng / tài khoản
 
 Phần test Telegram dùng `session.txt` hiện có (tự bỏ qua nếu chưa đăng nhập), tải 1 file nhạc nhỏ nhất (≤ 60MB) vào thư mục tạm rồi xoá — không đụng tới `downloads/`. Chọn kênh test bằng `TEST_CHAT=<username|id> npm test`.
 
-Test dùng `settings.json` / `history.json` riêng trong thư mục tạm, không đụng tới cài đặt và lịch sử thật.
+Test dùng `settings.json` / `history.json` riêng trong thư mục tạm, không đụng tới cài đặt và lịch sử thật. Test MongoDB (`test/cloud.test.js`) chạy trên một MongoDB tạm trong bộ nhớ (`mongodb-memory-server`), không bao giờ chạm cluster thật — các test khác đặt `MONGODB_URI=""` để không ghi lên MongoDB của bạn.

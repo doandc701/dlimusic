@@ -14,9 +14,24 @@ const TYPES = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; ch
 // vercel.json "source" patterns are path-to-regexp; the few used here translate directly.
 const rules = config.headers.map((h) => ({ re: new RegExp(`^${h.source.replace(/\(\.\*\)/g, ".*")}$`), headers: h.headers }));
 
+// /api/cloud/* like the Vercel function, when MONGODB_URI + TDL_SECRET are in .env / the environment.
+const envFile = (() => {
+  try {
+    return Object.fromEntries(fs.readFileSync(path.join(ROOT, ".env"), "utf8").split(/\r?\n/)
+      .map((l) => /^\s*([A-Z_]+)\s*=\s*(.*?)\s*$/.exec(l)).filter(Boolean).map((m) => [m[1], m[2].replace(/^["']|["']$/g, "")]));
+  } catch {
+    return {};
+  }
+})();
+const cloudEnv = { ...envFile, ...process.env, TG_API_ID: process.env.TG_API_ID || envFile.API_ID, TG_API_HASH: process.env.TG_API_HASH || envFile.API_HASH };
+const { createCloudApi, verifyWithTelegram } = await import("../cloud/api.js");
+const cloud = createCloudApi({ env: cloudEnv, verify: verifyWithTelegram });
+
 const server = http
   .createServer((req, res) => {
     const url = new URL(req.url, "http://x");
+    const cloudAction = /^\/api\/cloud\/([a-z]+)$/.exec(url.pathname)?.[1];
+    if (cloudAction) return cloud(req, res, cloudAction);
     let file = path.normalize(path.join(DIST, decodeURIComponent(url.pathname)));
     if (!file.startsWith(DIST)) return res.writeHead(403).end();
     if (url.pathname === "/" || (fs.existsSync(file) && fs.statSync(file).isDirectory())) file = path.join(DIST, "index.html");

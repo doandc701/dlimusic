@@ -28,6 +28,7 @@ import {
   isFavoriteId,
   FAVORITES_LIMIT,
 } from "../core.js";
+import { createCloudSync } from "./cloud-sync.js";
 
 // visibleChats: { "<account id>": ["<chat id>", …] }, the chats each account chose to show in the list
 const STORE = { session: "tdl.session", api: "tdl.api", settings: "tdl.settings", history: "tdl.history", visibleChats: "tdl.visibleChats", favorites: "tdl.favorites" };
@@ -77,7 +78,10 @@ function save(key, value) {
   } catch {
     // storage full or blocked (private mode): keep working in memory
   }
+  cloudSync?.changed(key);
 }
+
+let cloudSync = null; // MongoDB copy (web/cloud-sync.js), created below; save() reports changes to it
 
 // Directory handles cannot be stored in localStorage, only in IndexedDB.
 function idb() {
@@ -207,6 +211,37 @@ function removeHistory(ids) {
 
 // ---------- auth ----------
 
+// ---------- MongoDB copy through /api/cloud (Vercel function; see cloud/api.js, web/cloud-sync.js) ----------
+
+cloudSync = createCloudSync({
+  store: { load, save },
+  keys: STORE,
+  signedIn: () => auth.me?.id || null,
+  emit: (status) => emit("cloud", status),
+  /** This account's value of a synced item, as stored in MongoDB (null = nothing). */
+  read(name, account) {
+    if (name === "settings") return { subfolderPerChat: settings.subfolderPerChat }; // the folder is per device
+    if (name === "history") return history.length ? history : null;
+    const all = load(name === "visibleChats" ? STORE.visibleChats : STORE.favorites, {});
+    if (name === "favorites") return all[account]?.length ? all[account] : null;
+    return all[account] ?? null;
+  },
+  /** Take MongoDB's copy of an item into this browser. */
+  apply(name, value, account) {
+    if (name === "settings") return saveSettings({ subfolderPerChat: value.subfolderPerChat ?? settings.subfolderPerChat });
+    if (name === "history") {
+      history = value;
+      historySeq = history.reduce((max, h) => Math.max(max, h.id || 0), 0);
+      save(STORE.history, history);
+      return emit("history", history);
+    }
+    const key = name === "visibleChats" ? STORE.visibleChats : STORE.favorites;
+    save(key, { ...load(key, {}), [account]: value });
+  },
+});
+
+// ---------- Telegram sign-in ----------
+
 let client = null;
 const auth = { step: "connecting", error: null, me: null, phone: "", apiChoice: HAS_BAKED };
 let pendingInput = null;
@@ -302,7 +337,11 @@ async function startAuth({ keepStep = false } = {}, run = authRun) {
   save(STORE.session, client.session.save());
 
   const me = await client.getMe();
+  if (run !== authRun) return;
   auth.me = { id: String(me.id), name: entityTitle(me), username: me.username || null };
+  // MongoDB copy first (so the lists show the synced data), but never keep the user waiting long
+  await Promise.race([cloudSync.sync(auth.me.id), new Promise((r) => setTimeout(r, 8000))]);
+  if (run !== authRun) return;
   auth.step = "ready";
   auth.error = null;
   emit("auth", auth);
@@ -342,6 +381,7 @@ function backToChoice() {
 
 function logout() {
   const old = client;
+  cloudSync.signOut();
   save(STORE.session, undefined);
   history = []; // this browser may be used by someone else next
   save(STORE.history, history);
@@ -1025,6 +1065,9 @@ async function route(method, url, body, signal) {
       return { added: enqueue(scan, ids, { mode: "fs", base }), outDir: scan.fav ? base.name : folderLabel(base, scan.title) };
     }
 
+    case "GET /api/cloud":
+      return { ...cloudSync.status };
+
     case "GET /api/settings":
       return publicSettings();
 
@@ -1108,7 +1151,9 @@ async function start() {
   emit("jobs", []);
   emit("settings", publicSettings());
   emit("history", history);
+  emit("cloud", { ...cloudSync.status });
   startServiceWorker();
+  await cloudSync.restoreSession();
   runAuth();
 }
 

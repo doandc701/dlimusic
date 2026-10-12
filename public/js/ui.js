@@ -116,6 +116,7 @@ const toastBox = bootstrap.Toast.getOrCreateInstance($("toast"), { delay: 3500 }
 const state = {
   auth: null,
   dialogs: [],
+  cloud: null,         // status of the MongoDB copy { enabled, connected, host, error, lastSync }
   visibleChats: null, // Set of chat ids this account chose to show, or null = all
   favorites: new Set(), // "<chat id>|<message id>" of this account's favourite files
   favScope: "all",     // "Bài hát yêu thích": "all" chats, or one chat id (list + what plays)
@@ -591,18 +592,66 @@ async function loadDialogs() {
 /** The chats the account chose to show (all of them while nothing was chosen). */
 const shownDialogs = () => (state.visibleChats ? state.dialogs.filter((d) => state.visibleChats.has(d.id)) : state.dialogs);
 
+// ---------- sorting the chat list (remembered in this browser) ----------
+
+const DIALOG_SORTS = {
+  recent: { label: "Mới hoạt động", icon: "bi-clock-history" }, // Telegram's own order
+  az: { label: "Tên A → Z", icon: "bi-sort-alpha-down" },
+  za: { label: "Tên Z → A", icon: "bi-sort-alpha-up-alt" },
+  type: { label: "Theo loại (Kênh, Nhóm, Người dùng)", icon: "bi-collection" },
+};
+let dialogSort = "recent";
+try { if (DIALOG_SORTS[localStorage.getItem("dialogSort")]) dialogSort = localStorage.getItem("dialogSort"); } catch {}
+
+const TYPE_RANK = { channel: 0, group: 1, user: 2 };
+const byTitle = (a, b) => a.title.localeCompare(b.title, "vi", { sensitivity: "base", numeric: true });
+
+/** Chats in the chosen order; "recent" keeps the order Telegram returned (latest activity first). */
+function sortDialogs(list) {
+  if (dialogSort === "recent") return list;
+  const order = list.map((d, i) => [d, i]);
+  const cmp = {
+    az: ([a], [b]) => byTitle(a, b),
+    za: ([a], [b]) => byTitle(b, a),
+    type: ([a, i], [b, j]) => TYPE_RANK[a.type] - TYPE_RANK[b.type] || i - j,
+  }[dialogSort];
+  return order.sort((x, y) => cmp(x, y) || x[1] - y[1]).map(([d]) => d);
+}
+
+function setDialogSort(key) {
+  if (!DIALOG_SORTS[key]) return;
+  dialogSort = key;
+  try { localStorage.setItem("dialogSort", key); } catch {}
+  renderDialogs();
+  if ($("chatsModal").classList.contains("show")) renderChatsModal();
+}
+
+/** Small ⇅ menu in the bar above the list. */
+function dialogSortMenu() {
+  const cur = DIALOG_SORTS[dialogSort];
+  return `<div class="dropdown flex-none">
+    <button class="btn btn-sm chats-bar-btn chats-sort-btn${dialogSort !== "recent" ? " is-sorted" : ""}" type="button" data-bs-toggle="dropdown"
+      aria-expanded="false" title="Sắp xếp: ${cur.label}" aria-label="Sắp xếp hội thoại: ${cur.label}"><i class="bi bi-arrow-down-up"></i></button>
+    <ul class="dropdown-menu dropdown-menu-end shadow-sm">
+      <li><h6 class="dropdown-header">Sắp xếp hội thoại</h6></li>
+      ${Object.entries(DIALOG_SORTS).map(([k, s]) => `<li><button class="dropdown-item d-flex align-items-center gap-2${k === dialogSort ? " active" : ""}" type="button" data-dialog-sort="${k}">
+        <i class="bi ${s.icon}"></i><span class="flex-grow-1">${s.label}</span>${k === dialogSort ? '<i class="bi bi-check2"></i>' : ""}</button></li>`).join("")}
+    </ul></div>`;
+}
+
 function renderDialogs() {
   renderFavEntry();
   const q = norm($("dialogSearch").value.trim());
   const shown = shownDialogs();
-  const list = shown.filter((d) => !q || norm(d.title).includes(q) || norm(d.username).includes(q));
+  const list = sortDialogs(shown.filter((d) => !q || norm(d.title).includes(q) || norm(d.username).includes(q)));
   // Bar above the list: how many chats are shown, and a button to choose them.
   const total = state.dialogs.length;
   show($("chatsBar"), total > 0);
   $("chatsBar").innerHTML = total ? `
     <span class="text-truncate"><i class="bi ${state.visibleChats ? "bi-funnel-fill text-primary" : "bi-chat-dots"}"></i>
-      ${state.visibleChats ? `Hiện <strong>${shown.length}</strong>/${total} hội thoại` : `Tất cả <strong>${total}</strong> hội thoại`}</span>
-    <button class="btn btn-sm chats-bar-btn ms-auto flex-none" data-chats-edit>
+      ${state.visibleChats ? `<strong>${shown.length}</strong>/${total} hội thoại` : `<strong>${total}</strong> hội thoại`}</span>
+    <span class="ms-auto"></span>${dialogSortMenu()}
+    <button class="btn btn-sm chats-bar-btn flex-none" data-chats-edit>
       <i class="bi bi-sliders"></i> ${state.visibleChats ? "Chọn lại" : "Chọn hiển thị"}</button>` : "";
   if (!shown.length && state.dialogs.length) {
     $("dialogs").innerHTML = `<div class="text-center text-body-secondary small p-4">
@@ -627,7 +676,7 @@ let chatsDraft = null; // Set of chat ids being edited
 
 function renderChatsModal() {
   const q = norm($("chatsSearch").value.trim());
-  const list = state.dialogs.filter((d) => !q || norm(d.title).includes(q) || norm(d.username).includes(q));
+  const list = sortDialogs(state.dialogs.filter((d) => !q || norm(d.title).includes(q) || norm(d.username).includes(q)));
   $("chatsCount").textContent = `Đã chọn ${state.dialogs.filter((d) => chatsDraft.has(d.id)).length}/${state.dialogs.length}`;
   $("chatsList").innerHTML = list.length ? list.map((d) => `
     <label class="list-group-item list-group-item-action d-flex align-items-center gap-2 chats-row">
@@ -710,7 +759,11 @@ async function saveVisibleChats(ids) {
 }
 
 $("setChatsBtn").addEventListener("click", openChatsModal);
-$("chatsBar").addEventListener("click", (e) => e.target.closest("[data-chats-edit]") && openChatsModal());
+$("chatsBar").addEventListener("click", (e) => {
+  const sort = e.target.closest("[data-dialog-sort]");
+  if (sort) return setDialogSort(sort.dataset.dialogSort);
+  if (e.target.closest("[data-chats-edit]")) openChatsModal();
+});
 $("dialogs").addEventListener("click", (e) => {
   if (!e.target.closest("[data-chats-edit]")) return;
   e.preventDefault();
@@ -1694,11 +1747,42 @@ function renderSettingsForm() {
   $("setExample").innerHTML = `Ví dụ file sẽ lưu tại: <code>${esc(base)}${settingsDraft.subfolderPerChat ? "/Tên kênh" : ""}/Tên bài.mp3</code>`;
 }
 
+// ---------- MongoDB copy: status shown in Settings ----------
+
+function renderCloudInfo() {
+  const c = state.cloud;
+  const local = !BACKEND;
+  const when = c?.lastSync ? new Date(c.lastSync).toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" }) : null;
+  const [icon, cls, text] = !c || !c.enabled
+    ? ["bi-hdd", "text-body-secondary", local ? "Chưa bật — dữ liệu chỉ lưu trên máy này" : "Chưa bật — dữ liệu chỉ lưu trong trình duyệt này"]
+    : c.connected
+      ? ["bi-cloud-check-fill", "text-success", `Đã đồng bộ${c.host ? ` với ${c.host}` : ""}${when ? ` · lúc ${when}` : ""}`]
+      : ["bi-cloud-slash-fill", "text-warning", `Mất kết nối — đang dùng dữ liệu ${local ? "trên máy" : "trong trình duyệt"}, sẽ tự thử lại`];
+  $("setCloudInfo").innerHTML = `<i class="bi ${icon} ${cls}"></i><span class="small flex-grow-1">${esc(text)}</span>`;
+  $("setCloudInfo").title = c?.error || "";
+  $("setCloudHelp").textContent = !c || !c.enabled
+    ? local
+      ? "Thêm MONGODB_URI (và TDL_SECRET) vào file .env rồi khởi động lại để lưu cài đặt, lịch sử, yêu thích và phiên đăng nhập lên MongoDB."
+      : "Máy chủ chưa cấu hình MongoDB."
+    : "Cài đặt, lịch sử, yêu thích, hội thoại hiển thị và phiên đăng nhập (đã mã hoá) được lưu trên MongoDB.";
+}
+
+async function refreshCloud() {
+  try {
+    state.cloud = await api("/api/cloud");
+  } catch {
+    state.cloud = null;
+  }
+  renderCloudInfo();
+}
+
 async function openSettings() {
   await hideOpenModals();
   settingsDraft = { ...state.settings };
   renderSettingsForm();
   renderChatsInfo();
+  renderCloudInfo();
+  refreshCloud();
   settingsModal.show();
 }
 
@@ -1957,6 +2041,13 @@ $("cancelBtn").addEventListener("click", () => api("/api/cancel", {}).then((r) =
 // ---------- live updates ----------
 
 const EVENTS = {
+  cloud: (d) => {
+    const wasConnected = state.cloud?.connected;
+    state.cloud = d;
+    renderCloudInfo();
+    // data pulled from MongoDB after the lists were shown (slow first sync): show the synced lists
+    if (d.connected && !wasConnected && state.auth?.step === "ready") loadDialogs();
+  },
   auth: (d) => renderAuth(d),
   job: (d) => applyJob(d),
   jobs: (d) => {

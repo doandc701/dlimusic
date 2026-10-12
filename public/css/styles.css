@@ -285,6 +285,11 @@ body { background: var(--bs-tertiary-bg); }
 .chats-bar { display: flex; align-items: center; gap: .5rem; padding: .4rem .6rem .4rem 1rem; font-size: .8rem; white-space: nowrap;
   color: var(--bs-secondary-color); background: var(--bs-tertiary-bg); border-bottom: var(--bs-border-width) solid var(--bs-border-color); }
 .chats-bar.d-none { display: none; }
+.chats-sort-btn { --bs-btn-padding-x: .45rem; }
+.chats-bar .chats-sort-btn.is-sorted { color: #fff; background: var(--c); border-color: var(--c); } /* not the default order */
+/* every dropdown: the chosen item in the app's violet instead of Bootstrap blue */
+.dropdown-menu { --bs-dropdown-link-active-bg: var(--bs-primary); --bs-dropdown-link-active-color: #fff; }
+.chats-bar .dropdown-menu { font-size: .85rem; white-space: normal; }
 [data-bs-theme=dark] .chats-bar-btn { --bs-btn-hover-color: #111827; }
 .chats-bar strong { color: var(--bs-body-color); }
 .chats-bar-btn { --c: var(--fun-pink); --bs-btn-padding-y: .15rem; --bs-btn-padding-x: .6rem; --bs-btn-font-size: .78rem;

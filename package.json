@@ -19,12 +19,14 @@
   },
   "dependencies": {
     "big-integer": "^1.6.52",
+    "mongodb": "^6.21.0",
     "telegram": "^2.26.0"
   },
   "devDependencies": {
     "buffer": "^6.0.3",
     "esbuild": "^0.28.2",
     "events": "^3.3.0",
+    "mongodb-memory-server": "^10.4.3",
     "path-browserify": "^1.0.1",
     "process": "^0.11.10",
     "util": "^0.12.5"

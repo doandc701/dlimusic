@@ -67,7 +67,8 @@ export function createCloudApi({ env, verify }) {
       let acc;
       try {
         acc = String(await verify(body.session, creds));
-      } catch {
+      } catch (err) {
+        console.error("cloud login: Telegram did not confirm the session:", err?.message || err); // shown in the function logs
         throw fail(401, "Telegram không xác nhận phiên này", "CLOUD_VERIFY");
       }
       if (!/^\d{1,20}$/.test(acc)) throw fail(401, "Telegram không xác nhận phiên này", "CLOUD_VERIFY");
@@ -166,11 +167,26 @@ async function readBody(req) {
   }
 }
 
+// Telegram's data centres over plain TCP. Sessions made in the browser point at the WebSocket-only
+// hosts (pluto / venus / aurora / vesta / flora .web.telegram.org), which Node cannot use.
+const DC_IPV4 = { 1: "149.154.175.53", 2: "149.154.167.51", 3: "149.154.175.100", 4: "149.154.167.91", 5: "91.108.56.130" };
+
+/** The session with a TCP address for its data centre (same auth key), usable from Node. */
+export async function tcpSession(session) {
+  const { StringSession } = await import("telegram/sessions/index.js");
+  const stored = new StringSession(session);
+  await stored.load();
+  if (!/^[\d.:]+$/.test(stored.serverAddress || "") && DC_IPV4[stored.dcId]) {
+    stored.setDC(stored.dcId, DC_IPV4[stored.dcId], 443);
+  }
+  return stored;
+}
+
 /** Ask Telegram which account a session belongs to (connects with GramJS, then disconnects). */
 export async function verifyWithTelegram(session, creds, timeoutMs = 20_000) {
   const { TelegramClient } = await import("telegram");
-  const { StringSession } = await import("telegram/sessions/index.js");
-  const client = new TelegramClient(new StringSession(session), creds.id, creds.hash, { connectionRetries: 1, autoReconnect: false });
+  const stored = await tcpSession(session);
+  const client = new TelegramClient(stored, creds.id, creds.hash, { connectionRetries: 1, autoReconnect: false });
   client.setLogLevel("none");
   let timer;
   try {

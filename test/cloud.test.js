@@ -16,7 +16,7 @@ import {
   encrypt, decrypt, keyFromSecret, ACCOUNT_DATA, normalizeApi, isSessionString, isMongoUri, mongoHost, closeDb,
 } from "../cloud/common.js";
 import { createMirror } from "../cloud/mirror.js";
-import { createCloudApi } from "../cloud/api.js";
+import { createCloudApi, tcpSession } from "../cloud/api.js";
 import { createCloudSync } from "../web/cloud-sync.js";
 
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
@@ -55,6 +55,25 @@ describe("encryption and validation", () => {
     assert.equal(decrypt(box, keyFromSecret("another secret")), null);
     assert.equal(decrypt({ ...box, data: Buffer.from("x").toString("base64") }, key), null);
     assert.notDeepEqual(encrypt(SESSION_A, key).iv, box.iv, "fresh IV every time");
+  });
+
+  test("browser sessions (WebSocket hosts) are checked over TCP: same data centre and key, IP address", async () => {
+    const { StringSession } = await import("telegram/sessions/index.js");
+    const { AuthKey } = await import("telegram/crypto/AuthKey.js");
+    const key = new AuthKey();
+    await key.setKey(Buffer.alloc(256, 7));
+    for (const [dc, host, ip] of [[2, "venus.web.telegram.org", "149.154.167.51"], [5, "flora.web.telegram.org", "91.108.56.130"]]) {
+      const browser = new StringSession("");
+      browser.setDC(dc, host, 443);
+      browser.setAuthKey(key);
+      const tcp = await tcpSession(browser.save());
+      assert.deepEqual([tcp.dcId, tcp.serverAddress, tcp.port], [dc, ip, 443]);
+      assert.ok(tcp.getAuthKey().getKey().equals(key.getKey()), "auth key kept");
+    }
+    const node = new StringSession("");
+    node.setDC(5, "91.108.56.102", 443);
+    node.setAuthKey(key);
+    assert.equal((await tcpSession(node.save())).serverAddress, "91.108.56.102", "an IP is left alone");
   });
 
   test("account data is validated (null = remove, undefined = rejected)", () => {

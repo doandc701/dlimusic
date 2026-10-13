@@ -47,11 +47,13 @@ self.addEventListener("fetch", (event) => {
 const SAFE_HEADERS = { "X-Content-Type-Options": "nosniff", "Content-Security-Policy": "sandbox; default-src 'none'" };
 // Defense in depth: only media types are served as-is, whatever the page says (same list as core.js).
 const SAFE_MEDIA = /^(audio\/[\w.+-]+|video\/[\w.+-]+|image\/(jpeg|png|gif|webp|bmp|avif))$/i;
-const safeType = (mime) => (SAFE_MEDIA.test(String(mime || "").trim()) ? String(mime).trim().toLowerCase() : "application/octet-stream");
+const safeType = (mime) =>
+  SAFE_MEDIA.test(String(mime || "").trim()) ? String(mime).trim().toLowerCase() : "application/octet-stream";
 
 async function serve(event, url, download) {
   const port = await providerFor(event.clientId || url.searchParams.get("c"));
-  if (!port) return new Response("Trang DLiMusic không còn mở, hãy tải lại trang.", { status: 503, headers: SAFE_HEADERS });
+  if (!port)
+    return new Response("Trang DLiMusic không còn mở, hãy tải lại trang.", { status: 503, headers: SAFE_HEADERS });
 
   const channel = new MessageChannel();
   const next = (ms) =>
@@ -73,7 +75,7 @@ async function serve(event, url, download) {
       range: event.request.headers.get("range"),
       download,
     },
-    [channel.port2]
+    [channel.port2],
   );
 
   let meta;
@@ -116,7 +118,7 @@ async function serve(event, url, download) {
         channel.port1.postMessage({ type: "cancel" });
       },
     },
-    { highWaterMark: 1 } // pull only as fast as the player / download consumes
+    { highWaterMark: 1 }, // pull only as fast as the player / download consumes
   );
   return new Response(body, { status: meta.status, headers });
 }

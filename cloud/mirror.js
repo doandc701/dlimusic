@@ -140,7 +140,9 @@ export function createMirror({ uri, dbName, instance = "default", secret, keyFil
         log.log(`MongoDB: đã đồng bộ dữ liệu với ${status.host} (instance "${instance}").`);
       } catch (err) {
         offline(err);
-        log.warn(`MongoDB: không kết nối được ${status.host} — dùng dữ liệu trên máy, sẽ thử lại sau. (${status.error})`);
+        log.warn(
+          `MongoDB: không kết nối được ${status.host} — dùng dữ liệu trên máy, sẽ thử lại sau. (${status.error})`,
+        );
       }
       return status;
     },

@@ -7,18 +7,30 @@
 //
 //   POST /api/cloud/login    { session, api }        -> { token, accountId, data }
 //   GET  /api/cloud/data                              -> { settings, history, visibleChats, favorites }
-//   POST /api/cloud/data     { name, value }          -> { ok }        (value null = remove)
+//   POST /api/cloud/join     { data }                 -> { data }      (this device's copy merged with MongoDB's)
+//   POST /api/cloud/ops      { name, ops }            -> { ok }        (changes as operations, see core.js)
 //   GET  /api/cloud/session                           -> { session, api }   (restore on this device)
 //   POST /api/cloud/session  { session }              -> { ok }        (GramJS saved a new session)
 //   POST /api/cloud/logout                            -> { ok }        (forget the session, revoke the token)
 //   GET  /api/cloud/status                            -> { enabled }   (no token needed)
 
 import {
-  openDb, getValues, setValue, deleteValue, encrypt, decrypt, keyFromSecret,
-  issueToken, accountForToken, revokeToken, ACCOUNT_DATA, normalizeApi, isSessionString, isMongoUri,
+  openDb,
+  getValues,
+  setValue,
+  deleteValue,
+  encrypt,
+  decrypt,
+  keyFromSecret,
+  issueToken,
+  accountForToken,
+  revokeToken,
+  normalizeApi,
+  isSessionString,
+  isMongoUri,
 } from "./common.js";
+import { readAccount, joinAccount, checkOps, applyOps } from "./account.js";
 
-const DATA_NAMES = Object.keys(ACCOUNT_DATA);
 const MAX_BODY = 2 * 1024 * 1024;
 
 const fail = (status, error, code) => Object.assign(new Error(error), { status, code });
@@ -32,7 +44,9 @@ export function createCloudApi({ env, verify }) {
   const key = ready ? keyFromSecret(env.TDL_SECRET) : null;
   const builtin = () => {
     const id = Number(env.TG_API_ID);
-    return Number.isInteger(id) && id > 0 && /^[0-9a-f]{32}$/i.test(env.TG_API_HASH || "") ? { id, hash: env.TG_API_HASH } : null;
+    return Number.isInteger(id) && id > 0 && /^[0-9a-f]{32}$/i.test(env.TG_API_HASH || "")
+      ? { id, hash: env.TG_API_HASH }
+      : null;
   };
   const db = () => openDb(env.MONGODB_URI.trim(), { dbName: env.MONGODB_DB || undefined });
   const id = (account, name) => `acct:${account}:${name}`;
@@ -44,10 +58,7 @@ export function createCloudApi({ env, verify }) {
     return { acc, token };
   }
 
-  async function readData(acc) {
-    const got = await getValues(await db(), DATA_NAMES.map((n) => id(acc, n)));
-    return Object.fromEntries(DATA_NAMES.map((n) => [n, got[id(acc, n)] ?? null]));
-  }
+  const readData = async (acc) => readAccount(await db(), acc);
 
   async function saveApi(acc, api) {
     // the user's own API hash is a credential: stored encrypted like the session
@@ -80,13 +91,17 @@ export function createCloudApi({ env, verify }) {
 
     "GET data": async (req) => readData((await account(req)).acc),
 
-    "POST data": async (req, body) => {
+    "POST join": async (req, body) => {
       const { acc } = await account(req);
-      if (!DATA_NAMES.includes(body.name)) throw fail(400, "Loại dữ liệu không hợp lệ");
-      const value = ACCOUNT_DATA[body.name](body.value);
-      if (value === undefined) throw fail(400, "Dữ liệu không hợp lệ");
-      if (value === null) await deleteValue(await db(), id(acc, body.name));
-      else await setValue(await db(), id(acc, body.name), value);
+      if (!body.data || typeof body.data !== "object") throw fail(400, "Dữ liệu không hợp lệ");
+      return { data: await joinAccount(await db(), acc, body.data) };
+    },
+
+    "POST ops": async (req, body) => {
+      const { acc } = await account(req);
+      const ops = checkOps(body.name, body.ops);
+      if (!ops) throw fail(400, "Dữ liệu không hợp lệ");
+      await applyOps(await db(), acc, body.name, ops);
       return { ok: true };
     },
 
@@ -130,13 +145,18 @@ export function createCloudApi({ env, verify }) {
       if (action !== "status" && !ready) throw fail(503, "Chưa cấu hình MongoDB trên máy chủ", "CLOUD_OFF");
       let body = {};
       if (req.method === "POST") {
-        if (!/^application\/json\b/i.test(req.headers["content-type"] || "")) throw fail(415, "Cần Content-Type: application/json");
+        if (!/^application\/json\b/i.test(req.headers["content-type"] || ""))
+          throw fail(415, "Cần Content-Type: application/json");
         body = await readBody(req);
       }
       send(200, await route(req, body));
     } catch (err) {
       const status = err.status || 503; // anything else: the database could not be reached
-      send(status, { error: err.status ? err.message : "Không kết nối được MongoDB", ...(err.code && { code: err.code }), ...(!err.status && { code: "CLOUD_DOWN" }) });
+      send(status, {
+        error: err.status ? err.message : "Không kết nối được MongoDB",
+        ...(err.code && { code: err.code }),
+        ...(!err.status && { code: "CLOUD_DOWN" }),
+      });
     }
   };
 }
@@ -169,7 +189,13 @@ async function readBody(req) {
 
 // Telegram's data centres over plain TCP. Sessions made in the browser point at the WebSocket-only
 // hosts (pluto / venus / aurora / vesta / flora .web.telegram.org), which Node cannot use.
-const DC_IPV4 = { 1: "149.154.175.53", 2: "149.154.167.51", 3: "149.154.175.100", 4: "149.154.167.91", 5: "91.108.56.130" };
+const DC_IPV4 = {
+  1: "149.154.175.53",
+  2: "149.154.167.51",
+  3: "149.154.175.100",
+  4: "149.154.167.91",
+  5: "91.108.56.130",
+};
 
 /** The session with a TCP address for its data centre (same auth key), usable from Node. */
 export async function tcpSession(session) {

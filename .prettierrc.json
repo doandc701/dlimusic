@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json.schemastore.org/prettierrc",
+  "printWidth": 120,
+  "tabWidth": 2,
+  "useTabs": false,
+  "semi": true,
+  "singleQuote": false,
+  "quoteProps": "as-needed",
+  "trailingComma": "all",
+  "bracketSpacing": true,
+  "arrowParens": "always",
+  "endOfLine": "lf",
+  "htmlWhitespaceSensitivity": "css",
+  "overrides": [
+    { "files": "*.html", "options": { "printWidth": 120 } },
+    { "files": "*.md", "options": { "proseWrap": "preserve" } }
+  ]
+}

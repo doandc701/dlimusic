@@ -60,7 +60,9 @@ const SAFE_MEDIA = /^(audio\/[\w.+-]+|video\/[\w.+-]+|image\/(jpeg|png|gif|webp|
  * so anything that a browser could execute (text/html, image/svg+xml, ...) becomes a plain download.
  */
 export function safeMediaType(mime) {
-  const m = String(mime ?? "").trim().toLowerCase();
+  const m = String(mime ?? "")
+    .trim()
+    .toLowerCase();
   return SAFE_MEDIA.test(m) ? m : "application/octet-stream";
 }
 
@@ -165,12 +167,20 @@ export async function resolveChat(client, chat) {
     return found.entity;
   }
 
-  const username = chat.replace(/^https?:\/\/t\.me\//, "").replace(/^@/, "").split(/[/?]/)[0];
+  const username = chat
+    .replace(/^https?:\/\/t\.me\//, "")
+    .replace(/^@/, "")
+    .split(/[/?]/)[0];
   return client.getEntity(username);
 }
 
 export function entityTitle(entity) {
-  return entity.title || [entity.firstName, entity.lastName].filter(Boolean).join(" ") || entity.username || String(entity.id);
+  return (
+    entity.title ||
+    [entity.firstName, entity.lastName].filter(Boolean).join(" ") ||
+    entity.username ||
+    String(entity.id)
+  );
 }
 
 /**
@@ -198,7 +208,10 @@ export const QR_LOGIN = "__qr__";
 
 /** The tg://login link of a login token (bytes from auth.ExportLoginToken) and an SVG QR code of it. */
 export function loginQr(token) {
-  const b64 = btoa(String.fromCharCode(...new Uint8Array(token))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  const b64 = btoa(String.fromCharCode(...new Uint8Array(token)))
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
   const url = `tg://login?token=${b64}`;
   const qr = qrcode(0, "M");
   qr.addData(url);
@@ -231,7 +244,8 @@ export function authErrorText(err) {
   const wait = Number(err?.seconds) || Number(/FLOOD_WAIT_(\d+)/.exec(raw)?.[1]) || 0;
   if (wait || /FLOOD/.test(code)) {
     if (!wait) return AUTH_ERRORS[code] || "Bạn thử quá nhiều lần. Vui lòng đợi một lúc rồi thử lại.";
-    const left = wait >= 3600 ? `${Math.ceil(wait / 3600)} giờ` : wait >= 60 ? `${Math.ceil(wait / 60)} phút` : `${wait} giây`;
+    const left =
+      wait >= 3600 ? `${Math.ceil(wait / 3600)} giờ` : wait >= 60 ? `${Math.ceil(wait / 60)} phút` : `${wait} giây`;
     return `Bạn thử quá nhiều lần. Telegram yêu cầu đợi ${left} rồi thử lại.`;
   }
   if (AUTH_ERRORS[code]) return AUTH_ERRORS[code];
@@ -239,6 +253,139 @@ export function authErrorText(err) {
   if (/timeout|timed out|ECONN|ENOTFOUND|ETIMEDOUT|network|websocket|socket|Not connected/i.test(raw)) {
     return "Không kết nối được tới Telegram. Kiểm tra mạng rồi thử lại.";
   }
-  if (/^[A-Z][A-Z0-9_]+$/.test(code) && /^\d{3}:/.test(raw)) return `Telegram từ chối đăng nhập (${code}). Vui lòng thử lại.`;
+  if (/^[A-Z][A-Z0-9_]+$/.test(code) && /^\d{3}:/.test(raw))
+    return `Telegram từ chối đăng nhập (${code}). Vui lòng thử lại.`;
   return raw || "Đăng nhập không thành công. Vui lòng thử lại.";
+}
+
+// ---------- scanning a chat page by page ----------
+
+/** Files per page: shown at once, the next page loads when the list is scrolled to the end. */
+export const PAGE_SIZE = 500;
+
+/**
+ * Read the next page of a scan: files of messages older than scan.cursor (the last message read), until
+ * `pageSize` new files or the oldest message. Fills scan.items, moves scan.cursor, clears scan.more at the
+ * end. `messages(offsetId)` iterates messages newest first (client.iterMessages); leaving it early also
+ * stops the requests. Returns the ids of the new files, in order.
+ */
+export async function readPage(
+  scan,
+  messages,
+  { pageSize = PAGE_SIZE, signal, stopped = () => new Error("stopped"), onProgress } = {},
+) {
+  const page = [];
+  if (!scan.more) return page;
+  let full = false;
+  for await (const msg of messages(scan.cursor)) {
+    if (signal?.aborted) throw stopped();
+    scan.cursor = msg.id;
+    const info = fileInfo(msg);
+    if (!info || scan.items.has(msg.id)) continue;
+    scan.items.set(msg.id, { msg, info });
+    page.push(msg.id);
+    if (page.length % 50 === 0) onProgress?.(scan.items.size);
+    if (page.length >= pageSize) {
+      full = true;
+      break;
+    }
+  }
+  if (!full) scan.more = false; // reached the oldest message
+  return page;
+}
+
+// ---------- data shared by every device of an account (kept in MongoDB) ----------
+// settings: { subfolderPerChat } (the download folder belongs to each device) · history: entries, newest
+// first · visibleChats: chat ids or null (= all) · favorites: "<chat id>|<message id>", newest first ·
+// recent: the songs played lately, { id: "<chat id>|<message id>", at, … }, newest first.
+// Devices send operations, not whole copies, so two devices changing things at once lose nothing.
+
+export const ACCOUNT_NAMES = ["settings", "history", "visibleChats", "favorites", "recent"];
+export const HISTORY_MAX = 2000;
+export const RECENT_MAX = 100;
+const LISTS = new Set(["history", "favorites", "recent"]);
+/** Lists of entries with an id (history, recent plays) and how many are kept. */
+const ENTRY_MAX = { history: HISTORY_MAX, recent: RECENT_MAX };
+
+/** What an item is when nothing was saved yet. */
+export const accountEmpty = (name) => (LISTS.has(name) ? [] : null);
+
+const same = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+
+/** Operations turning `before` into `after`. */
+export function accountOps(name, before, after) {
+  if (name === "favorites") {
+    const b = new Set(before || []);
+    const a = new Set(after || []);
+    const ops = [...b].filter((id) => !a.has(id)).map((id) => ({ op: "remove", id }));
+    // added ones are put in front one by one: the oldest first, so the newest ends up on top
+    return ops.concat(
+      (after || [])
+        .filter((id) => !b.has(id))
+        .reverse()
+        .map((id) => ({ op: "add", id })),
+    );
+  }
+  if (name in ENTRY_MAX) {
+    const b = before || [];
+    const a = after || [];
+    if (!a.length && b.length) return [{ op: "clear" }];
+    const aIds = new Set(a.map((h) => h.id));
+    const bAt = new Map(b.map((h) => [h.id, h.at]));
+    const ops = [];
+    const removed = b.filter((h) => !aIds.has(h.id)).map((h) => h.id);
+    if (removed.length) ops.push({ op: "remove", ids: removed });
+    // new entries, and ones seen again (a song played again moves to the top: its time changed)
+    const added = a.filter((h) => !bAt.has(h.id) || bAt.get(h.id) !== h.at);
+    if (added.length) ops.push({ op: "add", entries: added });
+    return ops;
+  }
+  return same(before, after) ? [] : [{ op: "set", value: after ?? null }];
+}
+
+/** The same operations applied to a copy (MongoDB applies them the same way). */
+export function applyAccountOps(name, value, ops) {
+  let v = value ?? accountEmpty(name);
+  for (const o of ops) {
+    if (o.op === "set") v = o.value;
+    else if (o.op === "clear") v = [];
+    else if (name === "favorites" && o.op === "add") v = [o.id, ...v.filter((x) => x !== o.id)];
+    else if (name === "favorites" && o.op === "remove") v = v.filter((x) => x !== o.id);
+    else if (name in ENTRY_MAX && o.op === "add") {
+      const ids = new Set(o.entries.map((h) => h.id));
+      v = [...o.entries, ...v.filter((h) => !ids.has(h.id))].slice(0, ENTRY_MAX[name]);
+    } else if (name in ENTRY_MAX && o.op === "remove") v = v.filter((h) => !o.ids.includes(h.id));
+  }
+  return v;
+}
+
+/** A history id that two devices will not both pick (the old ones were 1, 2, 3… on every device). */
+export const newHistoryId = () => Date.now() * 1000 + Math.floor(Math.random() * 1000);
+
+/**
+ * First time a device joins (or after being offline): one copy out of this device's and MongoDB's,
+ * losing nothing. Lists are united; for settings / visible chats MongoDB's choice wins when it has one.
+ */
+export function mergeAccount(name, mine, theirs) {
+  if (name === "favorites") return [...new Set([...(theirs || []), ...(mine || [])])];
+  if (name === "history") {
+    const byId = new Map((theirs || []).map((h) => [h.id, h]));
+    for (const h of mine || []) {
+      const other = byId.get(h.id);
+      if (!other) byId.set(h.id, h);
+      else if (!same(other, h)) {
+        const id = newHistoryId(); // same old number on two devices, different downloads: keep both
+        byId.set(id, { ...h, id });
+      }
+    }
+    return [...byId.values()].sort((a, b) => (b.at || 0) - (a.at || 0)).slice(0, HISTORY_MAX);
+  }
+  if (name === "recent") {
+    // the same song played on two devices: keep the latest play
+    const byId = new Map();
+    for (const h of [...(theirs || []), ...(mine || [])])
+      if (!byId.has(h.id) || (h.at || 0) > (byId.get(h.id).at || 0)) byId.set(h.id, h);
+    return [...byId.values()].sort((a, b) => (b.at || 0) - (a.at || 0)).slice(0, RECENT_MAX);
+  }
+  return theirs ?? mine ?? null;
 }

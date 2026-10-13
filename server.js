@@ -43,9 +43,15 @@ import {
   FAVORITES_LIMIT,
   QR_LOGIN,
   loginQr,
+  newHistoryId,
   authErrorText,
+  readPage,
 } from "./lib.js";
 import { createMirror } from "./cloud/mirror.js";
+import { openDb, ACCOUNT_DATA } from "./cloud/common.js";
+import { RECENT_MAX } from "./core.js";
+import { readAccount, joinAccount, checkOps, applyOps } from "./cloud/account.js";
+import { createAccountSync } from "./web/cloud-sync.js";
 
 const PORT = Number(process.env.PORT) || 3000;
 const HOST = "127.0.0.1";
@@ -68,6 +74,8 @@ const HISTORY_FILE = path.resolve(process.env.HISTORY_FILE || dataFile("history.
 const VISIBLE_FILE = path.resolve(process.env.VISIBLE_CHATS_FILE || dataFile("visible-chats.json"));
 // Favourite files of each Telegram account: { "<account id>": ["<chat id>|<message id>", …] }.
 const FAVORITES_FILE = path.resolve(process.env.FAVORITES_FILE || dataFile("favorites.json"));
+// Songs played lately, per Telegram account: { "<account id>": [{ id: "<chat id>|<message id>", at, … }] }.
+const RECENT_FILE = path.resolve(process.env.RECENT_FILE || dataFile("recent.json"));
 // Which Telegram app (API ID / hash) to use: the built-in one from .env, or the user's own (see chosenCreds).
 const API_FILE = path.resolve(process.env.API_FILE || dataFile("api.json"));
 const HISTORY_LIMIT = 2000;
@@ -87,7 +95,17 @@ function writeJsonFile(file, data) {
   fs.writeFileSync(tmp, JSON.stringify(data, null, 2), { mode: 0o600 });
   fs.renameSync(tmp, file); // atomic replace, never leaves a half-written file; result is owner-only (600)
   mirror.changed(file);
+  const shared = {
+    [HISTORY_FILE]: "history",
+    [VISIBLE_FILE]: "visibleChats",
+    [FAVORITES_FILE]: "favorites",
+    [RECENT_FILE]: "recent",
+    [SETTINGS_FILE]: "settings",
+  }[file];
+  if (shared) accountSync?.changed(shared);
 }
+
+let accountSync = null; // shared data of the signed-in account, set up further down (writeJsonFile tells it)
 
 /** Remove a private file (and its copy in MongoDB). */
 function removeDataFile(file) {
@@ -108,11 +126,9 @@ const mirror = createMirror({
   secret: cloudSetting("TDL_SECRET") || null,
   keyFile: dataFile(".cloud-key"),
   timeoutMs: Number(process.env.TDL_MONGO_TIMEOUT_MS) || undefined, // how long startup waits for the cluster
+  // this computer's own files; history, favourites and visible chats are shared per account (accountSync)
   files: {
-    [SETTINGS_FILE]: { name: "settings.json" },
-    [HISTORY_FILE]: { name: "history.json" },
-    [VISIBLE_FILE]: { name: "visible-chats.json" },
-    [FAVORITES_FILE]: { name: "favorites.json" },
+    [SETTINGS_FILE]: { name: "settings.json" }, // the download folder is a path on this computer
     [API_FILE]: { name: "api.json", secret: true }, // may hold the user's own API hash
     [SESSION_FILE]: { name: "session.txt", secret: true },
   },
@@ -120,7 +136,7 @@ const mirror = createMirror({
 await mirror.start(); // before the files are read below
 
 /** Settings, history, session and token are private to the account running the server. */
-for (const file of [SETTINGS_FILE, HISTORY_FILE, VISIBLE_FILE, FAVORITES_FILE, SESSION_FILE]) {
+for (const file of [SETTINGS_FILE, HISTORY_FILE, VISIBLE_FILE, FAVORITES_FILE, RECENT_FILE, SESSION_FILE]) {
   try {
     fs.chmodSync(file, 0o600);
   } catch {
@@ -293,11 +309,102 @@ const favorites = (() => {
   const data = readJsonFile(FAVORITES_FILE, {});
   return data && typeof data === "object" && !Array.isArray(data) ? data : {};
 })();
-let historySeq = history.reduce((max, h) => Math.max(max, h.id || 0), 0);
+
+// ---------- songs played lately, per Telegram account ----------
+
+const recentPlays = (() => {
+  const data = readJsonFile(RECENT_FILE, {});
+  return data && typeof data === "object" && !Array.isArray(data) ? data : {};
+})();
+
+// ---------- data shared by every device of the signed-in account (MongoDB "acct:<id>:…") ----------
+// Same documents as the browser version (cloud/account.js), so this computer, the web app and any other
+// device show the same history, favourites, visible chats and settings. Off without MONGODB_URI.
+
+const accountState = { connected: false, error: null, lastSync: null };
+let accountRetry = null;
+
+accountSync = createAccountSync({
+  read(name) {
+    const acc = auth.me?.id;
+    if (name === "settings") return { subfolderPerChat: settings.subfolderPerChat };
+    if (name === "history") return history;
+    if (name === "visibleChats") return visibleChats[acc] ?? null;
+    if (name === "recent") return recentPlays[acc] || [];
+    return favorites[acc] || [];
+  },
+  apply(name, value) {
+    const acc = auth.me?.id;
+    if (name === "settings") {
+      settings.subfolderPerChat = value.subfolderPerChat ?? settings.subfolderPerChat;
+      writeJsonFile(SETTINGS_FILE, settings);
+      return broadcast("settings", settings);
+    }
+    if (name === "history") {
+      history = value;
+      writeJsonFile(HISTORY_FILE, history);
+      return broadcast("history", history);
+    }
+    const [store, file] = { visibleChats: [visibleChats, VISIBLE_FILE], recent: [recentPlays, RECENT_FILE] }[name] || [
+      favorites,
+      FAVORITES_FILE,
+    ];
+    if (value === null || (name !== "visibleChats" && !value.length)) delete store[acc];
+    else store[acc] = value;
+    writeJsonFile(file, store);
+    broadcast("account", { name }); // the page shows the new favourites / chat list
+  },
+  onSynced: () => Object.assign(accountState, { connected: true, error: null, lastSync: Date.now() }),
+  onError: (err) => {
+    Object.assign(accountState, { connected: false, error: err.message });
+    scheduleAccountRetry();
+  },
+});
+
+function scheduleAccountRetry() {
+  clearTimeout(accountRetry);
+  accountRetry = setTimeout(startAccountSync, 60_000);
+  accountRetry.unref();
+}
+
+/** After signing in: join the account's shared data (merging what this computer has). */
+async function startAccountSync() {
+  const acc = auth.me?.id;
+  const uri = mirror.status.enabled ? cloudSetting("MONGODB_URI").trim() : null;
+  if (!acc || !uri || accountSync.connected) return;
+  try {
+    const db = await openDb(uri, {
+      dbName: cloudSetting("MONGODB_DB")?.trim() || undefined,
+      timeoutMs: Number(process.env.TDL_MONGO_TIMEOUT_MS) || undefined,
+    });
+    if (auth.me?.id !== acc) return;
+    await accountSync.start({
+      join: (data) => joinAccount(db, acc, data),
+      ops: (name, ops) => {
+        const checked = checkOps(name, ops);
+        if (!checked) throw new Error(`invalid operations for ${name}`);
+        return applyOps(db, acc, name, checked);
+      },
+      read: () => readAccount(db, acc),
+    });
+  } catch (err) {
+    Object.assign(accountState, {
+      connected: false,
+      error: err.message.replace(/mongodb(\+srv)?:\/\/\S+/g, "mongodb://…"),
+    });
+    scheduleAccountRetry();
+  }
+}
+
+function stopAccountSync() {
+  clearTimeout(accountRetry);
+  accountSync.stop();
+  Object.assign(accountState, { connected: false, error: null });
+}
 
 function addHistory(job, status) {
   const entry = {
-    id: ++historySeq,
+    id: newHistoryId(), // unique across devices: the history is shared by every device of the account
     at: Date.now(),
     status, // done | skipped | failed
     chat: job.chat,
@@ -335,7 +442,8 @@ function isDir(p) {
 }
 
 function listFolder(requested) {
-  const fallback = settings.downloadDir || (isDir(path.join(ROOT_DIR, "downloads")) ? path.join(ROOT_DIR, "downloads") : os.homedir());
+  const fallback =
+    settings.downloadDir || (isDir(path.join(ROOT_DIR, "downloads")) ? path.join(ROOT_DIR, "downloads") : os.homedir());
   let dir = path.resolve(expandHome(requested || fallback));
   while (!isDir(dir) && path.dirname(dir) !== dir) dir = path.dirname(dir); // nearest existing parent
 
@@ -343,7 +451,9 @@ function listFolder(requested) {
   try {
     dirs = fs
       .readdirSync(dir, { withFileTypes: true })
-      .filter((d) => !d.name.startsWith(".") && (d.isDirectory() || (d.isSymbolicLink() && isDir(path.join(dir, d.name)))))
+      .filter(
+        (d) => !d.name.startsWith(".") && (d.isDirectory() || (d.isSymbolicLink() && isDir(path.join(dir, d.name)))),
+      )
       .map((d) => d.name)
       .sort((a, b) => a.localeCompare(b, "vi"));
   } catch {
@@ -365,7 +475,14 @@ function listFolder(requested) {
     { label: "Thư mục tool", icon: "folder", path: path.join(ROOT_DIR, "downloads") },
   ].filter((s) => isDir(s.path));
 
-  return { path: dir, parent: path.dirname(dir) === dir ? null : path.dirname(dir), sep: path.sep, dirs, writable, shortcuts };
+  return {
+    path: dir,
+    parent: path.dirname(dir) === dir ? null : path.dirname(dir),
+    sep: path.sep,
+    dirs,
+    writable,
+    shortcuts,
+  };
 }
 
 function makeFolder(parent, name) {
@@ -435,7 +552,9 @@ async function askApiCreds() {
       continue;
     }
     auth.error = null;
-    const hash = String(await waitInput("api_hash")).trim().toLowerCase();
+    const hash = String(await waitInput("api_hash"))
+      .trim()
+      .toLowerCase();
     if (hash === BACK && envCreds()) return (auth.error = null);
     if (!/^[0-9a-f]{32}$/.test(hash)) {
       auth.error = "API hash gồm 32 ký tự 0-9, a-f";
@@ -501,7 +620,13 @@ async function startAuth({ keepStep = false, error = null } = {}, run = authRun)
 
   const me = await client.getMe();
   if (run !== authRun) return;
-  auth.me = { id: String(me.id), name: entityTitle(me), username: me.username || null };
+  auth.me = {
+    id: String(me.id),
+    name: entityTitle(me),
+    username: me.username || null,
+    phone: me.phone ? `+${me.phone}` : null,
+  };
+  startAccountSync(); // in the background: the shared history / favourites arrive by themselves
   auth.step = "ready";
   auth.qr = null;
   auth.floodUntil = 0;
@@ -529,7 +654,10 @@ function runAuth(options) {
       client = null;
       pendingInput = null;
       old?.destroy().catch(() => {});
-      return runAuth({ keepStep: true, error: authErrorText({ errorMessage: "FLOOD_WAIT", seconds: Math.ceil(waitMs / 1000) }) });
+      return runAuth({
+        keepStep: true,
+        error: authErrorText({ errorMessage: "FLOOD_WAIT", seconds: Math.ceil(waitMs / 1000) }),
+      });
     }
     auth.step = "error";
     auth.error = authErrorText(err);
@@ -572,13 +700,21 @@ function backToChoice() {
  */
 function logout() {
   const old = client;
+  accountSync.finish().catch(() => {}); // pending changes still reach MongoDB, then syncing stops
+  stopAccountSync();
   removeDataFile(SESSION_FILE);
   scans.clear();
   photoCache.clear();
   cancelQueued();
   pendingInput = null;
   earlyPhone = null;
-  Object.assign(auth, { step: "phone", error: null, me: null, phone: envValue("PHONE") || "", apiChoice: !!envCreds() });
+  Object.assign(auth, {
+    step: "phone",
+    error: null,
+    me: null,
+    phone: envValue("PHONE") || "",
+    apiChoice: !!envCreds(),
+  });
   broadcast("auth", auth);
 
   (async () => {
@@ -599,7 +735,8 @@ function logout() {
 const scans = new Map();
 
 /** Id the UI gives a scan so it can match the progress events to it (short, harmless characters only). */
-const scanIdParam = (url) => (/^[\w-]{1,40}$/.test(url.searchParams.get("scan") || "") ? url.searchParams.get("scan") : null);
+const scanIdParam = (url) =>
+  /^[\w-]{1,40}$/.test(url.searchParams.get("scan") || "") ? url.searchParams.get("scan") : null;
 
 /** The UI moved to another chat (request closed): stop reading this one from Telegram. */
 const scanStopped = () => Object.assign(new Error("Đã dừng quét kênh"), { status: 499, stopped: true });
@@ -607,30 +744,46 @@ const scanStopped = () => Object.assign(new Error("Đã dừng quét kênh"), { 
 async function scanChat(chat, type, signal, scanId = null) {
   const entity = await resolveChat(client, chat);
   if (signal?.aborted) throw scanStopped();
-  const title = entityTitle(entity);
-  const key = `${entity.id}|${type}`;
-  const Filter = FILTERS[type];
-
-  const items = new Map();
-  for await (const msg of client.iterMessages(entity, { filter: Filter ? new Filter() : undefined })) {
-    if (signal?.aborted) throw scanStopped(); // leaving the loop also stops the message requests
-    const info = fileInfo(msg);
-    if (!info) continue;
-    items.set(msg.id, { msg, info });
-    // scanId (from the UI) tells this scan's progress apart from an earlier scan of the same chat
-    if (items.size % 50 === 0) broadcast("scan", { chat, scanId, count: items.size });
-  }
-
-  const scan = { key, chat, type, title, items };
-  scans.set(key, scan);
-  return scan;
+  const scan = {
+    key: `${entity.id}|${type}`,
+    chat,
+    type,
+    title: entityTitle(entity),
+    entity,
+    items: new Map(),
+    cursor: 0,
+    more: true,
+  };
+  const page = await scanPage(scan, signal, scanId);
+  scans.set(scan.key, scan);
+  return { scan, page };
 }
 
+/** The next page of a scan (see readPage); pages of one scan run one after another. */
+function scanPage(scan, signal, scanId = null) {
+  const Filter = FILTERS[scan.type];
+  const run = (scan.paging || Promise.resolve())
+    .catch(() => {})
+    .then(() =>
+      readPage(
+        scan,
+        (offsetId) => client.iterMessages(scan.entity, { filter: Filter ? new Filter() : undefined, offsetId }),
+        {
+          signal,
+          stopped: scanStopped,
+          // scanId (from the UI) tells this scan's progress apart from an earlier scan of the same chat
+          onProgress: (count) => broadcast("scan", { chat: scan.chat, scanId, count }),
+        },
+      ),
+    );
+  scan.paging = run;
+  return run;
+}
 
 // ---------- "Bài hát yêu thích": every favourite file, from all chats, as one list ----------
 
 /** The favourites of this account, fetched from Telegram as one scan (key "fav"). */
-async function favoritesScan(ids, signal) {
+async function favoritesScan(ids, signal, { key = "fav", title = "Bài hát yêu thích" } = {}) {
   const byChat = new Map(); // chat id -> [message id…]
   for (const id of ids) {
     const [chat, msg] = id.split("|");
@@ -638,7 +791,8 @@ async function favoritesScan(ids, signal) {
     byChat.get(chat).push(Number(msg));
   }
   const entities = new Map();
-  if (byChat.size) for (const d of await client.getDialogs({})) if (d.entity) entities.set(String(d.entity.id), d.entity);
+  if (byChat.size)
+    for (const d of await client.getDialogs({})) if (d.entity) entities.set(String(d.entity.id), d.entity);
   const found = new Map(); // fav id -> item
   for (const [chat, msgIds] of byChat) {
     const entity = entities.get(chat);
@@ -647,14 +801,24 @@ async function favoritesScan(ids, signal) {
       if (signal?.aborted) throw scanStopped();
       for (const msg of await client.getMessages(entity, { ids: msgIds.slice(i, i + 100) })) {
         const info = msg && fileInfo(msg);
-        if (info) found.set(`${chat}|${msg.id}`, { msg, info, chatTitle: entityTitle(entity), fav: `${chat}|${msg.id}` });
+        if (info)
+          found.set(`${chat}|${msg.id}`, { msg, info, chatTitle: entityTitle(entity), fav: `${chat}|${msg.id}` });
       }
     }
   }
   // Message ids repeat across chats, so the list uses its own ids (1, 2, …) in favourite order (newest first).
   const items = new Map();
   for (const id of ids) if (found.has(id)) items.set(items.size + 1, found.get(id));
-  const scan = { key: "fav", chat: "fav", type: "all", title: "Bài hát yêu thích", fav: true, items, missing: ids.length - items.size };
+  // "fav": the favourites list (shown as a list); "recent": the songs played lately (played from the side panel)
+  const scan = {
+    key,
+    chat: key,
+    type: "all",
+    title,
+    ...(key === "fav" ? { fav: true } : { recent: true }),
+    items,
+    missing: ids.length - items.size,
+  };
   scans.set(scan.key, scan);
   return scan;
 }
@@ -663,7 +827,8 @@ async function favoritesScan(ids, signal) {
 function historyPaths(scanKey) {
   const map = new Map();
   for (const h of history) {
-    if (h.scanKey === scanKey && h.path && ["done", "skipped"].includes(h.status) && !map.has(h.msgId)) map.set(h.msgId, h.path);
+    if (h.scanKey === scanKey && h.path && ["done", "skipped"].includes(h.status) && !map.has(h.msgId))
+      map.set(h.msgId, h.path);
   }
   return map;
 }
@@ -671,7 +836,12 @@ function historyPaths(scanKey) {
 /** Path of a complete local copy of an item (default folder first, then the history), or null. */
 function localCopy(scan, item, fromHistory = historyPaths(scan.key)) {
   if (settings.downloadDir) {
-    const t = resolveTarget(chatDir(settings.downloadDir, item.chatTitle ?? scan.title), item.info.name, item.info.size, item.msg.id);
+    const t = resolveTarget(
+      chatDir(settings.downloadDir, item.chatTitle ?? scan.title),
+      item.info.name,
+      item.info.size,
+      item.msg.id,
+    );
     if (t.skip) return t.filePath;
   }
   const p = fromHistory.get(item.msg.id);
@@ -683,14 +853,18 @@ function localCopy(scan, item, fromHistory = historyPaths(scan.key)) {
   return null;
 }
 
-function describeScan(scan) {
+/** The scan's files for the page (all of them, or only `ids` = one more page), plus whether more exist. */
+function describeScan(scan, ids = null) {
   const fromHistory = historyPaths(scan.key);
+  const entries = ids ? ids.map((id) => [id, scan.items.get(id)]) : [...scan.items];
   return {
     key: scan.key,
     title: scan.title,
+    more: !!scan.more,
     outDir: settings.downloadDir ? (scan.fav ? settings.downloadDir : chatDir(settings.downloadDir, scan.title)) : null,
     ...(scan.fav && { fav: true, missing: scan.missing }),
-    files: [...scan.items].map(([id, item]) => ({
+    ...(scan.recent && { recent: true, missing: scan.missing }),
+    files: entries.map(([id, item]) => ({
       id,
       ...(item.fav && { fav: item.fav, chat: item.chatTitle }),
       name: item.info.name,
@@ -764,9 +938,9 @@ function pump() {
     runJob(job)
       .catch((err) => updateJob(job, { status: "failed", error: err.message }))
       .finally(() => {
-      active--;
-      pump();
-    });
+        active--;
+        pump();
+      });
   }
 }
 
@@ -848,7 +1022,8 @@ const cancelledError = () => Object.assign(new Error("Đã huỷ"), { cancelled:
 /** Scan keys sent by the UI for POST /api/cancel: undefined = all queued downloads. */
 function cancelKeys(value) {
   if (value === undefined) return undefined;
-  if (!Array.isArray(value) || value.length > 1000 || !value.every((k) => typeof k === "string" && k.length <= 200)) return null;
+  if (!Array.isArray(value) || value.length > 1000 || !value.every((k) => typeof k === "string" && k.length <= 200))
+    return null;
   return value;
 }
 
@@ -902,9 +1077,20 @@ function streamFile(req, res, filePath) {
   const { size } = fs.statSync(filePath);
   const ext = path.extname(filePath).toLowerCase();
   const types = {
-    ".mp3": "audio/mpeg", ".m4a": "audio/mp4", ".flac": "audio/flac", ".ogg": "audio/ogg", ".wav": "audio/wav",
-    ".mp4": "video/mp4", ".webm": "video/webm", ".mov": "video/quicktime", ".mkv": "video/x-matroska",
-    ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp", ".gif": "image/gif",
+    ".mp3": "audio/mpeg",
+    ".m4a": "audio/mp4",
+    ".flac": "audio/flac",
+    ".ogg": "audio/ogg",
+    ".wav": "audio/wav",
+    ".mp4": "video/mp4",
+    ".webm": "video/webm",
+    ".mov": "video/quicktime",
+    ".mkv": "video/x-matroska",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".webp": "image/webp",
+    ".gif": "image/gif",
   };
   const headers = {
     "Content-Type": types[ext] || "application/octet-stream",
@@ -950,7 +1136,11 @@ async function sendPhoto(res, scan, item) {
     photoCache.set(key, buf);
     if (photoCache.size > PHOTO_CACHE_MAX) photoCache.delete(photoCache.keys().next().value);
   }
-  res.writeHead(200, { "Content-Type": "image/jpeg", "Content-Length": buf.length, "Cache-Control": "private, max-age=3600" });
+  res.writeHead(200, {
+    "Content-Type": "image/jpeg",
+    "Content-Length": buf.length,
+    "Cache-Control": "private, max-age=3600",
+  });
   res.end(buf);
 }
 
@@ -1021,7 +1211,11 @@ async function handleApi(req, res, url) {
 
   switch (route) {
     case "GET /api/events": {
-      res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive" });
+      res.writeHead(200, {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        Connection: "keep-alive",
+      });
       // a reloaded page starts clean: the last error is not repeated (Telegram's wait still applies, so it stays)
       if (auth.error && !(auth.floodUntil > Date.now())) auth.error = null;
       res.write(`event: auth\ndata: ${JSON.stringify(auth)}\n\n`);
@@ -1038,7 +1232,14 @@ async function handleApi(req, res, url) {
 
     case "GET /api/cloud":
       // { enabled, connected, host, error, lastSync } of the MongoDB copy (never the connection string)
-      return sendJson(res, 200, { ...mirror.status, kind: "local" });
+      // this computer's files + the account's shared data
+      return sendJson(res, 200, {
+        ...mirror.status,
+        connected: mirror.status.connected && (!auth.me || accountState.connected),
+        error: mirror.status.error || (auth.me && accountState.error) || null,
+        lastSync: Math.max(mirror.status.lastSync || 0, accountState.lastSync || 0) || null,
+        kind: "local",
+      });
 
     case "POST /api/login": {
       const { kind, value } = await readJson(req);
@@ -1059,7 +1260,8 @@ async function handleApi(req, res, url) {
         broadcast("auth", auth);
         return sendJson(res, 200, { ok: true });
       }
-      if (!pendingInput || pendingInput.kind !== kind) return sendJson(res, 409, { error: "Not waiting for this input" });
+      if (!pendingInput || pendingInput.kind !== kind)
+        return sendJson(res, 409, { error: "Not waiting for this input" });
       const { resolve } = pendingInput;
       pendingInput = null;
       auth.step = "waiting";
@@ -1085,7 +1287,7 @@ async function handleApi(req, res, url) {
           title: d.title || entityTitle(d.entity),
           type: dialogType(d),
           username: d.entity?.username || null,
-        }))
+        })),
       );
     }
 
@@ -1107,6 +1309,42 @@ async function handleApi(req, res, url) {
       requireReady();
       return sendJson(res, 200, { ids: favorites[auth.me.id] || [] });
 
+    case "GET /api/recent":
+      requireReady();
+      return sendJson(res, 200, { items: recentPlays[auth.me.id] || [] });
+
+    case "POST /api/recent": {
+      // { op: "add", entry } (a song started) · { op: "remove", id } · { op: "clear" }
+      requireReady();
+      const body = await readJson(req);
+      const list = recentPlays[auth.me.id] || [];
+      let next;
+      if (body.op === "add") {
+        const entry = ACCOUNT_DATA.recent([body.entry])?.[0];
+        if (!entry) return sendJson(res, 400, { error: "Bài không hợp lệ" });
+        next = [entry, ...list.filter((h) => h.id !== entry.id)].slice(0, RECENT_MAX);
+      } else if (body.op === "remove" && isFavoriteId(body.id)) next = list.filter((h) => h.id !== body.id);
+      else if (body.op === "clear") next = [];
+      else return sendJson(res, 400, { error: "Thao tác không hợp lệ" });
+      if (next.length) recentPlays[auth.me.id] = next;
+      else delete recentPlays[auth.me.id];
+      writeJsonFile(RECENT_FILE, recentPlays);
+      return sendJson(res, 200, { items: next });
+    }
+
+    case "GET /api/recent/files": {
+      // the songs played lately, ready to play again (from every chat, like the favourites)
+      requireReady();
+      const ctrl = new AbortController();
+      res.on("close", () => !res.writableEnded && ctrl.abort());
+      const ids = (recentPlays[auth.me.id] || []).map((h) => h.id);
+      return sendJson(
+        res,
+        200,
+        describeScan(await favoritesScan(ids, ctrl.signal, { key: "recent", title: "Phát gần đây" })),
+      );
+    }
+
     case "GET /api/favorites/files": {
       requireReady();
       const ctrl = new AbortController();
@@ -1121,7 +1359,8 @@ async function handleApi(req, res, url) {
       if (!isFavoriteId(id) || typeof on !== "boolean") return sendJson(res, 400, { error: "Yêu thích không hợp lệ" });
       const list = (favorites[auth.me.id] ||= []).filter((x) => x !== id);
       if (on) {
-        if (list.length >= FAVORITES_LIMIT) return sendJson(res, 400, { error: `Tối đa ${FAVORITES_LIMIT} file yêu thích` });
+        if (list.length >= FAVORITES_LIMIT)
+          return sendJson(res, 400, { error: `Tối đa ${FAVORITES_LIMIT} file yêu thích` });
         list.unshift(id); // newest first
       }
       if (list.length) favorites[auth.me.id] = list;
@@ -1139,8 +1378,18 @@ async function handleApi(req, res, url) {
       // Switching to another chat aborts this request in the browser: stop scanning when it closes.
       const ctrl = new AbortController();
       res.on("close", () => !res.writableEnded && ctrl.abort());
-      const scan = await scanChat(chat, type, ctrl.signal, scanIdParam(url));
-      return sendJson(res, 200, describeScan(scan));
+      const { scan, page } = await scanChat(chat, type, ctrl.signal, scanIdParam(url));
+      return sendJson(res, 200, describeScan(scan, page));
+    }
+
+    case "GET /api/files/more": {
+      // the next page of a scan (infinite scroll); only the new files are sent
+      requireReady();
+      const scan = getScan(url.searchParams.get("key"));
+      const ctrl = new AbortController();
+      res.on("close", () => !res.writableEnded && ctrl.abort());
+      const page = await scanPage(scan, ctrl.signal, scanIdParam(url));
+      return sendJson(res, 200, describeScan(scan, page));
     }
 
     case "POST /api/download": {
@@ -1153,7 +1402,10 @@ async function handleApi(req, res, url) {
       if (!base) throw httpError(409, "Chưa chọn thư mục tải xuống", { code: "NEED_DIR" });
       if (!dir) base = checkDir(base); // the saved folder may have been removed since
       if (dir && remember) saveSettings({ downloadDir: base });
-      return sendJson(res, 200, { added: enqueue(scan, ids, base), outDir: scan.fav ? base : chatDir(base, scan.title) });
+      return sendJson(res, 200, {
+        added: enqueue(scan, ids, base),
+        outDir: scan.fav ? base : chatDir(base, scan.title),
+      });
     }
 
     case "GET /api/scan":
@@ -1261,7 +1513,8 @@ const server = http.createServer(async (req, res) => {
     return res.end();
   }
   if (!tokenMatches(readCookie(req, COOKIE))) {
-    if (isApi) return sendJson(res, 401, { error: "Cần mở giao diện bằng link có token in trong terminal", code: "NEED_TOKEN" });
+    if (isApi)
+      return sendJson(res, 401, { error: "Cần mở giao diện bằng link có token in trong terminal", code: "NEED_TOKEN" });
     res.writeHead(url.pathname === "/" ? 401 : 404, { "Content-Type": "text/html; charset=utf-8" });
     return res.end(LOCKED_PAGE.replace("PORT", PORT));
   }
@@ -1271,7 +1524,11 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === "GET" && (url.pathname === "/" || url.pathname === "/index.html")) {
       const html = fs.readFileSync(path.join(PUBLIC_DIR, "index.html"), "utf8");
-      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", "Content-Security-Policy": pageCsp() });
+      res.writeHead(200, {
+        "Content-Type": "text/html; charset=utf-8",
+        "Cache-Control": "no-store",
+        "Content-Security-Policy": pageCsp(),
+      });
       return res.end(html);
     }
     const asset = req.method === "GET" && PUBLIC_ASSETS[url.pathname];
@@ -1281,7 +1538,8 @@ const server = http.createServer(async (req, res) => {
     }
     sendJson(res, 404, { error: "Not found" });
   } catch (err) {
-    if (!res.headersSent) sendJson(res, err.status || 500, { error: err.message, ...(err.status && err.code && { code: err.code }) });
+    if (!res.headersSent)
+      sendJson(res, err.status || 500, { error: err.message, ...(err.status && err.code && { code: err.code }) });
     else res.end();
   }
 });
@@ -1292,7 +1550,9 @@ process.on("uncaughtException", (err) => console.error("uncaught exception:", er
 
 server.on("error", (err) => {
   if (err.code === "EADDRINUSE") {
-    console.error(`Cổng ${PORT} đang bị chương trình khác dùng. Tắt chương trình đó, hoặc chạy với cổng khác: PORT=3001 npm run web`);
+    console.error(
+      `Cổng ${PORT} đang bị chương trình khác dùng. Tắt chương trình đó, hoặc chạy với cổng khác: PORT=3001 npm run web`,
+    );
   } else {
     console.error(`Không khởi động được server: ${err.message}`);
   }
@@ -1301,11 +1561,18 @@ server.on("error", (err) => {
 
 server.listen(PORT, HOST, () => {
   console.log(`Telegram downloader UI: http://127.0.0.1:${PORT}/?token=${UI_TOKEN}`);
-  console.log("(Link chứa token bí mật — chỉ mở trên máy này, đừng chia sẻ. Ctrl+click để mở; mỗi trình duyệt chỉ cần mở 1 lần.)");
+  console.log(
+    "(Link chứa token bí mật — chỉ mở trên máy này, đừng chia sẻ. Ctrl+click để mở; mỗi trình duyệt chỉ cần mở 1 lần.)",
+  );
   // --open: open the UI in the default browser, already signed in, with a one-time code (never the token).
   if (process.argv.includes("--open")) {
-    const cmd = process.env.TDL_OPEN_CMD || (process.platform === "darwin" ? "open" : process.platform === "win32" ? "explorer" : "xdg-open");
-    const child = spawn(cmd, [`http://127.0.0.1:${PORT}/?once=${issueOnceCode()}`], { detached: true, stdio: "ignore" });
+    const cmd =
+      process.env.TDL_OPEN_CMD ||
+      (process.platform === "darwin" ? "open" : process.platform === "win32" ? "explorer" : "xdg-open");
+    const child = spawn(cmd, [`http://127.0.0.1:${PORT}/?once=${issueOnceCode()}`], {
+      detached: true,
+      stdio: "ignore",
+    });
     child.on("error", () => {});
     child.unref();
   }

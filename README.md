@@ -19,7 +19,7 @@ Lần chạy đầu sẽ hỏi số điện thoại, mã OTP (và mật khẩu 2
 npm run web        # chạy server và tự mở trình duyệt, đã đăng nhập sẵn (npm run web:server: chỉ chạy server)
 ```
 
-> **Kết nối API khi đăng nhập:** nếu `.env` có đủ `API_ID` + `API_HASH`, màn đăng nhập cho chọn *Dùng API có sẵn* (của `.env`) hoặc *Tự tạo API ID*; nếu `.env` thiếu, tool hỏi thẳng API ID/hash (có link tới my.telegram.org). API tự nhập được lưu ở thư mục dữ liệu riêng (`api.json`, quyền 600), không ghi vào `.env`. Nút *← Chọn lại cách kết nối* có ở các bước nhập API và số điện thoại. `.env` được đọc lại mỗi lần đăng nhập, sửa không cần khởi động lại server.
+> **Kết nối API khi đăng nhập:** nếu `.env` có đủ `API_ID` + `API_HASH`, màn đăng nhập cho chọn _Dùng API có sẵn_ (của `.env`) hoặc _Tự tạo API ID_; nếu `.env` thiếu, tool hỏi thẳng API ID/hash (có link tới my.telegram.org). API tự nhập được lưu ở thư mục dữ liệu riêng (`api.json`, quyền 600), không ghi vào `.env`. Nút _← Chọn lại cách kết nối_ có ở các bước nhập API và số điện thoại. `.env` được đọc lại mỗi lần đăng nhập, sửa không cần khởi động lại server.
 >
 > Trình duyệt được mở bằng một **mã dùng một lần** (hết hạn sau 60 giây, dùng xong là vô hiệu) thay vì token thật, nên không lộ token qua dòng lệnh. Muốn mở bằng trình duyệt khác: `TDL_OPEN_CMD=firefox npm run web`, hoặc Ctrl+click link có token in trong terminal (mỗi trình duyệt chỉ cần một lần).
 >
@@ -32,24 +32,24 @@ Terminal sẽ in một **link kèm token**, dạng `http://127.0.0.1:3000/?token
 
 1. Đăng nhập (lần đầu): nhập số điện thoại → mã trong app Telegram → mật khẩu 2FA nếu có.
 2. Chọn kênh ở cột trái (hoặc dán link `t.me/...` / username rồi Enter).
-3. Chọn loại file (Nhạc, Video, Ảnh…), tìm theo tên, lọc *Chưa tải / Đã tải*.
+3. Chọn loại file (Nhạc, Video, Ảnh…), tìm theo tên, lọc _Chưa tải / Đã tải_.
 4. Bấm vào dòng để chọn; **Shift + bấm** để chọn cả đoạn; ô tích ở hàng tiêu đề bảng chọn / bỏ chọn mọi bài đang hiện.
 5. **Tải xuống** → kiểm tra danh sách trong hộp xác nhận → **Bắt đầu tải**.
 6. Theo dõi tiến độ ở cột bên phải; 📂 mở thư mục lưu.
 
-**Nghe trước khi tải:** mọi bài đều có nút ▶ ở đầu dòng. Bài chưa tải được phát trực tiếp từ Telegram (nhãn *Nghe thử*, tua được, không lưu gì xuống máy); bài đã tải phát từ file trên máy (nhãn *Từ máy*). Bấm lại nút để tạm dừng; nút **⏪ 10s / 10s ⏩** (hoặc phím **← / →**) để lùi / tiến 10 giây.
+**Nghe trước khi tải:** mọi bài đều có nút ▶ ở đầu dòng. Bài chưa tải được phát trực tiếp từ Telegram (nhãn _Nghe thử_, tua được, không lưu gì xuống máy); bài đã tải phát từ file trên máy (nhãn _Từ máy_). Bấm lại nút để tạm dừng; nút **⏪ 10s / 10s ⏩** (hoặc phím **← / →**) để lùi / tiến 10 giây.
 
 **Xem trước ảnh / video:** ảnh có nút 👁, video có nút ▶ (màn hình) thay cho nút phát nhạc. Bấm để mở hộp xem trước: ảnh hiện lớn, video phát trực tiếp từ Telegram (tua được, không lưu xuống máy). Trong hộp có **‹ Trước / Sau ›** (phím ← →) để lướt qua các ảnh/video đang hiện trong danh sách, và **Chọn để tải** để tick luôn. Video định dạng trình duyệt không hỗ trợ (vd. một số .mkv) sẽ báo không xem được nhưng vẫn tải về bình thường.
 
-**Thư mục tải xuống:** lần đầu bấm *Bắt đầu tải* mà chưa cài đặt, tool sẽ hỏi thư mục (duyệt thư mục, lối tắt Home / Music / Downloads, tạo thư mục mới) kèm ô *Ghi nhớ làm thư mục mặc định*. Đổi bất cứ lúc nào ở **⚙ Cài đặt**: thư mục mặc định (hoặc bỏ để lần nào cũng hỏi) và bật/tắt *Tạo thư mục con theo tên kênh*. Khi đã có thư mục mặc định, hộp xác nhận tải không hỏi thư mục nữa (file vào thẳng thư mục mặc định); muốn đổi thì vào ⚙ Cài đặt. Cài đặt lưu ở `settings.json`.
+**Thư mục tải xuống:** lần đầu bấm _Bắt đầu tải_ mà chưa cài đặt, tool sẽ hỏi thư mục (duyệt thư mục, lối tắt Home / Music / Downloads, tạo thư mục mới) kèm ô _Ghi nhớ làm thư mục mặc định_. Đổi bất cứ lúc nào ở **⚙ Cài đặt**: thư mục mặc định (hoặc bỏ để lần nào cũng hỏi) và bật/tắt _Tạo thư mục con theo tên kênh_. Khi đã có thư mục mặc định, hộp xác nhận tải không hỏi thư mục nữa (file vào thẳng thư mục mặc định); muốn đổi thì vào ⚙ Cài đặt. Cài đặt lưu ở `settings.json`.
 
-**Hội thoại hiển thị:** bấm **Chọn hiển thị** trên thanh ngay dưới ô tìm kênh (hoặc ⚙ Cài đặt → *Hội thoại hiển thị*) để tích những hội thoại muốn thấy trong danh sách. Danh sách lưu **riêng cho từng tài khoản Telegram** (`visible-chats.json`; bản trình duyệt lưu trong trình duyệt), giữ nguyên khi đăng xuất / đăng nhập lại. Chưa chọn thì hiện tất cả; *Hiện tất cả* để bỏ lọc.
+**Hội thoại hiển thị:** bấm **Chọn hiển thị** trên thanh ngay dưới ô tìm kênh (hoặc ⚙ Cài đặt → _Hội thoại hiển thị_) để tích những hội thoại muốn thấy trong danh sách. Danh sách lưu **riêng cho từng tài khoản Telegram** (`visible-chats.json`; bản trình duyệt lưu trong trình duyệt), giữ nguyên khi đăng xuất / đăng nhập lại. Chưa chọn thì hiện tất cả; _Hiện tất cả_ để bỏ lọc.
 
-**Bài hát yêu thích ♥:** bấm trái tim ở cuối mỗi dòng để thêm / bỏ một bài. Mục **♥ Bài hát yêu thích** ở đầu cột kênh mở danh sách **tất cả** bài đã thả tim, từ mọi kênh (mới thả tim nhất ở trên, mỗi bài ghi tên kênh của nó); nghe thử, xem trước, tải xuống như trong một kênh, file tải về vào thư mục của kênh gốc. Thanh **▶ Phát** ở đầu danh sách: chọn *Tất cả kênh — theo danh sách* (mặc định) hoặc một kênh (danh sách chỉ còn bài của kênh đó) rồi bấm **Phát**; hết bài sẽ tự phát bài kế tiếp theo đúng thứ tự đang hiện (bỏ qua video / ảnh / tài liệu). Tự phát bài kế tiếp cũng áp dụng trong từng kênh. Lưu riêng cho từng tài khoản Telegram (`favorites.json`; bản trình duyệt lưu trong trình duyệt).
+**Bài hát yêu thích ♥:** bấm trái tim ở cuối mỗi dòng để thêm / bỏ một bài. Mục **♥ Bài hát yêu thích** ở đầu cột kênh mở danh sách **tất cả** bài đã thả tim, từ mọi kênh (mới thả tim nhất ở trên, mỗi bài ghi tên kênh của nó); nghe thử, xem trước, tải xuống như trong một kênh, file tải về vào thư mục của kênh gốc. Thanh **▶ Phát** ở đầu danh sách: chọn _Tất cả kênh — theo danh sách_ (mặc định) hoặc một kênh (danh sách chỉ còn bài của kênh đó) rồi bấm **Phát**; hết bài sẽ tự phát bài kế tiếp theo đúng thứ tự đang hiện (bỏ qua video / ảnh / tài liệu). Tự phát bài kế tiếp cũng áp dụng trong từng kênh. Lưu riêng cho từng tài khoản Telegram (`favorites.json`; bản trình duyệt lưu trong trình duyệt).
 
-**Lịch sử tải:** nút **Lịch sử** trên thanh trên cùng bật/tắt cột lịch sử (lưu ở `history.json`, còn nguyên sau khi tắt server). Mỗi mục có 📂 mở thư mục chứa file và 🗑 xoá khỏi lịch sử; có nút *Xoá toàn bộ lịch sử*. Xoá lịch sử **không xoá file** trên máy.
+**Lịch sử tải:** nút **Lịch sử** trên thanh trên cùng bật/tắt cột lịch sử (lưu ở `history.json`, còn nguyên sau khi tắt server). Mỗi mục có 📂 mở thư mục chứa file và 🗑 xoá khỏi lịch sử; có nút _Xoá toàn bộ lịch sử_. Xoá lịch sử **không xoá file** trên máy.
 
-**Sắp xếp:** ô *Sắp xếp* trên thanh công cụ hoặc bấm tiêu đề cột — `#` (mới nhất / cũ nhất), *Tên bài* (A→Z / Z→A), *Dung lượng* (bấm lần lượt: lớn→nhỏ, nhỏ→lớn, thời lượng dài→ngắn, ngắn→dài). Mặc định là thứ tự trong kênh (mới nhất trước); tải lại trang sẽ về mặc định. Sắp xếp kết hợp được với tìm kiếm và bộ lọc *Chưa tải / Đã tải*.
+**Sắp xếp:** ô _Sắp xếp_ trên thanh công cụ hoặc bấm tiêu đề cột — `#` (mới nhất / cũ nhất), _Tên bài_ (A→Z / Z→A), _Dung lượng_ (bấm lần lượt: lớn→nhỏ, nhỏ→lớn, thời lượng dài→ngắn, ngắn→dài). Mặc định là thứ tự trong kênh (mới nhất trước); tải lại trang sẽ về mặc định. Sắp xếp kết hợp được với tìm kiếm và bộ lọc _Chưa tải / Đã tải_.
 
 Tên hiển thị là tên Telegram hiện (Ca sĩ – Tên bài trong tag); nếu khác tên file thì tên file hiện ở dòng nhỏ bên dưới. Ô tìm kiếm tìm theo cả hai, không phân biệt dấu.
 
@@ -72,28 +72,28 @@ node index.js --chat me                            # Saved Messages
 
 Sau khi quét kênh, tool hiện danh sách dạng checkbox:
 
-| Phím | Tác dụng |
-|---|---|
-| `↑` `↓` / `PgUp` `PgDn` / `Home` `End` | di chuyển |
-| `Space` | chọn / bỏ chọn bài đang trỏ |
-| gõ chữ | tìm theo tên (`Backspace` xoá, `Esc` xoá ô tìm) |
-| `Ctrl+A` | chọn tất cả bài đang hiển thị (dùng kèm tìm kiếm) |
-| `Ctrl+D` | bỏ chọn tất cả |
-| `Enter` | xác nhận |
-| `Esc` (khi ô tìm trống) / `Ctrl+C` | thoát |
+| Phím                                   | Tác dụng                                          |
+| -------------------------------------- | ------------------------------------------------- |
+| `↑` `↓` / `PgUp` `PgDn` / `Home` `End` | di chuyển                                         |
+| `Space`                                | chọn / bỏ chọn bài đang trỏ                       |
+| gõ chữ                                 | tìm theo tên (`Backspace` xoá, `Esc` xoá ô tìm)   |
+| `Ctrl+A`                               | chọn tất cả bài đang hiển thị (dùng kèm tìm kiếm) |
+| `Ctrl+D`                               | bỏ chọn tất cả                                    |
+| `Enter`                                | xác nhận                                          |
+| `Esc` (khi ô tìm trống) / `Ctrl+C`     | thoát                                             |
 
 Sau `Enter`, tool in danh sách đã chọn + tổng dung lượng và hỏi `Start download?`:
 `Enter`/`y` = bắt đầu tải, `n` = quay lại danh sách (giữ nguyên lựa chọn), `q` = thoát.
 Bài có dấu `✓` là đã tải trước đó.
 
-| Tuỳ chọn | Mô tả |
-|---|---|
-| `-c, --chat` | username, @username, link t.me, ID số, hoặc `me` |
-| `-t, --type` | `all` (mặc định), `music`, `video`, `photo`, `document`, `voice` |
-| `-a, --all` | tải tất cả, bỏ qua bước chọn |
-| `-o, --out` | thư mục lưu (mặc định `downloads/<tên chat>`) |
-| `-l, --limit` | số tin nhắn tối đa cần quét |
-| `-j, --concurrency` | số file tải song song (mặc định 3) |
+| Tuỳ chọn            | Mô tả                                                            |
+| ------------------- | ---------------------------------------------------------------- |
+| `-c, --chat`        | username, @username, link t.me, ID số, hoặc `me`                 |
+| `-t, --type`        | `all` (mặc định), `music`, `video`, `photo`, `document`, `voice` |
+| `-a, --all`         | tải tất cả, bỏ qua bước chọn                                     |
+| `-o, --out`         | thư mục lưu (mặc định `downloads/<tên chat>`)                    |
+| `-l, --limit`       | số tin nhắn tối đa cần quét                                      |
+| `-j, --concurrency` | số file tải song song (mặc định 3)                               |
 
 - Chạy lại sẽ bỏ qua file đã tải đủ dung lượng (resume được).
 - File đang tải có đuôi `.part`, chỉ đổi tên khi tải xong.
@@ -104,7 +104,7 @@ Bài có dấu `✓` là đã tải trước đó.
 Vercel không chạy được `server.js` (response tối đa 4,5 MB, function sống tối đa vài phút, không có ổ đĩa lâu dài), nên bản Vercel **chạy Telegram ngay trong trình duyệt của từng người** (GramJS qua WebSocket tới `*.web.telegram.org`). Vercel chỉ phục vụ file tĩnh:
 
 - Mỗi người tự đăng nhập Telegram bằng tài khoản mình; phiên, cài đặt, lịch sử nằm **trong trình duyệt của họ** — không server nào giữ phiên của ai.
-- File tải **thẳng từ Telegram về máy người dùng**: Chrome/Edge (máy tính) chọn được thư mục thật; Firefox/Safari/điện thoại lưu vào thư mục *Tải về* của trình duyệt (stream qua Service Worker, không giữ cả file trong RAM).
+- File tải **thẳng từ Telegram về máy người dùng**: Chrome/Edge (máy tính) chọn được thư mục thật; Firefox/Safari/điện thoại lưu vào thư mục _Tải về_ của trình duyệt (stream qua Service Worker, không giữ cả file trong RAM).
 - Nghe/xem trước, tua, sắp xếp, lịch sử… giống bản local. Không có: nút mở thư mục trên máy.
 
 ```bash
@@ -122,27 +122,27 @@ Mã nguồn: https://github.com/doandc701/tele-downloader (riêng tư). Dự án
 
 Vẫn có thể deploy tay khi cần: `npx vercel --prod`.
 
-> Một số mạng (công ty / nhà mạng) chặn dải IP mới của `*.vercel.app` nên trang không mở được. Cách khắc phục bền vững là gắn tên miền riêng cho dự án trên Vercel (*Settings → Domains*).
+> Một số mạng (công ty / nhà mạng) chặn dải IP mới của `*.vercel.app` nên trang không mở được. Cách khắc phục bền vững là gắn tên miền riêng cho dự án trên Vercel (_Settings → Domains_).
 
 ### Triển khai
 
 1. Cài CLI và đăng nhập: `npm i -g vercel` rồi `vercel login`.
 2. Trong thư mục dự án: `vercel` (bản xem thử) → kiểm tra → `vercel --prod`.
-   (Hoặc đẩy mã lên GitHub rồi *Import Project* trên vercel.com — `vercel.json` đã có sẵn lệnh build.)
-3. Tuỳ chọn — biến môi trường trên Vercel (*Settings → Environment Variables*):
+   (Hoặc đẩy mã lên GitHub rồi _Import Project_ trên vercel.com — `vercel.json` đã có sẵn lệnh build.)
+3. Tuỳ chọn — biến môi trường trên Vercel (_Settings → Environment Variables_):
    - `TG_API_ID`, `TG_API_HASH`: gắn sẵn API của bạn → người dùng chỉ cần số điện thoại + mã.
      Lưu ý: hai giá trị này **nằm công khai trong file JS** (như mọi web client Telegram) và mọi người dùng chung một ứng dụng; nếu ai đó lạm dụng, Telegram có thể khoá cả ứng dụng.
    - Bỏ trống: mỗi người tự nhập API ID/hash của họ (tạo ở my.telegram.org) ở lần đầu.
 
 `.vercelignore` đảm bảo `session.txt`, `.env`, `.ui-token`, lịch sử, cài đặt và thư mục `downloads/` **không bao giờ** bị tải lên Vercel.
 
-**Đăng nhập bằng mã QR:** ở bước nhập số điện thoại, bấm *Đăng nhập bằng mã QR* rồi trên điện thoại mở Telegram → **Cài đặt → Thiết bị → Liên kết thiết bị máy tính** và quét mã (mã tự đổi mỗi 30 giây). Không cần mã OTP; mỗi máy là một thiết bị riêng trong Telegram, gỡ được từng máy. Tài khoản bật xác minh 2 bước vẫn được hỏi mật khẩu.
+**Đăng nhập bằng mã QR:** ở bước nhập số điện thoại, bấm _Đăng nhập bằng mã QR_ rồi trên điện thoại mở Telegram → **Cài đặt → Thiết bị → Liên kết thiết bị máy tính** và quét mã (mã tự đổi mỗi 30 giây). Không cần mã OTP; mỗi máy là một thiết bị riêng trong Telegram, gỡ được từng máy. Tài khoản bật xác minh 2 bước vẫn được hỏi mật khẩu.
 
 ## Lưu dữ liệu lên MongoDB Atlas (tuỳ chọn)
 
 Mặc định dữ liệu chỉ nằm trên máy (bản chạy trên máy) hoặc trong trình duyệt (bản Vercel). Bật MongoDB thì **cài đặt, lịch sử tải, hội thoại hiển thị, yêu thích, cách kết nối API và phiên đăng nhập Telegram** được lưu thêm lên MongoDB. Phiên Telegram và API hash tự tạo được **mã hoá AES-256-GCM** trước khi lưu. Mất kết nối MongoDB thì app vẫn chạy bằng dữ liệu cục bộ và tự đồng bộ lại sau. Trạng thái xem ở **⚙ Cài đặt → Lưu trữ đám mây**.
 
-1. Tạo cluster miễn phí ở [MongoDB Atlas](https://www.mongodb.com/atlas) → *Database Access*: tạo user · *Network Access*: cho phép IP của máy (bản Vercel: `0.0.0.0/0`, vì Vercel không có IP cố định) → *Connect → Drivers*: copy chuỗi kết nối `mongodb+srv://…`.
+1. Tạo cluster miễn phí ở [MongoDB Atlas](https://www.mongodb.com/atlas) → _Database Access_: tạo user · _Network Access_: cho phép IP của máy (bản Vercel: `0.0.0.0/0`, vì Vercel không có IP cố định) → _Connect → Drivers_: copy chuỗi kết nối `mongodb+srv://…`.
 2. **Bản chạy trên máy:** điền vào `.env` (xem `.env.example`):
    ```
    MONGODB_URI=mongodb+srv://user:matkhau@cluster0.xxxxx.mongodb.net/

@@ -9,21 +9,41 @@ const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..")
 const DIST = path.join(ROOT, "dist");
 const PORT = Number(process.env.PORT) || 4173;
 const config = JSON.parse(fs.readFileSync(path.join(ROOT, "vercel.json"), "utf8"));
-const TYPES = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".png": "image/png", ".json": "application/json" };
+const TYPES = {
+  ".html": "text/html; charset=utf-8",
+  ".js": "text/javascript; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".png": "image/png",
+  ".json": "application/json",
+};
 
 // vercel.json "source" patterns are path-to-regexp; the few used here translate directly.
-const rules = config.headers.map((h) => ({ re: new RegExp(`^${h.source.replace(/\(\.\*\)/g, ".*")}$`), headers: h.headers }));
+const rules = config.headers.map((h) => ({
+  re: new RegExp(`^${h.source.replace(/\(\.\*\)/g, ".*")}$`),
+  headers: h.headers,
+}));
 
 // /api/cloud/* like the Vercel function, when MONGODB_URI + TDL_SECRET are in .env / the environment.
 const envFile = (() => {
   try {
-    return Object.fromEntries(fs.readFileSync(path.join(ROOT, ".env"), "utf8").split(/\r?\n/)
-      .map((l) => /^\s*([A-Z_]+)\s*=\s*(.*?)\s*$/.exec(l)).filter(Boolean).map((m) => [m[1], m[2].replace(/^["']|["']$/g, "")]));
+    return Object.fromEntries(
+      fs
+        .readFileSync(path.join(ROOT, ".env"), "utf8")
+        .split(/\r?\n/)
+        .map((l) => /^\s*([A-Z_]+)\s*=\s*(.*?)\s*$/.exec(l))
+        .filter(Boolean)
+        .map((m) => [m[1], m[2].replace(/^["']|["']$/g, "")]),
+    );
   } catch {
     return {};
   }
 })();
-const cloudEnv = { ...envFile, ...process.env, TG_API_ID: process.env.TG_API_ID || envFile.API_ID, TG_API_HASH: process.env.TG_API_HASH || envFile.API_HASH };
+const cloudEnv = {
+  ...envFile,
+  ...process.env,
+  TG_API_ID: process.env.TG_API_ID || envFile.API_ID,
+  TG_API_HASH: process.env.TG_API_HASH || envFile.API_HASH,
+};
 const { createCloudApi, verifyWithTelegram } = await import("../cloud/api.js");
 const cloud = createCloudApi({ env: cloudEnv, verify: verifyWithTelegram });
 
@@ -34,7 +54,8 @@ const server = http
     if (cloudAction) return cloud(req, res, cloudAction);
     let file = path.normalize(path.join(DIST, decodeURIComponent(url.pathname)));
     if (!file.startsWith(DIST)) return res.writeHead(403).end();
-    if (url.pathname === "/" || (fs.existsSync(file) && fs.statSync(file).isDirectory())) file = path.join(DIST, "index.html");
+    if (url.pathname === "/" || (fs.existsSync(file) && fs.statSync(file).isDirectory()))
+      file = path.join(DIST, "index.html");
     for (const r of rules) if (r.re.test(url.pathname)) for (const h of r.headers) res.setHeader(h.key, h.value);
     if (!fs.existsSync(file)) return res.writeHead(404).end("Not found");
     res.writeHead(200, { "Content-Type": TYPES[path.extname(file)] || "application/octet-stream" });
@@ -44,14 +65,20 @@ const server = http
     const url = `http://127.0.0.1:${PORT}`;
     console.log(`Bản trình duyệt (giống Vercel): ${url}   — Ctrl+C để dừng`);
     if (process.argv.includes("--open")) {
-      const cmd = process.env.TDL_OPEN_CMD || (process.platform === "darwin" ? "open" : process.platform === "win32" ? "explorer" : "xdg-open");
-      spawn(cmd, [url], { detached: true, stdio: "ignore" }).on("error", () => {}).unref();
+      const cmd =
+        process.env.TDL_OPEN_CMD ||
+        (process.platform === "darwin" ? "open" : process.platform === "win32" ? "explorer" : "xdg-open");
+      spawn(cmd, [url], { detached: true, stdio: "ignore" })
+        .on("error", () => {})
+        .unref();
     }
   });
 
 server.on("error", (err) => {
-  console.error(err.code === "EADDRINUSE"
-    ? `Cổng ${PORT} đang bị chương trình khác dùng. Tắt nó đi, hoặc chạy với cổng khác: PORT=4174 npm run preview:web`
-    : `Không khởi động được: ${err.message}`);
+  console.error(
+    err.code === "EADDRINUSE"
+      ? `Cổng ${PORT} đang bị chương trình khác dùng. Tắt nó đi, hoặc chạy với cổng khác: PORT=4174 npm run preview:web`
+      : `Không khởi động được: ${err.message}`,
+  );
   process.exit(1);
 });

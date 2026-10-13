@@ -208,10 +208,10 @@ function pickFilesTui(jobs, outDir, title, selected = new Set()) {
     lines.push("");
     lines.push(
       `\x1b[1mSelected: ${selected.size}\x1b[0m (${formatBytes(selectedBytes())})` +
-        `   \x1b[90m${view.length ? cursor + 1 : 0}/${view.length}  ✓ = downloaded\x1b[0m`
+        `   \x1b[90m${view.length ? cursor + 1 : 0}/${view.length}  ✓ = downloaded\x1b[0m`,
     );
     lines.push(
-      "\x1b[90m↑↓ move · PgUp/PgDn · Space tick · Ctrl+A tick all shown · Ctrl+D untick all · Enter confirm · Esc clear search/quit\x1b[0m"
+      "\x1b[90m↑↓ move · PgUp/PgDn · Space tick · Ctrl+A tick all shown · Ctrl+D untick all · Enter confirm · Esc clear search/quit\x1b[0m",
     );
     write("\x1b[H" + lines.map((l) => l + "\x1b[K").join("\n") + "\x1b[J");
   };
@@ -423,7 +423,7 @@ async function downloadAll(client, opts) {
 
   console.log(
     `\nDone. Found ${stats.found}, downloaded ${stats.done} (${formatBytes(stats.bytes)}), ` +
-      `skipped ${stats.skipped}, failed ${stats.failed}.`
+      `skipped ${stats.skipped}, failed ${stats.failed}.`,
   );
 }
 
@@ -444,7 +444,14 @@ async function main() {
   });
 
   if (values.help) {
-    console.log(fs.readFileSync(new URL(import.meta.url), "utf8").split("\n").slice(1, 18).map((l) => l.replace(/^\/\/ ?/, "")).join("\n"));
+    console.log(
+      fs
+        .readFileSync(new URL(import.meta.url), "utf8")
+        .split("\n")
+        .slice(1, 18)
+        .map((l) => l.replace(/^\/\/ ?/, ""))
+        .join("\n"),
+    );
     return;
   }
   if (!(values.type in FILTERS)) {

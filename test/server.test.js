@@ -54,7 +54,11 @@ async function api(pathname, { method = "GET", body, headers = {} } = {}) {
   });
   const text = await res.text();
   let data;
-  try { data = JSON.parse(text); } catch { data = text; }
+  try {
+    data = JSON.parse(text);
+  } catch {
+    data = text;
+  }
   return { status: res.status, data, headers: res.headers };
 }
 
@@ -99,7 +103,21 @@ before(async () => {
   server = spawn(process.execPath, ["server.js", "--open"], {
     cwd: ROOT,
     // Isolated settings/history, and no DOWNLOAD_DIR: the server starts with no download folder.
-    env: { ...process.env, PORT: String(port), DOWNLOAD_DIR: "", SETTINGS_FILE: path.join(TMP, "settings.json"), HISTORY_FILE: path.join(TMP, "history.json"), UI_TOKEN: TOKEN, TOKEN_FILE: path.join(TMP, ".ui-token"), TDL_OPEN_CMD: OPENER, API_FILE: path.join(TMP, "api.json"), VISIBLE_CHATS_FILE: path.join(TMP, "visible-chats.json"), FAVORITES_FILE: path.join(TMP, "favorites.json"), MONGODB_URI: "" },
+    env: {
+      ...process.env,
+      PORT: String(port),
+      DOWNLOAD_DIR: "",
+      SETTINGS_FILE: path.join(TMP, "settings.json"),
+      HISTORY_FILE: path.join(TMP, "history.json"),
+      UI_TOKEN: TOKEN,
+      TOKEN_FILE: path.join(TMP, ".ui-token"),
+      TDL_OPEN_CMD: OPENER,
+      API_FILE: path.join(TMP, "api.json"),
+      VISIBLE_CHATS_FILE: path.join(TMP, "visible-chats.json"),
+      FAVORITES_FILE: path.join(TMP, "favorites.json"),
+      RECENT_FILE: path.join(TMP, "recent.json"),
+      MONGODB_URI: "",
+    },
     stdio: ["ignore", "pipe", "pipe"],
   });
   await new Promise((resolve, reject) => {
@@ -137,13 +155,20 @@ describe("http basics", () => {
   test("status reports the auth step", async () => {
     const { status, data } = await api("/api/status");
     assert.equal(status, 200);
-    assert.ok(["ready", "api_choice", "api_id", "api_hash", "phone", "code", "password", "error"].includes(data.step), data.step);
+    assert.ok(
+      ["ready", "api_choice", "api_id", "api_hash", "phone", "code", "password", "error"].includes(data.step),
+      data.step,
+    );
   });
 });
 
 describe("security", () => {
   test("rejects requests from another origin", async () => {
-    const { status } = await api("/api/cancel", { method: "POST", body: {}, headers: { Origin: "http://evil.example" } });
+    const { status } = await api("/api/cancel", {
+      method: "POST",
+      body: {},
+      headers: { Origin: "http://evil.example" },
+    });
     assert.equal(status, 403);
   });
 
@@ -152,7 +177,10 @@ describe("security", () => {
     const { port } = new URL(base);
     const status = await new Promise((resolve, reject) => {
       const sock = net.connect(Number(port), "127.0.0.1", () =>
-        sock.write(`GET /api/status HTTP/1.1\r\nHost: evil.example:${port}\r\nCookie: ${COOKIE}\r\nConnection: close\r\n\r\n`));
+        sock.write(
+          `GET /api/status HTTP/1.1\r\nHost: evil.example:${port}\r\nCookie: ${COOKIE}\r\nConnection: close\r\n\r\n`,
+        ),
+      );
       let out = "";
       sock.on("data", (d) => (out += d));
       sock.on("end", () => resolve(Number(out.split(" ")[1])));
@@ -163,20 +191,32 @@ describe("security", () => {
 
   test("POST requires a JSON content type (blocks simple cross-site form posts)", async () => {
     // /api/settings works signed in or not, so this checks only the content-type rule
-    const res = await authed(base + "/api/settings", { method: "POST", headers: { "Content-Type": "text/plain" }, body: "{}" });
+    const res = await authed(base + "/api/settings", {
+      method: "POST",
+      headers: { "Content-Type": "text/plain" },
+      body: "{}",
+    });
     assert.equal(res.status, 415);
   });
 
   test("R9: oversized body is 413, malformed JSON is 400, server stays up", async () => {
     const big = "a".repeat(1_100_000);
-    const r1 = await authed(base + "/api/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ x: big }) });
+    const r1 = await authed(base + "/api/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ x: big }),
+    });
     assert.equal(r1.status, 413);
-    const r2 = await authed(base + "/api/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{not json" });
+    const r2 = await authed(base + "/api/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{not json",
+    });
     assert.equal(r2.status, 400);
     assert.equal((await authed(base + "/api/status")).status, 200); // still alive
   });
 
-    test("login input is refused when the server is not waiting for it", async () => {
+  test("login input is refused when the server is not waiting for it", async () => {
     const { status } = await api("/api/login", { method: "POST", body: { kind: "code", value: "12345" } });
     assert.equal(status, 409);
   });
@@ -186,14 +226,25 @@ describe("security hardening (R1-R7)", () => {
   const plain = (p, opts) => fetch(base + p, opts); // no cookie: another OS user / another program
 
   test("R3/R4: without the token every API and the page are locked", async () => {
-    for (const p of ["/api/status", "/api/dialogs", "/api/settings", "/api/history", `/api/fs?path=${encodeURIComponent(os.homedir())}`, "/api/events"]) {
+    for (const p of [
+      "/api/status",
+      "/api/dialogs",
+      "/api/settings",
+      "/api/history",
+      `/api/fs?path=${encodeURIComponent(os.homedir())}`,
+      "/api/events",
+    ]) {
       const res = await plain(p);
       assert.equal(res.status, 401, p);
       const body = await res.json();
       assert.equal(body.code, "NEED_TOKEN");
       assert.ok(!JSON.stringify(body).includes("phone"), "nothing about the account leaks");
     }
-    const post = await plain("/api/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ downloadDir: TMP }) });
+    const post = await plain("/api/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ downloadDir: TMP }),
+    });
     assert.equal(post.status, 401);
     const page = await plain("/");
     assert.equal(page.status, 401);
@@ -202,7 +253,11 @@ describe("security hardening (R1-R7)", () => {
 
   test("R3: a wrong or truncated token is rejected", async () => {
     for (const bad of ["x", TOKEN.slice(0, -1), TOKEN + "x", ""]) {
-      assert.equal((await plain("/api/status", { headers: { Cookie: `tdl_token=${encodeURIComponent(bad)}` } })).status, 401, bad);
+      assert.equal(
+        (await plain("/api/status", { headers: { Cookie: `tdl_token=${encodeURIComponent(bad)}` } })).status,
+        401,
+        bad,
+      );
       assert.equal((await plain(`/?token=${encodeURIComponent(bad)}`, { redirect: "manual" })).status, 401, bad);
     }
   });
@@ -256,7 +311,11 @@ describe("security hardening (R1-R7)", () => {
   });
 
   test("the page's css/js files are served (with a token), nothing else from public/", async () => {
-    for (const [p, type] of [["/css/styles.css", /text\/css/], ["/js/theme.js", /javascript/], ["/js/ui.js", /javascript/]]) {
+    for (const [p, type] of [
+      ["/css/styles.css", /text\/css/],
+      ["/js/theme.js", /javascript/],
+      ["/js/ui.js", /javascript/],
+    ]) {
       const res = await authed(base + p);
       assert.equal(res.status, 200, p);
       assert.match(res.headers.get("content-type"), type, p);
@@ -267,7 +326,9 @@ describe("security hardening (R1-R7)", () => {
     const logo = await authed(base + "/img/logo-192.png");
     assert.equal(logo.status, 200);
     assert.equal(logo.headers.get("content-type"), "image/png");
-    assert.ok(Buffer.from(await logo.arrayBuffer()).equals(fs.readFileSync(path.join(ROOT, "public/img/logo-192.png"))));
+    assert.ok(
+      Buffer.from(await logo.arrayBuffer()).equals(fs.readFileSync(path.join(ROOT, "public/img/logo-192.png"))),
+    );
     for (const p of ["/index.html/../server.js", "/js/../../.env", "/js/", "/css/x.css", "/public/index.html"]) {
       assert.equal((await authed(base + p)).status, 404, p);
     }
@@ -292,12 +353,20 @@ describe("security hardening (R1-R7)", () => {
 describe("validation", () => {
   test("cancel by chat: keys must be a list of strings; unknown keys cancel nothing", async () => {
     for (const keys of ["x", [1], [{}], Array(1001).fill("k"), ["k".repeat(201)]]) {
-      assert.equal((await api("/api/cancel", { method: "POST", body: { keys } })).status, 400, JSON.stringify(keys).slice(0, 30));
+      assert.equal(
+        (await api("/api/cancel", { method: "POST", body: { keys } })).status,
+        400,
+        JSON.stringify(keys).slice(0, 30),
+      );
     }
     const r = await api("/api/cancel", { method: "POST", body: { keys: ["123|music"] } });
     assert.equal(r.status, 200);
     assert.deepEqual(r.data, { cancelled: 0 });
-    assert.deepEqual((await api("/api/cancel", { method: "POST", body: {} })).data, { cancelled: 0 }, "no keys: all queued, as before");
+    assert.deepEqual(
+      (await api("/api/cancel", { method: "POST", body: {} })).data,
+      { cancelled: 0 },
+      "no keys: all queued, as before",
+    );
   });
 
   test("media for an unknown scan is 404", async () => {
@@ -338,7 +407,10 @@ describe("settings & folder browser", () => {
   });
 
   test("rejects a folder that does not exist", async () => {
-    const { status, data } = await api("/api/settings", { method: "POST", body: { downloadDir: path.join(TMP, "nope") } });
+    const { status, data } = await api("/api/settings", {
+      method: "POST",
+      body: { downloadDir: path.join(TMP, "nope") },
+    });
     assert.equal(status, 400);
     assert.match(data.error, /không tồn tại/);
   });
@@ -369,7 +441,10 @@ describe("settings & folder browser", () => {
   });
 
   test("saves settings to the settings file", async () => {
-    const { data } = await api("/api/settings", { method: "POST", body: { downloadDir: FS_DIR, subfolderPerChat: false } });
+    const { data } = await api("/api/settings", {
+      method: "POST",
+      body: { downloadDir: FS_DIR, subfolderPerChat: false },
+    });
     assert.deepEqual(data, { downloadDir: FS_DIR, subfolderPerChat: false });
     assert.deepEqual(JSON.parse(fs.readFileSync(path.join(TMP, "settings.json"), "utf8")), data);
     // back to "no folder" so the download tests can exercise the ask-for-a-folder flow
@@ -402,13 +477,21 @@ describe("telegram (real account)", () => {
     assert.match(me.id, /^\d+$/, "status tells which account is signed in");
     assert.deepEqual((await api("/api/visible-chats")).data, { ids: null }, "nothing chosen yet: show all");
     const ids = (await api("/api/dialogs")).data.slice(0, 2).map((d) => d.id);
-    assert.deepEqual((await api("/api/visible-chats", { method: "POST", body: { ids: [...ids, ids[0]] } })).data, { ids }, "deduplicated");
+    assert.deepEqual(
+      (await api("/api/visible-chats", { method: "POST", body: { ids: [...ids, ids[0]] } })).data,
+      { ids },
+      "deduplicated",
+    );
     assert.deepEqual((await api("/api/visible-chats")).data, { ids });
     const stored = JSON.parse(fs.readFileSync(path.join(TMP, "visible-chats.json"), "utf8"));
     assert.deepEqual(stored, { [me.id]: ids }, "kept under the account id");
     assert.equal(fs.statSync(path.join(TMP, "visible-chats.json")).mode & 0o777, 0o600);
     for (const bad of ["1", [1.5], ["abc"], ["1; rm"], [{}], Array(10001).fill("1")]) {
-      assert.equal((await api("/api/visible-chats", { method: "POST", body: { ids: bad } })).status, 400, JSON.stringify(bad).slice(0, 30));
+      assert.equal(
+        (await api("/api/visible-chats", { method: "POST", body: { ids: bad } })).status,
+        400,
+        JSON.stringify(bad).slice(0, 30),
+      );
     }
     assert.deepEqual((await api("/api/visible-chats", { method: "POST", body: { ids: null } })).data, { ids: null });
     assert.deepEqual(JSON.parse(fs.readFileSync(path.join(TMP, "visible-chats.json"), "utf8")), {});
@@ -418,7 +501,8 @@ describe("telegram (real account)", () => {
     if (!ready) return t.skip("no logged-in session.txt");
     // needs a chat that takes several seconds to scan (thousands of files), else it ends before we leave
     const chat = process.env.TEST_BIG_CHAT || "KenhNhacThanhPho";
-    if (!(await api("/api/dialogs")).data.some((d) => d.username === chat || d.id === chat)) return t.skip(`not a member of ${chat}`);
+    if (!(await api("/api/dialogs")).data.some((d) => d.username === chat || d.id === chat))
+      return t.skip(`not a member of ${chat}`);
     const counts = [];
     const first = await listen((ev, d) => {
       if (ev === "scan" && d.chat === chat) counts.push(d);
@@ -438,10 +522,13 @@ describe("telegram (real account)", () => {
   test("a scan id that is not short and plain is dropped from the progress events", { timeout: 60_000 }, async (t) => {
     if (!ready) return t.skip("no logged-in session.txt");
     const chat = process.env.TEST_BIG_CHAT || "KenhNhacThanhPho";
-    if (!(await api("/api/dialogs")).data.some((d) => d.username === chat || d.id === chat)) return t.skip(`not a member of ${chat}`);
+    if (!(await api("/api/dialogs")).data.some((d) => d.username === chat || d.id === chat))
+      return t.skip(`not a member of ${chat}`);
     const first = await listen((ev, d) => ev === "scan" && d.chat === chat, 40_000);
     const ctrl = new AbortController();
-    const req = authed(`${base}/api/files?chat=${chat}&type=all&scan=${encodeURIComponent("<img src=x>")}`, { signal: ctrl.signal }).catch((e) => e);
+    const req = authed(`${base}/api/files?chat=${chat}&type=all&scan=${encodeURIComponent("<img src=x>")}`, {
+      signal: ctrl.signal,
+    }).catch((e) => e);
     assert.equal((await first.done).scanId, null);
     ctrl.abort();
     await req;
@@ -455,14 +542,59 @@ describe("telegram (real account)", () => {
     assert.deepEqual((await post({ id: "-1001|5", on: true })).data, { ids: ["-1001|5"] });
     assert.deepEqual((await post({ id: "42|7", on: true })).data, { ids: ["42|7", "-1001|5"] }, "newest first");
     assert.deepEqual((await post({ id: "42|7", on: true })).data, { ids: ["42|7", "-1001|5"] }, "no duplicates");
-    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(TMP, "favorites.json"), "utf8")), { [me.id]: ["42|7", "-1001|5"] });
+    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(TMP, "favorites.json"), "utf8")), {
+      [me.id]: ["42|7", "-1001|5"],
+    });
     assert.equal(fs.statSync(path.join(TMP, "favorites.json")).mode & 0o777, 0o600);
-    for (const bad of [{ id: "42", on: true }, { id: "a|1", on: true }, { id: "1|2", on: "yes" }, { id: ["1|2"], on: true }, { id: "1|2|3", on: true }]) {
+    for (const bad of [
+      { id: "42", on: true },
+      { id: "a|1", on: true },
+      { id: "1|2", on: "yes" },
+      { id: ["1|2"], on: true },
+      { id: "1|2|3", on: true },
+    ]) {
       assert.equal((await post(bad)).status, 400, JSON.stringify(bad));
     }
     assert.deepEqual((await post({ id: "42|7", on: false })).data, { ids: ["-1001|5"] });
     assert.deepEqual((await post({ id: "-1001|5", on: false })).data, { ids: [] });
-    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(TMP, "favorites.json"), "utf8")), {}, "empty lists are not kept");
+    assert.deepEqual(
+      JSON.parse(fs.readFileSync(path.join(TMP, "favorites.json"), "utf8")),
+      {},
+      "empty lists are not kept",
+    );
+  });
+
+  test("recent plays: added to the top, validated, removed, cleared (per account)", async (t) => {
+    if (!ready) return t.skip("no logged-in session.txt");
+    const post = (body) => api("/api/recent", { method: "POST", body });
+    assert.deepEqual((await api("/api/recent")).data, { items: [] });
+    await post({ op: "add", entry: { id: "-100123|5", at: 1, name: "a.mp3", title: "A", chat: "Kênh" } });
+    await post({ op: "add", entry: { id: "-100123|6", at: 2, name: "b.mp3" } });
+    const again = await post({ op: "add", entry: { id: "-100123|5", at: 3, name: "a.mp3", title: "A", chat: "Kênh" } });
+    assert.deepEqual(
+      again.data.items.map((h) => h.id),
+      ["-100123|5", "-100123|6"],
+      "played again: back on top, not twice",
+    );
+    for (const bad of [
+      { op: "add", entry: { id: "nope" } },
+      { op: "add", entry: { id: "1|1", x: { a: 1 } } },
+      { op: "drop" },
+      { op: "remove", id: 5 },
+    ]) {
+      assert.equal((await post(bad)).status, 400, JSON.stringify(bad));
+    }
+    assert.deepEqual(
+      (await post({ op: "remove", id: "-100123|6" })).data.items.map((h) => h.id),
+      ["-100123|5"],
+    );
+    const me = (await api("/api/status")).data.me.id;
+    assert.deepEqual(
+      Object.keys(JSON.parse(fs.readFileSync(path.join(TMP, "recent.json"), "utf8"))),
+      [me],
+      "kept under the account id",
+    );
+    assert.deepEqual((await post({ op: "clear" })).data.items, []);
   });
 
   test("scans a chat for music", async (t) => {
@@ -551,7 +683,9 @@ describe("telegram (real account)", () => {
 
   test("the downloaded file can be streamed with Range (seek in player)", async (t) => {
     if (!scan || !file) return t.skip("nothing downloaded");
-    const res = await authed(`${base}/api/media?key=${encodeURIComponent(scan.key)}&id=${file.id}`, { headers: { Range: "bytes=100-199" } });
+    const res = await authed(`${base}/api/media?key=${encodeURIComponent(scan.key)}&id=${file.id}`, {
+      headers: { Range: "bytes=100-199" },
+    });
     assert.equal(res.status, 206);
     assert.equal(res.headers.get("content-range"), `bytes 100-199/${file.size}`);
     assert.equal((await res.arrayBuffer()).byteLength, 100);
@@ -617,7 +751,8 @@ describe("telegram (real account)", () => {
 
   test("downloaded flags follow the default folder (GET /api/scan, no rescan)", async (t) => {
     if (!outDir) return t.skip("nothing downloaded");
-    const flag = async () => (await api(`/api/scan?key=${encodeURIComponent(scan.key)}`)).data.files.find((f) => f.id === file.id).downloaded;
+    const flag = async () =>
+      (await api(`/api/scan?key=${encodeURIComponent(scan.key)}`)).data.files.find((f) => f.id === file.id).downloaded;
     assert.equal(await flag(), true);
     await api("/api/settings", { method: "POST", body: { downloadDir: FS_DIR } });
     assert.equal(await flag(), false, "not in the new default folder and no history left");
@@ -629,9 +764,18 @@ describe("telegram (real account)", () => {
     if (!scan || !outDir) return t.skip("nothing downloaded");
     const big = scan.files.find((f) => f.id !== file.id && f.size > 8 * 1024 ** 2);
     if (!big) return t.skip("no file big enough to stop half-way");
-    const started = await listen((ev, d) => ev === "job" && d.msgId === big.id && d.status === "downloading" && d.received > 0, 60_000);
-    const ended = await listen((ev, d) => ev === "job" && d.msgId === big.id && ["cancelled", "done", "failed"].includes(d.status), 110_000);
-    assert.equal((await api("/api/download", { method: "POST", body: { key: scan.key, ids: [big.id] } })).data.added, 1);
+    const started = await listen(
+      (ev, d) => ev === "job" && d.msgId === big.id && d.status === "downloading" && d.received > 0,
+      60_000,
+    );
+    const ended = await listen(
+      (ev, d) => ev === "job" && d.msgId === big.id && ["cancelled", "done", "failed"].includes(d.status),
+      110_000,
+    );
+    assert.equal(
+      (await api("/api/download", { method: "POST", body: { key: scan.key, ids: [big.id] } })).data.added,
+      1,
+    );
     await started.done;
     assert.deepEqual((await api("/api/cancel", { method: "POST", body: { keys: [scan.key] } })).data, { cancelled: 1 });
     const job = await ended.done;
@@ -640,28 +784,32 @@ describe("telegram (real account)", () => {
     assert.deepEqual(left, [], "neither the file nor its .part is left behind");
   });
 
-  test("Bài hát yêu thích: favourites from the chat come back as one list that can be played", { timeout: 60_000 }, async (t) => {
-    if (!scan || !file) return t.skip("scan did not run");
-    const favId = `${scan.key.split("|")[0]}|${file.id}`;
-    await api("/api/favorites", { method: "POST", body: { id: favId, on: true } });
-    try {
-      const { status, data } = await api("/api/favorites/files");
-      assert.equal(status, 200, data.error);
-      assert.equal(data.key, "fav");
-      assert.equal(data.fav, true);
-      assert.equal(data.missing, 0);
-      const f = data.files.find((x) => x.fav === favId);
-      assert.ok(f, "the favourite is in the list");
-      assert.equal(f.chat, scan.title, "with the name of its chat");
-      assert.equal(f.size, file.size);
-      const res = await authed(`${base}/api/media?key=fav&id=${f.id}`, { headers: { Range: "bytes=0-99" } });
-      assert.equal(res.status, 206, "plays through the list's own id");
-      assert.equal((await res.arrayBuffer()).byteLength, 100);
-    } finally {
-      await api("/api/favorites", { method: "POST", body: { id: favId, on: false } });
-    }
-    assert.deepEqual((await api("/api/favorites/files")).data.files, [], "empty once the heart is removed");
-  });
+  test(
+    "Bài hát yêu thích: favourites from the chat come back as one list that can be played",
+    { timeout: 60_000 },
+    async (t) => {
+      if (!scan || !file) return t.skip("scan did not run");
+      const favId = `${scan.key.split("|")[0]}|${file.id}`;
+      await api("/api/favorites", { method: "POST", body: { id: favId, on: true } });
+      try {
+        const { status, data } = await api("/api/favorites/files");
+        assert.equal(status, 200, data.error);
+        assert.equal(data.key, "fav");
+        assert.equal(data.fav, true);
+        assert.equal(data.missing, 0);
+        const f = data.files.find((x) => x.fav === favId);
+        assert.ok(f, "the favourite is in the list");
+        assert.equal(f.chat, scan.title, "with the name of its chat");
+        assert.equal(f.size, file.size);
+        const res = await authed(`${base}/api/media?key=fav&id=${f.id}`, { headers: { Range: "bytes=0-99" } });
+        assert.equal(res.status, 206, "plays through the list's own id");
+        assert.equal((await res.arrayBuffer()).byteLength, 100);
+      } finally {
+        await api("/api/favorites", { method: "POST", body: { id: favId, on: false } });
+      }
+      assert.deepEqual((await api("/api/favorites/files")).data.files, [], "empty once the heart is removed");
+    },
+  );
 
   test("clear removes finished jobs", async (t) => {
     if (!scan || !file) return t.skip("nothing downloaded");
@@ -724,7 +872,11 @@ describe("API choice on the login screen", () => {
 
   test("no API in .env: asks for the user's own API ID directly (was an error before)", async () => {
     const data = fs.mkdtempSync(path.join(dir, "d-"));
-    const s = await startServer({ TDL_ENV_FILE: envFile("empty.env", "PHONE=+84\n"), TDL_DATA_DIR: data, API_FILE: path.join(data, "api.json") });
+    const s = await startServer({
+      TDL_ENV_FILE: envFile("empty.env", "PHONE=+84\n"),
+      TDL_DATA_DIR: data,
+      API_FILE: path.join(data, "api.json"),
+    });
     servers.push(s);
     const st = await s.waitStep("api_id");
     assert.equal(st.step, "api_id");

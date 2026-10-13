@@ -26,15 +26,26 @@ import {
   entityTitle,
   normalizeChatIds,
   isFavoriteId,
+  RECENT_MAX,
   FAVORITES_LIMIT,
   QR_LOGIN,
   loginQr,
+  newHistoryId,
   authErrorText,
+  readPage,
 } from "../core.js";
 import { createCloudSync } from "./cloud-sync.js";
 
 // visibleChats: { "<account id>": ["<chat id>", …] }, the chats each account chose to show in the list
-const STORE = { session: "tdl.session", api: "tdl.api", settings: "tdl.settings", history: "tdl.history", visibleChats: "tdl.visibleChats", favorites: "tdl.favorites" };
+const STORE = {
+  session: "tdl.session",
+  api: "tdl.api",
+  settings: "tdl.settings",
+  history: "tdl.history",
+  visibleChats: "tdl.visibleChats",
+  favorites: "tdl.favorites",
+  recent: "tdl.recent",
+};
 
 // API ID / hash baked in at build time (TG_API_ID / TG_API_HASH, e.g. from the project's .env).
 // When present, users choose between these and their own app from my.telegram.org.
@@ -180,11 +191,10 @@ const folderLabel = (base, title) => (settings.subfolderPerChat ? `${base.name}/
 // ---------- history (removing entries never touches the files) ----------
 
 let history = load(STORE.history, []);
-let historySeq = history.reduce((max, h) => Math.max(max, h.id || 0), 0);
 
 function addHistory(job, status) {
   const entry = {
-    id: ++historySeq,
+    id: newHistoryId(), // unique across devices: the history is shared by every device of the account
     at: Date.now(),
     status, // done | skipped | failed
     mode: job.mode, // fs = chosen folder, browser = browser's Downloads folder
@@ -221,27 +231,34 @@ cloudSync = createCloudSync({
   keys: STORE,
   signedIn: () => auth.me?.id || null,
   emit: (status) => emit("cloud", status),
-  /** This account's value of a synced item, as stored in MongoDB (null = nothing). */
+  /** This account's value of a shared item (core.js formats). */
   read(name, account) {
     if (name === "settings") return { subfolderPerChat: settings.subfolderPerChat }; // the folder is per device
-    if (name === "history") return history.length ? history : null;
-    const all = load(name === "visibleChats" ? STORE.visibleChats : STORE.favorites, {});
-    if (name === "favorites") return all[account]?.length ? all[account] : null;
-    return all[account] ?? null;
+    if (name === "history") return history;
+    const all = load(STORE[name], {}); // visibleChats / favorites / recent: { "<account id>": … }
+    if (name === "visibleChats") return all[account] ?? null;
+    return all[account] || [];
   },
   /** Take MongoDB's copy of an item into this browser. */
   apply(name, value, account) {
-    if (name === "settings") return saveSettings({ subfolderPerChat: value.subfolderPerChat ?? settings.subfolderPerChat });
+    if (name === "settings")
+      return saveSettings({ subfolderPerChat: value.subfolderPerChat ?? settings.subfolderPerChat });
     if (name === "history") {
       history = value;
-      historySeq = history.reduce((max, h) => Math.max(max, h.id || 0), 0);
       save(STORE.history, history);
       return emit("history", history);
     }
-    const key = name === "visibleChats" ? STORE.visibleChats : STORE.favorites;
-    save(key, { ...load(key, {}), [account]: value });
+    const key = STORE[name];
+    const all = load(key, {});
+    if (value === null || (Array.isArray(value) && !value.length && name !== "visibleChats")) delete all[account];
+    else all[account] = value;
+    save(key, all);
+    emit("account", { name }); // the page shows the new favourites / chat list / recent plays
   },
 });
+
+// Back to this tab: show what other devices changed meanwhile.
+document.addEventListener("visibilitychange", () => document.visibilityState === "visible" && cloudSync.pull());
 
 // ---------- Telegram sign-in ----------
 
@@ -292,7 +309,9 @@ async function askApiCreds() {
       continue;
     }
     auth.error = null;
-    const hash = String(await waitInput("api_hash")).trim().toLowerCase();
+    const hash = String(await waitInput("api_hash"))
+      .trim()
+      .toLowerCase();
     if (hash === BACK.toLowerCase() && HAS_BAKED) return (auth.error = null);
     if (!/^[0-9a-f]{32}$/.test(hash)) {
       auth.error = "API hash gồm 32 ký tự 0-9, a-f";
@@ -360,7 +379,12 @@ async function startAuth({ keepStep = false, error = null } = {}, run = authRun)
 
   const me = await client.getMe();
   if (run !== authRun) return;
-  auth.me = { id: String(me.id), name: entityTitle(me), username: me.username || null };
+  auth.me = {
+    id: String(me.id),
+    name: entityTitle(me),
+    username: me.username || null,
+    phone: me.phone ? `+${me.phone}` : null,
+  };
   // MongoDB copy first (so the lists show the synced data), but never keep the user waiting long
   await Promise.race([cloudSync.sync(auth.me.id), new Promise((r) => setTimeout(r, 8000))]);
   if (run !== authRun) return;
@@ -391,7 +415,10 @@ function runAuth(options) {
       client = null;
       pendingInput = null;
       old?.destroy().catch(() => {});
-      return runAuth({ keepStep: true, error: authErrorText({ errorMessage: "FLOOD_WAIT", seconds: Math.ceil(waitMs / 1000) }) });
+      return runAuth({
+        keepStep: true,
+        error: authErrorText({ errorMessage: "FLOOD_WAIT", seconds: Math.ceil(waitMs / 1000) }),
+      });
     }
     auth.step = "error";
     auth.error = authErrorText(err);
@@ -466,21 +493,40 @@ const scanStopped = () => httpError(499, "Đã dừng quét kênh", { stopped: t
 async function scanChat(chat, type, signal, scanId = null) {
   const entity = await resolveChat(client, chat);
   if (signal?.aborted) throw scanStopped();
-  const title = entityTitle(entity);
-  const key = `${entity.id}|${type}`;
-  const Filter = FILTERS[type];
-  const items = new Map();
-  for await (const msg of client.iterMessages(entity, { filter: Filter ? new Filter() : undefined })) {
-    if (signal?.aborted) throw scanStopped(); // leaving the loop also stops the message requests
-    const info = fileInfo(msg);
-    if (!info) continue;
-    items.set(msg.id, { msg, info });
-    // scanId (from the UI) tells this scan's progress apart from an earlier scan of the same chat
-    if (items.size % 50 === 0) emit("scan", { chat, scanId, count: items.size });
-  }
-  const scan = { key, chat, type, title, items };
-  scans.set(key, scan);
-  return scan;
+  const scan = {
+    key: `${entity.id}|${type}`,
+    chat,
+    type,
+    title: entityTitle(entity),
+    entity,
+    items: new Map(),
+    cursor: 0,
+    more: true,
+  };
+  const page = await scanPage(scan, signal, scanId);
+  scans.set(scan.key, scan);
+  return { scan, page };
+}
+
+/** The next page of a scan (see readPage); pages of one scan run one after another. */
+function scanPage(scan, signal, scanId = null) {
+  const Filter = FILTERS[scan.type];
+  const run = (scan.paging || Promise.resolve())
+    .catch(() => {})
+    .then(() =>
+      readPage(
+        scan,
+        (offsetId) => client.iterMessages(scan.entity, { filter: Filter ? new Filter() : undefined, offsetId }),
+        {
+          signal,
+          stopped: scanStopped,
+          // scanId (from the UI) tells this scan's progress apart from an earlier scan of the same chat
+          onProgress: (count) => emit("scan", { chat: scan.chat, scanId, count }),
+        },
+      ),
+    );
+  scan.paging = run;
+  return run;
 }
 
 function getScan(key) {
@@ -491,7 +537,7 @@ function getScan(key) {
 
 // ---------- "Bài hát yêu thích": every favourite file, from all chats, as one list ----------
 
-async function favoritesScan(ids, signal) {
+async function favoritesScan(ids, signal, { key = "fav", title = "Bài hát yêu thích" } = {}) {
   const byChat = new Map(); // chat id -> [message id…]
   for (const id of ids) {
     const [chat, msg] = id.split("|");
@@ -499,7 +545,8 @@ async function favoritesScan(ids, signal) {
     byChat.get(chat).push(Number(msg));
   }
   const entities = new Map();
-  if (byChat.size) for (const d of await client.getDialogs({})) if (d.entity) entities.set(String(d.entity.id), d.entity);
+  if (byChat.size)
+    for (const d of await client.getDialogs({})) if (d.entity) entities.set(String(d.entity.id), d.entity);
   const found = new Map();
   for (const [chat, msgIds] of byChat) {
     const entity = entities.get(chat);
@@ -508,14 +555,24 @@ async function favoritesScan(ids, signal) {
       if (signal?.aborted) throw scanStopped();
       for (const msg of await client.getMessages(entity, { ids: msgIds.slice(i, i + 100) })) {
         const info = msg && fileInfo(msg);
-        if (info) found.set(`${chat}|${msg.id}`, { msg, info, chatTitle: entityTitle(entity), fav: `${chat}|${msg.id}` });
+        if (info)
+          found.set(`${chat}|${msg.id}`, { msg, info, chatTitle: entityTitle(entity), fav: `${chat}|${msg.id}` });
       }
     }
   }
   // Message ids repeat across chats, so the list uses its own ids (1, 2, …) in favourite order (newest first).
   const items = new Map();
   for (const id of ids) if (found.has(id)) items.set(items.size + 1, found.get(id));
-  const scan = { key: "fav", chat: "fav", type: "all", title: "Bài hát yêu thích", fav: true, items, missing: ids.length - items.size };
+  // "fav": the favourites list (shown as a list); "recent": the songs played lately (played from the side panel)
+  const scan = {
+    key,
+    chat: key,
+    type: "all",
+    title,
+    ...(key === "fav" ? { fav: true } : { recent: true }),
+    items,
+    missing: ids.length - items.size,
+  };
   scans.set(scan.key, scan);
   return scan;
 }
@@ -544,7 +601,8 @@ async function localFile(index, item) {
   return null;
 }
 
-async function describeScan(scan) {
+/** The scan's files for the page (all of them, or only `ids` = one more page), plus whether more exist. */
+async function describeScan(scan, ids = null) {
   const indexes = new Map(); // chat title -> files in its folder (favourites span several chats)
   const indexFor = async (title) => {
     if (!indexes.has(title)) indexes.set(title, await diskIndex(title));
@@ -552,10 +610,10 @@ async function describeScan(scan) {
   };
   // Downloads into the browser's Downloads folder can't be checked on disk: the history is the record.
   const inBrowserDownloads = new Set(
-    history.filter((h) => h.scanKey === scan.key && h.mode === "browser" && h.status !== "failed").map((h) => h.msgId)
+    history.filter((h) => h.scanKey === scan.key && h.mode === "browser" && h.status !== "failed").map((h) => h.msgId),
   );
   const files = [];
-  for (const [id, item] of scan.items) {
+  for (const [id, item] of ids ? ids.map((id) => [id, scan.items.get(id)]) : scan.items) {
     files.push({
       id,
       ...(item.fav && { fav: item.fav, chat: item.chatTitle }),
@@ -566,11 +624,20 @@ async function describeScan(scan) {
       duration: item.info.duration || null,
       size: item.info.size,
       date: item.msg.date,
-      downloaded: inBrowserDownloads.has(item.msg.id) || !!(await localFile(await indexFor(item.chatTitle ?? scan.title), item)),
+      downloaded:
+        inBrowserDownloads.has(item.msg.id) || !!(await localFile(await indexFor(item.chatTitle ?? scan.title), item)),
     });
   }
   const outDir = dirHandle ? (scan.fav ? dirHandle.name : folderLabel(dirHandle, scan.title)) : null;
-  return { key: scan.key, title: scan.title, outDir, ...(scan.fav && { fav: true, missing: scan.missing }), files };
+  return {
+    key: scan.key,
+    title: scan.title,
+    outDir,
+    more: !!scan.more,
+    ...(scan.fav && { fav: true, missing: scan.missing }),
+    ...(scan.recent && { recent: true, missing: scan.missing }),
+    files,
+  };
 }
 
 // ---------- download queue ----------
@@ -756,7 +823,8 @@ async function downloadToBrowser(job) {
   const ready = await providerReady();
   if (!ready) {
     // No service worker (e.g. private mode in some browsers): small files only, through memory.
-    if (job.size > 300 * 1024 * 1024) throw new Error("Trình duyệt này không hỗ trợ tải file lớn; hãy dùng Chrome/Edge");
+    if (job.size > 300 * 1024 * 1024)
+      throw new Error("Trình duyệt này không hỗ trợ tải file lớn; hãy dùng Chrome/Edge");
     const parts = [];
     let received = 0;
     for await (const chunk of telegramRange(job.item, 0, (job.size || (await photoBytes(job.item)).length) - 1)) {
@@ -816,7 +884,8 @@ const cancelledError = () => Object.assign(new Error("Đã huỷ"), { cancelled:
 /** Scan keys sent by the UI for POST /api/cancel: undefined = all queued downloads. */
 function cancelKeys(value) {
   if (value === undefined) return undefined;
-  if (!Array.isArray(value) || value.length > 1000 || !value.every((k) => typeof k === "string" && k.length <= 200)) return null;
+  if (!Array.isArray(value) || value.length > 1000 || !value.every((k) => typeof k === "string" && k.length <= 200))
+    return null;
   return value;
 }
 
@@ -857,7 +926,10 @@ function parseRange(header, size) {
 }
 
 async function* fileRange(file, start, end) {
-  const reader = file.slice(start, end + 1).stream().getReader();
+  const reader = file
+    .slice(start, end + 1)
+    .stream()
+    .getReader();
   try {
     for (;;) {
       const { value, done } = await reader.read();
@@ -1067,6 +1139,45 @@ async function route(method, url, body, signal) {
       requireReady();
       return { ids: load(STORE.favorites, {})[auth.me.id] || [] };
 
+    case "GET /api/recent":
+      requireReady();
+      return { items: load(STORE.recent, {})[auth.me.id] || [] };
+
+    case "POST /api/recent": {
+      // { op: "add", entry } (a song started) · { op: "remove", id } · { op: "clear" }
+      requireReady();
+      const all = load(STORE.recent, {});
+      const list = all[auth.me.id] || [];
+      let next;
+      if (body.op === "add") {
+        const e = body.entry;
+        const ok =
+          e &&
+          typeof e === "object" &&
+          isFavoriteId(e.id) &&
+          Object.values(e).every((v) => v === null || ["string", "number", "boolean"].includes(typeof v));
+        if (!ok) throw httpError(400, "Bài không hợp lệ");
+        next = [e, ...list.filter((h) => h.id !== e.id)].slice(0, RECENT_MAX);
+      } else if (body.op === "remove" && isFavoriteId(body.id)) next = list.filter((h) => h.id !== body.id);
+      else if (body.op === "clear") next = [];
+      else throw httpError(400, "Thao tác không hợp lệ");
+      if (next.length) all[auth.me.id] = next;
+      else delete all[auth.me.id];
+      save(STORE.recent, all);
+      return { items: next };
+    }
+
+    case "GET /api/recent/files":
+      // the songs played lately, ready to play again (from every chat, like the favourites)
+      requireReady();
+      return describeScan(
+        await favoritesScan(
+          (load(STORE.recent, {})[auth.me.id] || []).map((h) => h.id),
+          signal,
+          { key: "recent", title: "Phát gần đây" },
+        ),
+      );
+
     case "GET /api/favorites/files":
       requireReady();
       return describeScan(await favoritesScan(load(STORE.favorites, {})[auth.me.id] || [], signal));
@@ -1094,7 +1205,16 @@ async function route(method, url, body, signal) {
       if (!chat) throw httpError(400, "Thiếu kênh");
       if (!(type in FILTERS)) throw httpError(400, "Loại file không hợp lệ");
       const scanId = /^[\w-]{1,40}$/.test(url.searchParams.get("scan") || "") ? url.searchParams.get("scan") : null;
-      return describeScan(await scanChat(chat, type, signal, scanId));
+      const { scan, page } = await scanChat(chat, type, signal, scanId);
+      return describeScan(scan, page);
+    }
+
+    case "GET /api/files/more": {
+      // the next page of a scan (infinite scroll); only the new files are sent
+      requireReady();
+      const scan = getScan(url.searchParams.get("key"));
+      const scanId = /^[\w-]{1,40}$/.test(url.searchParams.get("scan") || "") ? url.searchParams.get("scan") : null;
+      return describeScan(scan, await scanPage(scan, signal, scanId));
     }
 
     case "GET /api/scan":
@@ -1114,7 +1234,10 @@ async function route(method, url, body, signal) {
         throw httpError(403, "Chưa được cấp quyền ghi vào thư mục. Hãy bấm Tải xuống lại và chọn Cho phép.");
       }
       if (dir && remember) await setDefaultDir(base);
-      return { added: enqueue(scan, ids, { mode: "fs", base }), outDir: scan.fav ? base.name : folderLabel(base, scan.title) };
+      return {
+        added: enqueue(scan, ids, { mode: "fs", base }),
+        outDir: scan.fav ? base.name : folderLabel(base, scan.title),
+      };
     }
 
     case "GET /api/cloud":

@@ -12,7 +12,9 @@
     "test:unit": "node --test test/lib.test.js test/ui.test.js",
     "build:web": "node web/build.mjs",
     "preview:web": "node web/build.mjs && node web/preview.mjs --open",
-    "web:server": "node server.js"
+    "web:server": "node server.js",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
   },
   "engines": {
     "node": ">=20.12"
@@ -29,6 +31,7 @@
     "events": "^3.3.0",
     "mongodb-memory-server": "^10.4.3",
     "path-browserify": "^1.0.1",
+    "prettier": "^3.9.10",
     "process": "^0.11.10",
     "util": "^0.12.5"
   }

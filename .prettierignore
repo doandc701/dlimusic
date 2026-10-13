@@ -1,0 +1,9 @@
+# generated / installed
+node_modules/
+dist/
+package-lock.json
+.vercel/
+# local data and secrets
+.env
+.env.*
+downloads/

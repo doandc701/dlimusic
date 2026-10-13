@@ -11,7 +11,7 @@
 
 import crypto from "node:crypto";
 import { MongoClient } from "mongodb";
-import { normalizeChatIds, isFavoriteId, FAVORITES_LIMIT } from "../core.js";
+import { normalizeChatIds, isFavoriteId, FAVORITES_LIMIT, RECENT_MAX } from "../core.js";
 
 export const DEFAULT_DB = "tele_downloader";
 const TOKEN_TTL_DAYS = 400;
@@ -43,7 +43,10 @@ export async function openDb(uri, { dbName = DEFAULT_DB, timeoutMs = 6000 } = {}
   const db = (await pending).db(dbName);
   if (!indexed.has(`${uri}|${dbName}`)) {
     indexed.add(`${uri}|${dbName}`);
-    await db.collection("tokens").createIndex({ lastUsedAt: 1 }, { expireAfterSeconds: TOKEN_TTL_DAYS * 86400 }).catch(() => {});
+    await db
+      .collection("tokens")
+      .createIndex({ lastUsedAt: 1 }, { expireAfterSeconds: TOKEN_TTL_DAYS * 86400 })
+      .catch(() => {});
   }
   return db;
 }
@@ -53,7 +56,14 @@ export async function closeDb() {
   const all = [...clients.values()];
   clients.clear();
   indexed.clear();
-  await Promise.all(all.map((p) => p.then((c) => c.close(), () => {})));
+  await Promise.all(
+    all.map((p) =>
+      p.then(
+        (c) => c.close(),
+        () => {},
+      ),
+    ),
+  );
 }
 
 /** A connection string worth trying (never logged: it contains the password). */
@@ -78,7 +88,9 @@ export async function getValue(db, id) {
 }
 
 export async function getValues(db, ids) {
-  const docs = await kv(db).find({ _id: { $in: ids } }).toArray();
+  const docs = await kv(db)
+    .find({ _id: { $in: ids } })
+    .toArray();
   return Object.fromEntries(docs.map((d) => [d._id, d.value]));
 }
 
@@ -99,7 +111,12 @@ export function encrypt(text, key) {
   const iv = crypto.randomBytes(12);
   const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
   const data = Buffer.concat([cipher.update(String(text), "utf8"), cipher.final()]);
-  return { v: 1, iv: iv.toString("base64"), tag: cipher.getAuthTag().toString("base64"), data: data.toString("base64") };
+  return {
+    v: 1,
+    iv: iv.toString("base64"),
+    tag: cipher.getAuthTag().toString("base64"),
+    data: data.toString("base64"),
+  };
 }
 
 /** Plain text, or null when the box was made with another key or was tampered with. */
@@ -129,11 +146,9 @@ export async function issueToken(db, accountId) {
 /** Account id of a device token, or null (unknown, revoked or expired). */
 export async function accountForToken(db, token) {
   if (!isToken(token)) return null;
-  const doc = await db.collection("tokens").findOneAndUpdate(
-    { _id: hashToken(token) },
-    { $set: { lastUsedAt: new Date() } },
-    { returnDocument: "after" }
-  );
+  const doc = await db
+    .collection("tokens")
+    .findOneAndUpdate({ _id: hashToken(token) }, { $set: { lastUsedAt: new Date() } }, { returnDocument: "after" });
   return doc?.accountId || null;
 }
 
@@ -144,9 +159,17 @@ export async function revokeToken(db, token) {
 // ---------- what an account may store, validated (null = remove, undefined = invalid) ----------
 
 const plainEntry = (e) =>
-  e && typeof e === "object" && !Array.isArray(e) && Object.keys(e).length <= 24 &&
-  Object.values(e).every((v) => v === null || typeof v === "boolean" || (typeof v === "number" && Number.isFinite(v)) ||
-    (typeof v === "string" && v.length <= 2000));
+  e &&
+  typeof e === "object" &&
+  !Array.isArray(e) &&
+  Object.keys(e).length <= 24 &&
+  Object.values(e).every(
+    (v) =>
+      v === null ||
+      typeof v === "boolean" ||
+      (typeof v === "number" && Number.isFinite(v)) ||
+      (typeof v === "string" && v.length <= 2000),
+  );
 
 export const ACCOUNT_DATA = {
   settings(v) {
@@ -173,6 +196,12 @@ export const ACCOUNT_DATA = {
     if (!Array.isArray(v) || v.length > FAVORITES_LIMIT || !v.every(isFavoriteId)) return undefined;
     return [...new Set(v)];
   },
+  recent(v) {
+    if (v === null) return null;
+    if (!Array.isArray(v) || v.length > RECENT_MAX || !v.every((e) => plainEntry(e) && isFavoriteId(e.id)))
+      return undefined;
+    return v;
+  },
 };
 
 /** API settings of the browser version: the built-in app, or the user's own id + hash. */
@@ -185,4 +214,5 @@ export function normalizeApi(v) {
 }
 
 /** A GramJS StringSession as saved by the client (base64-ish text). */
-export const isSessionString = (s) => typeof s === "string" && s.length >= 100 && s.length <= 2000 && /^[\w+/=-]+$/.test(s);
+export const isSessionString = (s) =>
+  typeof s === "string" && s.length >= 100 && s.length <= 2000 && /^[\w+/=-]+$/.test(s);

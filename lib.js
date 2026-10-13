@@ -27,6 +27,9 @@ export {
   QR_LOGIN,
   loginQr,
   authErrorText,
+  readPage,
+  PAGE_SIZE,
+  newHistoryId,
 } from "./core.js";
 
 // ---------- private data folder ----------
@@ -36,7 +39,8 @@ export {
 
 function defaultDataDir() {
   if (process.platform === "win32") return path.join(process.env.APPDATA || os.homedir(), "tele-downloader");
-  if (process.platform === "darwin") return path.join(os.homedir(), "Library", "Application Support", "tele-downloader");
+  if (process.platform === "darwin")
+    return path.join(os.homedir(), "Library", "Application Support", "tele-downloader");
   return path.join(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), ".config"), "tele-downloader");
 }
 
@@ -78,13 +82,16 @@ export const SESSION_FILE = dataFile("session.txt");
 
 /** Values from the .env file (re-read on every call, so edits apply without restarting), or {}. */
 export function readEnvFile() {
-  const file = process.env.TDL_ENV_FILE || [path.resolve(".env"), path.join(PROJECT_DIR, ".env")].find((f) => fs.existsSync(f));
+  const file =
+    process.env.TDL_ENV_FILE || [path.resolve(".env"), path.join(PROJECT_DIR, ".env")].find((f) => fs.existsSync(f));
   try {
     return Object.fromEntries(
-      fs.readFileSync(file, "utf8").split(/\r?\n/)
+      fs
+        .readFileSync(file, "utf8")
+        .split(/\r?\n/)
         .map((line) => /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$/.exec(line))
         .filter(Boolean)
-        .map((m) => [m[1], m[2].replace(/^["']|["']$/g, "")])
+        .map((m) => [m[1], m[2].replace(/^["']|["']$/g, "")]),
     );
   } catch {
     return {};
@@ -107,7 +114,9 @@ export function envCreds() {
 /** A client for the given API ID / hash and the saved session (not yet connected). */
 export function createClient(creds = envCreds()) {
   if (!creds) {
-    throw new Error("Thiếu API_ID / API_HASH trong .env. Tạo ở https://my.telegram.org → API development tools rồi điền vào .env.");
+    throw new Error(
+      "Thiếu API_ID / API_HASH trong .env. Tạo ở https://my.telegram.org → API development tools rồi điền vào .env.",
+    );
   }
   const saved = fs.existsSync(SESSION_FILE) ? fs.readFileSync(SESSION_FILE, "utf8").trim() : "";
   const client = new TelegramClient(new StringSession(saved), creds.id, creds.hash, { connectionRetries: 5 });

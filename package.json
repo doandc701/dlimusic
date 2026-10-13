@@ -20,6 +20,7 @@
   "dependencies": {
     "big-integer": "^1.6.52",
     "mongodb": "^6.21.0",
+    "qrcode-generator": "^2.0.4",
     "telegram": "^2.26.0"
   },
   "devDependencies": {

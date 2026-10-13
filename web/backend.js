@@ -27,6 +27,9 @@ import {
   normalizeChatIds,
   isFavoriteId,
   FAVORITES_LIMIT,
+  QR_LOGIN,
+  loginQr,
+  authErrorText,
 } from "../core.js";
 import { createCloudSync } from "./cloud-sync.js";
 
@@ -274,6 +277,7 @@ function waitInput(kind) {
     return Promise.resolve(value);
   }
   auth.step = kind;
+  auth.qr = null;
   emit("auth", auth);
   return new Promise((resolve, reject) => (pendingInput = { kind, resolve, reject }));
 }
@@ -305,9 +309,9 @@ async function askApiCreds() {
 // abandoned attempt does afterwards (errors, prompts, "ready") is ignored.
 let authRun = 0;
 
-async function startAuth({ keepStep = false } = {}, run = authRun) {
+async function startAuth({ keepStep = false, error = null } = {}, run = authRun) {
   if (!keepStep) auth.step = "connecting";
-  auth.error = null;
+  auth.error = error; // a message to keep showing on the next screen (wrong API, Telegram's wait…)
   auth.me = null;
   emit("auth", auth);
 
@@ -322,12 +326,30 @@ async function startAuth({ keepStep = false } = {}, run = authRun) {
 
   if (!(await client.checkAuthorization())) {
     await client.start({
-      phoneNumber: () => waitInput("phone"),
+      phoneNumber: async () => {
+        const value = await waitInput("phone");
+        // "Đăng nhập bằng mã QR": GramJS switches to auth.ExportLoginToken when this error is thrown
+        if (value === QR_LOGIN) throw Object.assign(new Error("QR"), { errorMessage: "RESTART_AUTH_WITH_QR" });
+        return value;
+      },
       phoneCode: () => waitInput("code"),
       password: () => waitInput("password"),
+      qrCode: async ({ token }) => {
+        if (run !== authRun) return;
+        pendingInput = null;
+        // a fresh token every 30 s; scanned with the Telegram app (Settings → Devices → Link Desktop Device)
+        Object.assign(auth, { step: "qr", error: null, qr: { ...loginQr(token), expires: Date.now() + 30_000 } });
+        emit("auth", auth);
+      },
       onError: (err) => {
         if (run !== authRun) return true; // abandoned attempt: stop quietly
-        auth.error = err.message;
+        if (err.seconds || /FLOOD/.test(err.errorMessage || err.message || "")) {
+          // Telegram blocks codes for this number for a while: stop here (runAuth goes back to the phone
+          // step, where the QR sign-in still works) instead of asking for a code again and again
+          auth.floodUntil = Date.now() + (Number(err.seconds) || 0) * 1000;
+          return true;
+        }
+        auth.error = authErrorText(err);
         emit("auth", auth);
         return /API_ID/.test(err.message); // wrong API ID/hash: stop and ask for them again
       },
@@ -343,6 +365,8 @@ async function startAuth({ keepStep = false } = {}, run = authRun) {
   await Promise.race([cloudSync.sync(auth.me.id), new Promise((r) => setTimeout(r, 8000))]);
   if (run !== authRun) return;
   auth.step = "ready";
+  auth.qr = null;
+  auth.floodUntil = 0;
   auth.error = null;
   emit("auth", auth);
 }
@@ -357,12 +381,36 @@ function runAuth(options) {
       auth.error = wasBuiltin
         ? "API có sẵn đang không dùng được, hãy tự tạo API ID của bạn"
         : "API ID / API hash không đúng, hãy nhập lại";
-      return runAuth();
+      return runAuth({ error: auth.error });
+    }
+    if (auth.floodUntil > Date.now() || /FLOOD/.test(err.errorMessage || err.message || "")) {
+      const waitMs = Math.max(0, (auth.floodUntil || 0) - Date.now());
+      auth.floodUntil = Date.now() + waitMs;
+      auth.step = "phone";
+      const old = client;
+      client = null;
+      pendingInput = null;
+      old?.destroy().catch(() => {});
+      return runAuth({ keepStep: true, error: authErrorText({ errorMessage: "FLOOD_WAIT", seconds: Math.ceil(waitMs / 1000) }) });
     }
     auth.step = "error";
-    auth.error = err.message;
+    auth.error = authErrorText(err);
     emit("auth", auth);
   });
+}
+
+/** "← Dùng số điện thoại" on the QR screen: drop the QR attempt and ask for the phone number again. */
+function backFromQr() {
+  const old = client;
+  client = null;
+  pendingInput = null;
+  earlyPhone = null;
+  // The phone form is shown at once: a QR attempt cannot be stopped, so a fresh client connects in the
+  // background (~3 s); a number typed before it is ready is kept (earlyPhone) and used as soon as it is.
+  Object.assign(auth, { step: "phone", error: null, me: null, qr: null });
+  emit("auth", auth);
+  runAuth({ keepStep: true }); // the abandoned attempt's errors are ignored (authRun changed)
+  old?.destroy().catch(() => {});
 }
 
 /** "← Choose again" on the phone step: forget the chosen API and start over at the choice screen. */
@@ -959,6 +1007,10 @@ async function route(method, url, body, signal) {
     case "POST /api/login": {
       const { kind, value } = body;
       if (!String(value ?? "").trim()) throw httpError(400, "Vui lòng nhập giá trị");
+      if (value === BACK && kind === "qr" && auth.step === "qr") {
+        backFromQr();
+        return { ok: true };
+      }
       if (value === BACK && kind === "phone" && HAS_BAKED && auth.step === "phone") {
         backToChoice();
         return { ok: true };

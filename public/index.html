@@ -82,7 +82,22 @@
           <div class="otp-boxes d-none mb-4" id="otpBoxes" role="group" aria-label="Mã xác nhận"></div>
           <div class="alert alert-danger py-2 d-none" id="loginError"></div>
           <button class="btn btn-primary w-100 fw-semibold" type="submit" id="loginBtn">Tiếp tục</button>
+          <div class="login-or d-none" id="qrOr"><span>hoặc</span></div>
+          <button type="button" class="btn btn-outline-secondary w-100 d-none" id="qrLoginBtn">
+            <i class="bi bi-qr-code-scan"></i> Đăng nhập bằng mã QR</button>
         </form>
+        <!-- sign-in with a QR code scanned in the Telegram app (no code to type) -->
+        <div class="d-none text-center" id="loginQr">
+          <div class="qr-box mx-auto" id="qrBox" role="img" aria-label="Mã QR đăng nhập Telegram"></div>
+          <ol class="qr-steps text-start small mx-auto">
+            <li>Mở <b>Telegram</b> trên điện thoại đã đăng nhập</li>
+            <li>Vào <b>Cài đặt → Thiết bị → Liên kết thiết bị máy tính</b></li>
+            <li>Hướng camera vào mã QR này</li>
+          </ol>
+          <div class="small text-body-secondary mb-3" id="qrTimer" aria-live="polite"></div>
+          <button type="button" class="btn btn-outline-secondary w-100" id="qrBackBtn"><i class="bi bi-phone"></i> Dùng
+            số điện thoại</button>
+        </div>
       </div>
     </div>
     <footer class="app-copy login-copy">© <span class="copy-year"></span> DLiMusic · <span class="app-slogan"></span>

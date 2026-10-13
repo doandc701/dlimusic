@@ -2,6 +2,7 @@
 // No Node built-ins here: this file is bundled for the browser too.
 
 import { Api } from "telegram";
+import qrcode from "qrcode-generator";
 
 export const FILTERS = {
   all: null,
@@ -189,3 +190,55 @@ export function isFavoriteId(value) {
   return typeof value === "string" && /^-?\d{1,20}\|\d{1,12}$/.test(value);
 }
 export const FAVORITES_LIMIT = 20000;
+
+// ---------- sign-in with a QR code (scanned with the Telegram app: Settings → Devices) ----------
+
+/** Value sent instead of a phone number to switch the sign-in to a QR code. */
+export const QR_LOGIN = "__qr__";
+
+/** The tg://login link of a login token (bytes from auth.ExportLoginToken) and an SVG QR code of it. */
+export function loginQr(token) {
+  const b64 = btoa(String.fromCharCode(...new Uint8Array(token))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  const url = `tg://login?token=${b64}`;
+  const qr = qrcode(0, "M");
+  qr.addData(url);
+  qr.make();
+  return { url, svg: qr.createSvgTag({ cellSize: 4, margin: 2, scalable: true }) };
+}
+
+// ---------- Telegram sign-in errors in plain Vietnamese ----------
+
+const AUTH_ERRORS = {
+  PHONE_CODE_INVALID: "Mã xác nhận không đúng. Kiểm tra lại mã trong app Telegram rồi nhập lại.",
+  PHONE_CODE_EXPIRED: "Mã xác nhận đã hết hạn. Hãy quay lại bước số điện thoại để nhận mã mới.",
+  PHONE_CODE_EMPTY: "Vui lòng nhập mã xác nhận.",
+  PHONE_NUMBER_INVALID: "Số điện thoại không hợp lệ. Kiểm tra lại mã quốc gia và số điện thoại.",
+  PHONE_NUMBER_BANNED: "Số điện thoại này đã bị Telegram khoá.",
+  PHONE_NUMBER_UNOCCUPIED: "Số điện thoại này chưa đăng ký Telegram.",
+  PHONE_NUMBER_FLOOD: "Số này đã yêu cầu mã quá nhiều lần. Vui lòng thử lại sau.",
+  PASSWORD_HASH_INVALID: "Mật khẩu xác minh 2 bước không đúng.",
+  PASSWORD_EMPTY: "Vui lòng nhập mật khẩu xác minh 2 bước.",
+  AUTH_RESTART: "Phiên đăng nhập bị gián đoạn. Vui lòng thử lại.",
+  AUTH_TOKEN_EXPIRED: "Mã QR đã hết hạn. Hãy quét mã mới.",
+  API_ID_INVALID: "API ID / API hash không đúng.",
+  API_ID_PUBLISHED_FLOOD: "API có sẵn đang bị Telegram giới hạn. Hãy tự tạo API ID của bạn.",
+};
+
+/** Message of a GramJS / Telegram error for the login screen ("400: PHONE_CODE_INVALID (…)" -> Vietnamese). */
+export function authErrorText(err) {
+  const raw = String(err?.errorMessage || err?.message || err || "");
+  const code = err?.errorMessage || /\b([A-Z][A-Z0-9_]{3,})\b/.exec(raw)?.[1] || "";
+  const wait = Number(err?.seconds) || Number(/FLOOD_WAIT_(\d+)/.exec(raw)?.[1]) || 0;
+  if (wait || /FLOOD/.test(code)) {
+    if (!wait) return AUTH_ERRORS[code] || "Bạn thử quá nhiều lần. Vui lòng đợi một lúc rồi thử lại.";
+    const left = wait >= 3600 ? `${Math.ceil(wait / 3600)} giờ` : wait >= 60 ? `${Math.ceil(wait / 60)} phút` : `${wait} giây`;
+    return `Bạn thử quá nhiều lần. Telegram yêu cầu đợi ${left} rồi thử lại.`;
+  }
+  if (AUTH_ERRORS[code]) return AUTH_ERRORS[code];
+  if (/Code is empty/i.test(raw)) return AUTH_ERRORS.PHONE_CODE_EMPTY;
+  if (/timeout|timed out|ECONN|ENOTFOUND|ETIMEDOUT|network|websocket|socket|Not connected/i.test(raw)) {
+    return "Không kết nối được tới Telegram. Kiểm tra mạng rồi thử lại.";
+  }
+  if (/^[A-Z][A-Z0-9_]+$/.test(code) && /^\d{3}:/.test(raw)) return `Telegram từ chối đăng nhập (${code}). Vui lòng thử lại.`;
+  return raw || "Đăng nhập không thành công. Vui lòng thử lại.";
+}

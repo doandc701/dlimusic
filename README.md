@@ -136,6 +136,8 @@ Vẫn có thể deploy tay khi cần: `npx vercel --prod`.
 
 `.vercelignore` đảm bảo `session.txt`, `.env`, `.ui-token`, lịch sử, cài đặt và thư mục `downloads/` **không bao giờ** bị tải lên Vercel.
 
+**Đăng nhập bằng mã QR:** ở bước nhập số điện thoại, bấm *Đăng nhập bằng mã QR* rồi trên điện thoại mở Telegram → **Cài đặt → Thiết bị → Liên kết thiết bị máy tính** và quét mã (mã tự đổi mỗi 30 giây). Không cần mã OTP; mỗi máy là một thiết bị riêng trong Telegram, gỡ được từng máy. Tài khoản bật xác minh 2 bước vẫn được hỏi mật khẩu.
+
 ## Lưu dữ liệu lên MongoDB Atlas (tuỳ chọn)
 
 Mặc định dữ liệu chỉ nằm trên máy (bản chạy trên máy) hoặc trong trình duyệt (bản Vercel). Bật MongoDB thì **cài đặt, lịch sử tải, hội thoại hiển thị, yêu thích, cách kết nối API và phiên đăng nhập Telegram** được lưu thêm lên MongoDB. Phiên Telegram và API hash tự tạo được **mã hoá AES-256-GCM** trước khi lưu. Mất kết nối MongoDB thì app vẫn chạy bằng dữ liệu cục bộ và tự đồng bộ lại sau. Trạng thái xem ở **⚙ Cài đặt → Lưu trữ đám mây**.

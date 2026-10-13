@@ -6,7 +6,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { Api } from "telegram";
-import { sanitize, safeMediaType, formatBytes, fileInfo, mediaKind, resolveTarget, claimTarget, FILTERS, normalizeChatIds, isFavoriteId } from "../lib.js";
+import { sanitize, safeMediaType, formatBytes, fileInfo, mediaKind, resolveTarget, claimTarget, FILTERS, normalizeChatIds, isFavoriteId, loginQr, QR_LOGIN, authErrorText } from "../lib.js";
 import { parseSelection } from "../index.js";
 
 function docMessage(id, { mimeType = "audio/mpeg", size = 1000, attributes = [] } = {}) {
@@ -235,4 +235,23 @@ test("normalizeChatIds: null = all, ids as strings, rejects anything else", () =
 test("isFavoriteId: <chat id>|<message id> only", () => {
   for (const ok of ["1|2", "-1001234567890|123456"]) assert.ok(isFavoriteId(ok), ok);
   for (const bad of ["1", "|2", "1|", "a|2", "1|2|3", "1 |2", 12, null, "1".repeat(21) + "|2"]) assert.ok(!isFavoriteId(bad), String(bad));
+});
+
+test("QR sign-in: tg://login link with the token in base64url, as an SVG QR code", () => {
+  const { url, svg } = loginQr(Buffer.from([1, 2, 3, 250, 251, 252, 253, 254, 255]));
+  assert.equal(url, "tg://login?token=AQID-vv8_f7_");
+  assert.match(svg, /^<svg[^>]*viewBox/);
+  assert.ok(!/<script|on\w+=/i.test(svg), "only shapes in the SVG");
+  assert.equal(QR_LOGIN, "__qr__");
+});
+
+test("sign-in errors from Telegram are shown in plain Vietnamese", () => {
+  assert.match(authErrorText(new Error("400: PHONE_CODE_INVALID (caused by auth.SignIn)")), /^Mã xác nhận không đúng/);
+  assert.match(authErrorText({ errorMessage: "PHONE_CODE_EXPIRED", message: "400: PHONE_CODE_EXPIRED" }), /hết hạn/);
+  assert.match(authErrorText({ errorMessage: "FLOOD_WAIT", seconds: 420, message: "420: FLOOD_WAIT_420" }), /đợi 7 phút/);
+  assert.match(authErrorText({ errorMessage: "PASSWORD_HASH_INVALID" }), /Mật khẩu xác minh 2 bước không đúng/);
+  assert.match(authErrorText(new Error("Request timed out")), /Không kết nối được tới Telegram/);
+  assert.equal(authErrorText(new Error("400: SOMETHING_NEW (caused by x)")), "Telegram từ chối đăng nhập (SOMETHING_NEW). Vui lòng thử lại.");
+  assert.equal(authErrorText(new Error("Thông báo của app")), "Thông báo của app", "our own messages are kept");
+  assert.ok(!/caused by/.test(authErrorText(new Error("400: PHONE_NUMBER_INVALID (caused by auth.SendCode)"))));
 });

@@ -231,7 +231,7 @@ function renderAuth(auth) {
   if (ready) {
     if (prev !== "ready") loadDialogs();
     // Only right after signing in here, not when a saved session reconnects on page load.
-    if (LOGIN_STEPS[prev] || prev === "waiting") {
+    if (LOGIN_STEPS[prev] || prev === "waiting" || prev === "qr") { // typed a code / password, or scanned the QR code
       // one line on a phone too: a long name is shortened ("Nguyễn Thị Phương Th…")
       const full = auth.me?.name || "bạn";
       const name = [...full].length > 18 ? [...full].slice(0, 17).join("").trimEnd() + "…" : full;
@@ -253,15 +253,39 @@ function renderAuth(auth) {
     return;
   }
 
+  // QR sign-in: the code (refreshed every 30 s by the backend) instead of the form
+  const qr = auth.step === "qr" && auth.qr;
+  show($("loginQr"), !!qr);
+  if (qr) {
+    show($("loginForm"), false);
+    show($("loginBack"), false);
+    show($("loginError"), false);
+    $("loginTitle").textContent = "Quét mã QR để đăng nhập";
+    $("loginDesc").textContent = "Dùng ứng dụng Telegram trên điện thoại";
+    renderQr(qr);
+    return;
+  }
+  stopQrTimer();
+
   const step = LOGIN_STEPS[auth.step];
   show($("loginForm"), !!step);
+  show($("qrOr"), auth.step === "phone");
+  show($("qrLoginBtn"), auth.step === "phone");
+  $("qrLoginBtn").disabled = false;
   show($("phoneCode"), auth.step === "phone");
   // "← choose again" on the API ID / hash steps and on the phone step (browser build with a built-in API)
   show($("loginBack"), !!step && !!auth.apiChoice && (auth.step.startsWith("api_") || auth.step === "phone"));
+  // Telegram's wait after too many codes: the time left, counted from when it ends (right after a reload too)
+  const flood = auth.error && auth.floodUntil > Date.now();
   // On the phone step a rejected number is shown on the field itself (Bootstrap validation).
-  const fieldError = auth.step === "phone" && auth.error;
+  const fieldError = auth.step === "phone" && !flood && auth.error;
   show($("loginError"), !!auth.error && !fieldError);
-  $("loginError").textContent = fieldError ? "" : auth.error || "";
+  const waited = auth.error && auth.floodUntil && auth.floodUntil <= Date.now(); // the wait is over meanwhile
+  if (flood) showFloodCountdown(auth.floodUntil);
+  else {
+    stopFloodCountdown();
+    $("loginError").textContent = fieldError ? "" : waited ? FLOOD_OVER : auth.error || "";
+  }
   if (step) {
     $("loginTitle").textContent = step.title;
     if (step.html) $("loginDesc").innerHTML = step.html; // fixed text from this file, never user data
@@ -288,6 +312,74 @@ function renderAuth(auth) {
     $("loginDesc").innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
   }
 }
+
+// ---------- Telegram's wait after too many codes: a live hh:mm:ss countdown ----------
+
+const FLOOD_OVER = "Đã hết thời gian chờ của Telegram, bạn có thể thử lại.";
+let floodTimer = null;
+
+const hms = (ms) => {
+  const t = Math.max(0, Math.ceil(ms / 1000));
+  return [Math.floor(t / 3600), Math.floor((t % 3600) / 60), t % 60].map((n) => String(n).padStart(2, "0")).join(":");
+};
+
+function showFloodCountdown(until) {
+  const box = $("loginError");
+  if (!box.querySelector("#floodLeft")) {
+    // fixed text from this file only
+    box.innerHTML = `<div>Telegram tạm khoá đăng nhập bằng mã cho số này vì thử quá nhiều lần.
+      <div class="flood-row">Thử lại sau <strong class="flood-left" id="floodLeft"></strong></div>
+      Bạn vẫn có thể đăng nhập ngay bằng <b>mã QR</b> bên dưới.</div>`;
+  }
+  const tick = () => {
+    if (Date.now() >= until) {
+      stopFloodCountdown();
+      box.textContent = FLOOD_OVER;
+      return;
+    }
+    $("floodLeft").textContent = hms(until - Date.now());
+  };
+  tick();
+  clearInterval(floodTimer);
+  floodTimer = setInterval(tick, 1000);
+}
+
+function stopFloodCountdown() {
+  clearInterval(floodTimer);
+  floodTimer = null;
+}
+
+// ---------- sign-in with a QR code ----------
+
+const QR_LOGIN = "__qr__"; // same value as core.js QR_LOGIN
+let qrTimer = null;
+let qrShown = null;
+
+function renderQr(qr) {
+  if (qrShown !== qr.url) {
+    qrShown = qr.url;
+    $("qrBox").innerHTML = qr.svg; // SVG made by the backend (qrcode-generator) from the login token
+  }
+  const tick = () => {
+    const left = Math.ceil((qr.expires - Date.now()) / 1000);
+    $("qrTimer").textContent = left > 0 ? `Mã tự làm mới sau ${left} giây` : "Đang lấy mã mới…";
+  };
+  tick();
+  clearInterval(qrTimer);
+  qrTimer = setInterval(tick, 1000);
+}
+
+function stopQrTimer() {
+  clearInterval(qrTimer);
+  qrTimer = null;
+  qrShown = null;
+}
+
+$("qrLoginBtn").addEventListener("click", () => {
+  $("qrLoginBtn").disabled = true;
+  sendLogin("phone", QR_LOGIN);
+});
+$("qrBackBtn").addEventListener("click", () => sendLogin("qr", "__back__"));
 
 async function sendLogin(kind, value) {
   try {

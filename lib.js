@@ -24,6 +24,9 @@ export {
   normalizeChatIds,
   isFavoriteId,
   FAVORITES_LIMIT,
+  QR_LOGIN,
+  loginQr,
+  authErrorText,
 } from "./core.js";
 
 // ---------- private data folder ----------

@@ -209,9 +209,7 @@ const state = {
   panelOpen: true,
   dlTarget: null, // folder chosen for the current download only: { path, remember }
 };
-try {
-  state.panelOpen = localStorage.getItem("panel") !== "0";
-} catch {}
+state.panelOpen = false; // "Phát gần đây" starts closed; the "Gần đây" button opens it
 
 try {
   state.type = localStorage.getItem("type") || "all";
@@ -272,13 +270,19 @@ function toast(msg, kind = "success", { oneLine = false } = {}) {
   toastBox.show();
 }
 
+// ---------- light / dark (theme.js applies it; until the button is used it follows the system) ----------
+
+function renderTheme() {
+  const dark = document.documentElement.getAttribute("data-bs-theme") === "dark";
+  $("themeIcon").className = `bi ${dark ? "bi-moon-stars-fill" : "bi-sun-fill"}`;
+  $("themeBtn").setAttribute("title", dark ? "Chuyển sang giao diện sáng" : "Chuyển sang giao diện tối");
+}
 $("themeBtn").addEventListener("click", () => {
-  const next = document.documentElement.getAttribute("data-bs-theme") === "dark" ? "light" : "dark";
-  document.documentElement.setAttribute("data-bs-theme", next);
-  try {
-    localStorage.setItem("theme", next);
-  } catch {}
+  const dark = document.documentElement.getAttribute("data-bs-theme") === "dark";
+  window.tdlTheme?.set(dark ? "light" : "dark");
 });
+document.addEventListener("tdl:theme", renderTheme);
+renderTheme();
 
 // ---------- auth ----------
 
@@ -1044,9 +1048,6 @@ async function openChatsModal() {
   await hideOpenModals();
   chatsDraft = new Set(state.visibleChats || state.dialogs.map((d) => d.id));
   $("chatsSearch").value = "";
-  $("chatsAccount").textContent = state.auth?.me
-    ? `${state.auth.me.name}${state.auth.me.username ? " (@" + state.auth.me.username + ")" : ""}`
-    : "này";
   renderChatsModal();
   chatsModal.show();
 }
@@ -1192,7 +1193,7 @@ function openChat(chat) {
   state.query = "";
   $("fileSearch").value = "";
   renderDialogs();
-  loadFiles();
+  return loadFiles();
 }
 
 function setMessage(html) {
@@ -1755,19 +1756,54 @@ $("emptyCat").addEventListener("click", catToChats);
  * list on a phone): the list kept in memory is shown again (no rescan, loaded pages kept), scrolled to the
  * song, which flashes briefly.
  */
+/** A song of "Phát gần đây" / another list: open its chat's list, read on until it is there, show it. */
+async function showSongInItsChat(f) {
+  const [chatPart, msgPart] = String(f?.fav || "").split("|");
+  if (!msgPart) return;
+  // the list id is the chat's own id; the chat list uses Telegram's marked ids (-100… channels, -… groups)
+  const dialog = state.dialogs.find((d) => [chatPart, `-${chatPart}`, `-100${chatPart}`].includes(d.id));
+  if (!dialog) return toast("Kênh của bài này không có trong danh sách kênh", "warn");
+  const msgId = Number(msgPart);
+  // a type filter that can show this song (video / photo / document lists would not)
+  if (!["all", "music", "voice"].includes(state.type) || (f.kind === "voice") !== (state.type === "voice")) {
+    state.type = f.kind === "voice" ? "voice" : "music";
+  }
+  setPanelOpen(false);
+  if (state.chat !== dialog.id || !state.scan || state.scan.key.split("|")[1] !== state.type) await openChat(dialog.id);
+  else setView("files");
+  for (
+    let pages = 0;
+    state.scan && !state.scan.files.some((x) => x.id === msgId) && state.scan.more && pages < 20;
+    pages++
+  )
+    await loadMore();
+  if (!state.scan?.files.some((x) => x.id === msgId))
+    return toast("Không tìm thấy bài trong kênh (có thể tin đã bị xoá)", "warn");
+  if (!$("files").querySelector(`tr[data-id="${msgId}"]`)) {
+    state.query = "";
+    $("fileSearch").value = "";
+    setShow("all"); // hidden by the search / "Chưa tải · Đã tải"
+  }
+  flashRow($("files").querySelector(`tr[data-id="${msgId}"]`));
+}
+
+/** Scroll a row into the middle of the list and flash it. */
+function flashRow(row) {
+  if (!row) return;
+  row.scrollIntoView({
+    block: "center",
+    behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
+  });
+  row.classList.remove("row-flash");
+  void row.offsetWidth; // restart the animation when clicked again
+  row.classList.add("row-flash");
+  setTimeout(() => row.classList.remove("row-flash"), 1800);
+}
+
 function showPlayingList() {
   const scan = state.playScan;
   if (!scan || state.playingId === null) return;
-  if (scan.recent) {
-    // played from "Phát gần đây": that panel is its list
-    setPanelOpen(true);
-    renderRecent();
-    const item = $("recentList").querySelector(".recent-item.playing");
-    item?.scrollIntoView({ block: "center", behavior: "smooth" });
-    item?.classList.add("row-flash");
-    setTimeout(() => item?.classList.remove("row-flash"), 1800);
-    return;
-  }
+  if (scan.recent) return showSongInItsChat(scan.files.find((f) => f.id === state.playingId));
   if (state.scan !== scan) {
     const chat = scan.fav ? FAV_CHAT : state.keyChat.get(scan.key);
     if (!chat) return;
@@ -1803,15 +1839,7 @@ function showPlayingList() {
     setShow("all");
     row = $("files").querySelector(`tr[data-id="${state.playingId}"]`);
   }
-  if (!row) return;
-  row.scrollIntoView({
-    block: "center",
-    behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
-  });
-  row.classList.remove("row-flash");
-  void row.offsetWidth; // restart the animation when clicked again
-  row.classList.add("row-flash");
-  setTimeout(() => row.classList.remove("row-flash"), 1800);
+  flashRow(row);
 }
 
 /** The DLiMusic logo: back to the start screen (the cat); the song keeps playing. */
@@ -1838,8 +1866,11 @@ $("homeLink").addEventListener("click", (e) => {
   goHome();
 });
 
-$("nowPlaying").addEventListener("click", (e) => {
-  if (e.target.closest("#playerFav")) return;
+// Only the song's name opens its list (not the picture, the chat's name or the space around them).
+$("npTitle").addEventListener("click", () => showPlayingList());
+$("npTitle").addEventListener("keydown", (e) => {
+  if (e.key !== "Enter" && e.key !== " ") return;
+  e.preventDefault();
   showPlayingList();
 });
 $("reloadBtn").addEventListener("click", () => state.chat && !state.scanning && loadFiles());
@@ -2069,6 +2100,7 @@ function setSpeed(rate, save = true) {
   const p = $("player");
   p.defaultPlaybackRate = rate; // also for the next songs (a new src resets playbackRate in some browsers)
   p.playbackRate = rate;
+  $("emptyCat").style.setProperty("--cat-rate", rate); // the dancing kittens keep pace
   $("speedBtn").textContent = `${rate}x`;
   $("speedBtn").classList.toggle("on", rate !== 1);
   $("speedVal").textContent = `${rate.toFixed(1)}x`;
@@ -2178,6 +2210,7 @@ for (const evt of ["play", "pause", "ended"]) {
     $("playBtn").innerHTML = `<i class="bi ${state.isPlaying ? "bi-pause-fill" : "bi-play-fill"}"></i>`;
     if (state.playingId !== null && state.scan?.key === state.playingKey) updateRow(state.playingId);
     renderRecent(); // ▶ / sound wave on the song in "Phát gần đây"
+    setHomeCat(state.isPlaying);
   });
 }
 player.addEventListener("ended", () => {
@@ -2186,6 +2219,21 @@ player.addEventListener("ended", () => {
   if (f?.duration && lastTime < f.duration - 5 && connectionLost()) return;
   playNext(true);
 });
+// ---------- the start screen's cat: dancing kittens while music plays, the cat with headphones otherwise ----------
+
+// The kittens are 39 frames stacked in one picture that CSS steps through, so their speed can follow the
+// song's playback speed (an animated GIF / WebP always runs at its own speed).
+const HOME_CAT = { still: "/img/cat-headphones.webp", dance: "/img/cat-dance-frames.webp" };
+function setHomeCat(playing) {
+  const cat = $("emptyCat");
+  const dance = playing && !matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const src = dance ? HOME_CAT.dance : HOME_CAT.still;
+  if (cat.getAttribute("src") === src) return;
+  cat.setAttribute("src", src); // the dancing one is only downloaded once music plays
+  cat.classList.toggle("cat-dancing", dance);
+  cat.alt = dance ? "Hai chú mèo con đang nhảy theo nhạc" : "Mèo đeo tai nghe đang thưởng thức nhạc";
+}
+
 // ---------- reloading the page while a song plays: it goes on where it was ----------
 
 const PLAYBACK_KEY = "tdl.playback"; // { acct, chat, key, id, time, playing, at } in this browser only
@@ -2814,10 +2862,7 @@ const STATUS = {
 };
 
 function setPanelOpen(open) {
-  state.panelOpen = open;
-  try {
-    localStorage.setItem("panel", open ? "1" : "0");
-  } catch {}
+  state.panelOpen = open; // not remembered: the panel starts closed on every page load
   $("dl").classList.toggle("d-none", !open);
   $("dl").classList.toggle("d-flex", open);
   $("recentBtn").classList.toggle("active", open);
@@ -2967,7 +3012,7 @@ $("recentSearch").addEventListener("input", renderRecent);
 $("recentClearBtn").addEventListener("click", async () => {
   const ok = await ask({
     title: '<i class="bi bi-trash3 text-danger"></i> Xoá danh sách phát gần đây',
-    body: `Xoá <strong>${state.recent.length}</strong> bài khỏi danh sách phát gần đây (trên mọi thiết bị của tài khoản)?`,
+    body: `Xoá <strong>${state.recent.length}</strong> bài khỏi danh sách phát gần đây?`,
     ok: "Xoá",
     okClass: "btn-danger",
   });

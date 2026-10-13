@@ -63,6 +63,12 @@ small {
 body {
   background: var(--bs-tertiary-bg);
 }
+/* 320px is the narrowest layout: below that the page keeps this width (theme.js scales it down to fit
+   on phones) instead of squeezing further */
+html,
+body {
+  min-width: 320px;
+}
 /* Exactly the visible screen: 100vh on mobile Safari/Chrome includes the area behind the address
    bar, which made the page scroll (and the header slide away) even when everything fits. */
 .app-body {
@@ -1731,9 +1737,22 @@ body:has(.fav-view) #filterSheet .type-filter {
   cursor: default;
 }
 
-/* the song in the player opens its list: pointer on the info, the row flashes once found */
-.dock-info {
+/* the song's name in the player opens its list: only the name itself (sized to its text, not the whole
+   width) is clickable; the row flashes once found */
+.dock-title {
+  align-self: flex-start;
+  max-width: 100%;
   cursor: pointer;
+  border-radius: 0.25rem;
+  transition: opacity 0.2s;
+}
+/* hover: the name fades a little (same colour, no underline) */
+.dock-title:hover {
+  opacity: 0.7;
+}
+.dock-title:focus-visible {
+  outline: 2px solid var(--fun-violet);
+  outline-offset: 2px;
 }
 @keyframes row-flash {
   0%,
@@ -1962,4 +1981,22 @@ body:has(.fav-view) #filterSheet .type-filter {
 }
 .recent-item.row-flash {
   animation: row-flash 1.8s ease-out;
+}
+
+/* the start screen while music plays: dancing kittens (a photo with its own dark background, so it sits in a
+   rounded frame whose edges fade into the page) */
+.empty-cat.cat-dancing {
+  translate: 0 0; /* the headphones cat's shift does not apply to this picture */
+  /* cat-dance-frames.webp is 39 frames of 320x224 stacked top to bottom: show one frame at a time and step
+     through them, 100ms each at 1x; --cat-rate (the playback speed) makes them dance faster or slower */
+  aspect-ratio: 320 / 224;
+  max-width: 100%;
+  object-fit: cover;
+  object-position: 50% 0;
+  animation: cat-frames calc(3.9s / var(--cat-rate, 1)) steps(39, jump-none) infinite;
+}
+@keyframes cat-frames {
+  to {
+    object-position: 50% 100%;
+  }
 }

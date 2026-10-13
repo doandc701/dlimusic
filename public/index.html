@@ -67,8 +67,13 @@
           <i class="bi bi-clock-history"></i><span class="d-none d-md-inline">Gần đây</span>
           <span class="badge rounded-pill text-bg-secondary" id="recentCount">0</span>
         </button>
-        <button class="btn btn-sm btn-outline-secondary btn-icon" id="themeBtn" title="Đổi giao diện sáng / tối">
-          <i class="bi bi-circle-half"></i>
+        <button
+          class="btn btn-sm btn-outline-secondary btn-icon"
+          id="themeBtn"
+          type="button"
+          title="Chuyển sang giao diện tối"
+        >
+          <i class="bi bi-sun-fill" id="themeIcon"></i>
         </button>
         <!-- the signed-in account: avatar button → card with the account's details -->
         <div class="dropdown d-none" id="userMenu">
@@ -447,7 +452,7 @@
       <div class="dock-info" id="nowPlaying">
         <span class="dock-art" aria-hidden="true"><i class="bi bi-music-note-beamed"></i></span>
         <span class="dock-text">
-          <span class="dock-title" id="npTitle"></span>
+          <span class="dock-title" id="npTitle" role="button" tabindex="0"></span>
           <span class="dock-sub" id="npSub"></span>
         </span>
         <button class="btn btn-sm fav-btn flex-none" id="playerFav" title="Thêm vào yêu thích" aria-pressed="false">
@@ -674,10 +679,6 @@
             <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Đóng"></button>
           </div>
           <div class="px-3 pt-3 pb-2 border-bottom">
-            <p class="small text-body-secondary mb-2">
-              Tích những hội thoại muốn thấy trong danh sách. Lưu riêng cho tài khoản
-              <strong id="chatsAccount"></strong>.
-            </p>
             <div class="input-group input-group-sm mb-2">
               <span class="input-group-text"><i class="bi bi-search"></i></span>
               <input type="search" class="form-control" id="chatsSearch" placeholder="Tìm hội thoại…" />

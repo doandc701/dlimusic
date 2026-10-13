@@ -112,11 +112,11 @@ npm run preview:web      # build vào dist/, chạy thử ở http://127.0.0.1:4
                          # build trên máy tự lấy API_ID / API_HASH trong .env cho lựa chọn "Dùng API có sẵn"
 ```
 
-**Đang chạy công khai tại: https://tele-downloader.vercel.app** (dự án Vercel `tele-downloader`).
+**Đang chạy công khai tại: https://dlimusic.vercel.app** (dự án Vercel `tele-downloader`).
 
-Mã nguồn: https://github.com/doandc701/tele-downloader (riêng tư). Dự án Vercel đã nối với repo này nên **không cần deploy tay**:
+Mã nguồn: https://github.com/doandc701/dlimusic (riêng tư). Dự án Vercel đã nối với repo này nên **không cần deploy tay**:
 
-- `git push` lên nhánh **`main`** → Vercel tự build và cập nhật https://tele-downloader.vercel.app
+- `git push` lên nhánh **`main`** → Vercel tự build và cập nhật https://dlimusic.vercel.app
 - push lên **nhánh khác** (hoặc mở Pull Request) → Vercel tạo **bản xem thử** riêng, có link để thử trước khi gộp vào `main`
 - build lỗi thì trang chính giữ nguyên bản cũ; xem lỗi ở Vercel → Deployments
 

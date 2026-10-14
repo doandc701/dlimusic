@@ -1636,6 +1636,7 @@ body:has(.fav-view) #filterSheet .type-filter {
   background: var(--seek-track);
 }
 .player-dock .time {
+  flex: none; /* never squeezed: a long song's "2:00:49" spilled past the screen's edge */
   font-size: 0.75rem;
   color: var(--bs-secondary-color);
   font-variant-numeric: tabular-nums;

@@ -1570,6 +1570,40 @@ body:has(.fav-view) #filterSheet .type-filter {
 .dock-controls #nextBtn {
   font-size: 1.3rem;
 }
+/* ±10 s like YouTube: a round arrow with "10" in the middle; the arrow gives a small turn when pressed */
+.dock-controls .seek10-btn {
+  position: relative;
+  font-size: 1.45rem;
+}
+.seek10-btn .bi {
+  transition: transform 0.2s ease;
+}
+#backBtn:active .bi {
+  transform: rotate(-40deg);
+}
+#fwdBtn:active .bi {
+  transform: rotate(40deg);
+}
+/* phones and small tablets: no ±10 s buttons, they would squeeze the song's name (the seek bar is right
+   there, and the ←/→ keys still work) */
+@media (max-width: 767.98px), (max-height: 500px) and (orientation: landscape) {
+  .dock-controls .seek10-btn {
+    display: none;
+  }
+}
+.seek10 {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  /* the font's line box has room above for Vietnamese marks, so centred digits sat ~1.6px low: lift them
+     onto the ring's centre (measured on the rendered icon) */
+  translate: 0 -0.08em;
+  font-size: 0.5rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  pointer-events: none;
+}
 .player-dock .btn-play {
   width: 42px;
   height: 42px;
@@ -1588,6 +1622,18 @@ body:has(.fav-view) #filterSheet .type-filter {
   flex: 1 1 auto;
   min-width: 0;
   height: 1rem;
+  /* like YouTube: played (--played, set by ui.js paintSeek) in colour, loaded (--loaded) lighter, rest dark */
+  --seek-rest: var(--bs-secondary-bg);
+  --seek-loaded: color-mix(in srgb, var(--bs-secondary-color) 40%, var(--bs-secondary-bg));
+  --seek-track:
+    linear-gradient(90deg, #7c3aed, #ec4899) 0 0 / var(--played, 0%) 100% no-repeat,
+    linear-gradient(var(--seek-loaded), var(--seek-loaded)) 0 0 / var(--loaded, 0%) 100% no-repeat, var(--seek-rest);
+}
+.dock-seek .seek::-webkit-slider-runnable-track {
+  background: var(--seek-track);
+}
+.dock-seek .seek::-moz-range-track {
+  background: var(--seek-track);
 }
 .player-dock .time {
   font-size: 0.75rem;

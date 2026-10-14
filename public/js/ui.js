@@ -1960,6 +1960,7 @@ function playFrom(scan, id) {
   $("curTime").textContent = "0:00";
   $("durTime").textContent = f.duration ? fmtDur(f.duration) : "0:00";
   $("seekRange").value = 0;
+  paintSeek();
   if (state.scan?.key === scan.key) {
     if (prev !== null && prevKey === scan.key) updateRow(prev);
     updateRow(id);
@@ -2154,6 +2155,19 @@ function syncTime() {
     $("seekRange").value = dur ? Math.round((p.currentTime / dur) * 1000) : 0;
   }
   if (dur) $("durTime").textContent = fmtDur(dur);
+  paintSeek();
+}
+
+/** The seek bar like YouTube's: played part in colour, the part already loaded lighter, the rest dark. */
+function paintSeek() {
+  const p = $("player");
+  const bar = $("seekRange");
+  const dur = Number.isFinite(p.duration) ? p.duration : 0;
+  let loaded = 0; // end of the loaded stretch that holds the current time
+  for (let i = 0; dur && i < p.buffered.length; i++)
+    if (p.buffered.start(i) <= p.currentTime + 1 && p.buffered.end(i) > loaded) loaded = p.buffered.end(i);
+  bar.style.setProperty("--played", `${bar.value / 10}%`);
+  bar.style.setProperty("--loaded", `${dur ? Math.min(100, (loaded / dur) * 100) : 0}%`);
 }
 
 $("playBtn").addEventListener("click", togglePlay);
@@ -2164,7 +2178,9 @@ $("seekRange").addEventListener("input", (e) => {
   seeking = true;
   const dur = $("player").duration;
   if (Number.isFinite(dur)) $("curTime").textContent = fmtDur((e.target.value / 1000) * dur) || "0:00";
+  paintSeek();
 });
+$("player").addEventListener("progress", paintSeek); // more of the song loaded
 $("seekRange").addEventListener("change", (e) => {
   const p = $("player");
   if (Number.isFinite(p.duration)) p.currentTime = (e.target.value / 1000) * p.duration;

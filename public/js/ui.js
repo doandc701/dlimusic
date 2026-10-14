@@ -1717,8 +1717,12 @@ function setView(view, push = true) {
   $("mainView").dataset.view = view;
   // One history entry for the list screen: opening another list from it (a song's own list from the player,
   // Favourites…) must not stack more, or Back / the ‹ button had to be pressed once per list.
-  if (view === "files" && push && isPhone() && history.state?.view !== "files")
+  if (view === "files" && push && isPhone() && history.state?.view !== "files") {
+    // opened straight from the cat (the song's name in the player): put the channel list in between, so ‹ / Back
+    // goes to the channels first, as it does after picking a channel
+    if (history.state?.view !== "chats") history.pushState({ view: "chats" }, "");
     history.pushState({ view: "files" }, "");
+  }
 }
 $("navBackBtn").addEventListener("click", () => (history.state?.view === "files" ? history.back() : setView("chats")));
 // phone Back: files → channel list → the cat

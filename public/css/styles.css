@@ -1089,7 +1089,8 @@ body {
   display: block;
   margin: 0 auto;
   width: auto;
-  height: clamp(140px, 32vh, 240px);
+  --cat-h: clamp(140px, 32vh, 240px);
+  height: var(--cat-h);
   user-select: none;
   -webkit-user-drag: none;
   filter: drop-shadow(0 10px 18px rgba(0, 0, 0, 0.18));
@@ -1121,7 +1122,7 @@ body {
 }
 @media (max-height: 500px) {
   .empty-cat {
-    height: 110px;
+    --cat-h: 110px;
   }
 }
 
@@ -2077,21 +2078,35 @@ body:has(.fav-view) #filterSheet .type-filter {
   animation: row-flash 1.8s ease-out;
 }
 
-/* the start screen while music plays: dancing kittens (a photo with its own dark background, so it sits in a
-   rounded frame whose edges fade into the page) */
-.empty-cat.cat-dancing {
-  translate: 0 0; /* the headphones cat's shift does not apply to this picture */
-  /* cat-dance-frames.webp is 39 frames of 320x224 stacked top to bottom: show one frame at a time and step
-     through them, 100ms each at 1x; --cat-rate (the playback speed) makes them dance faster or slower */
+/* the start screen while music plays: the dancing kittens. cat-dance-grid.webp holds their 39 frames (320x224)
+   in 3 columns x 13 rows — a single tall strip was too tall for iPhones (over their 4096/8192px image limit),
+   which then showed the headphones cat sliding about. The column steps every frame, the row every 3 frames,
+   100ms a frame at 1x; --cat-rate (the playback speed, set by ui.js) makes them dance faster or slower. */
+.empty-cat.cat-dance {
+  /* the box around is only as wide as the hint under it: size by the screen instead */
+  width: min(calc(100vw - 2rem), calc(var(--cat-h) * 320 / 224));
+  height: auto;
   aspect-ratio: 320 / 224;
-  max-width: 100%;
-  object-fit: cover;
-  object-position: 50% 0;
-  animation: cat-frames calc(3.9s / var(--cat-rate, 1)) steps(39, jump-none) infinite;
+  translate: 0 0; /* the headphones cat's shift does not apply here */
+  background: url("/img/cat-dance-grid.webp") 0 0 / 300% 1300% no-repeat;
+  animation:
+    cat-col calc(0.3s / var(--cat-rate, 1)) steps(3, jump-none) infinite,
+    cat-row calc(3.9s / var(--cat-rate, 1)) steps(13, jump-none) infinite;
 }
-@keyframes cat-frames {
+@keyframes cat-col {
+  from {
+    background-position-x: 0%;
+  }
   to {
-    object-position: 50% 100%;
+    background-position-x: 100%;
+  }
+}
+@keyframes cat-row {
+  from {
+    background-position-y: 0%;
+  }
+  to {
+    background-position-y: 100%;
   }
 }
 

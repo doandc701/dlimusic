@@ -1759,6 +1759,7 @@ function catToChats() {
   }, 1050);
 }
 $("emptyCat").addEventListener("click", catToChats);
+$("emptyCatDance").addEventListener("click", catToChats);
 /**
  * The song in the player → its list, from wherever the user is (another chat, the favourites, the chat
  * list on a phone): the list kept in memory is shown again (no rescan, loaded pages kept), scrolled to the
@@ -2109,7 +2110,7 @@ function setSpeed(rate, save = true) {
   const p = $("player");
   p.defaultPlaybackRate = rate; // also for the next songs (a new src resets playbackRate in some browsers)
   p.playbackRate = rate;
-  $("emptyCat").style.setProperty("--cat-rate", rate); // the dancing kittens keep pace
+  $("emptyCatDance").style.setProperty("--cat-rate", rate); // the dancing kittens keep pace
   $("speedBtn").textContent = `${rate}x`;
   $("speedBtn").classList.toggle("on", rate !== 1);
   $("speedVal").textContent = `${rate.toFixed(1)}x`;
@@ -2247,16 +2248,31 @@ player.addEventListener("ended", () => {
 
 // The kittens are 39 frames stacked in one picture that CSS steps through, so their speed can follow the
 // song's playback speed (an animated GIF / WebP always runs at its own speed).
-const HOME_CAT = { still: "/img/cat-headphones.webp", dance: "/img/cat-dance-frames.webp" };
-function setHomeCat(playing) {
-  const cat = $("emptyCat");
-  const dance = playing && !matchMedia("(prefers-reduced-motion: reduce)").matches;
-  const src = dance ? HOME_CAT.dance : HOME_CAT.still;
-  if (cat.getAttribute("src") === src) return;
-  cat.setAttribute("src", src); // the dancing one is only downloaded once music plays
-  cat.classList.toggle("cat-dancing", dance);
-  cat.alt = dance ? "Hai chú mèo con đang nhảy theo nhạc" : "Mèo đeo tai nghe đang thưởng thức nhạc";
+const HOME_CAT = { dance: "/img/cat-dance-grid.webp" };
+let danceReady = null; // resolves once the dancing kittens are downloaded and decoded
+let catDances = false; // what the cat should show now (the last play / pause wins)
+/** Fetch the kittens ahead (a song is loaded in the player), so ▶ swaps the picture at once. */
+function loadDanceCat() {
+  if (!danceReady) {
+    const img = new Image();
+    img.src = HOME_CAT.dance;
+    danceReady = img.decode().catch(() => {});
+  }
+  return danceReady;
 }
+function setHomeCat(playing) {
+  catDances = playing && !matchMedia("(prefers-reduced-motion: reduce)").matches;
+  // Swap only once the kittens are ready: the stepping animation on the still cat, while the strip was still
+  // loading, slid the headphones cat up and down for a moment.
+  if (catDances) loadDanceCat().then(() => catDances && showHomeCat(true));
+  else showHomeCat(false);
+}
+function showHomeCat(dance) {
+  // two elements, one shown at a time: the cat picture, or the kittens drawn by CSS (.cat-dance)
+  $("emptyCat").classList.toggle("d-none", dance);
+  $("emptyCatDance").classList.toggle("d-none", !dance);
+}
+player.addEventListener("loadstart", loadDanceCat); // a song in the player: get the kittens ready
 
 // ---------- reloading the page while a song plays: it goes on where it was ----------
 

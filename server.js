@@ -68,6 +68,7 @@ const PUBLIC_ASSETS = {
   "/img/apple-touch-icon.png": "image/png",
   "/img/cat-headphones.webp": "image/webp",
   "/img/cat-dance-frames.webp": "image/webp",
+  "/img/cat-dance-grid.webp": "image/webp",
 };
 const SETTINGS_FILE = path.resolve(process.env.SETTINGS_FILE || dataFile("settings.json"));
 const HISTORY_FILE = path.resolve(process.env.HISTORY_FILE || dataFile("history.json"));

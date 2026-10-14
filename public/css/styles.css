@@ -1186,6 +1186,21 @@ body {
   padding: 0 0.5rem;
   z-index: 1090;
 }
+/* ...over the list's own header (‹ back, Lọc, reload): taps go through the message to the button under it,
+   only its ✕ takes them — a tap no longer "does nothing" until the message fades */
+.app-toasts,
+.app-toasts .toast {
+  pointer-events: none;
+}
+.app-toasts .btn-close {
+  pointer-events: auto;
+}
+/* phones: the ✕ landed on the list's reload button; the message goes away by itself (3.5 s) */
+@media (max-width: 575.98px), (max-height: 500px) and (orientation: landscape) {
+  .app-toasts .btn-close {
+    display: none;
+  }
+}
 
 /* ---------- favourites (heart) ---------- */
 .file-table .col-fav {

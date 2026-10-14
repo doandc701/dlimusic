@@ -1715,13 +1715,17 @@ const homeView = () => (isPhone() ? "home" : "chats");
 
 function setView(view, push = true) {
   $("mainView").dataset.view = view;
-  if (view === "files" && push && isPhone()) history.pushState({ view: "files" }, "");
+  // One history entry for the list screen: opening another list from it (a song's own list from the player,
+  // Favourites…) must not stack more, or Back / the ‹ button had to be pressed once per list.
+  if (view === "files" && push && isPhone() && history.state?.view !== "files")
+    history.pushState({ view: "files" }, "");
 }
 $("navBackBtn").addEventListener("click", () => (history.state?.view === "files" ? history.back() : setView("chats")));
 // phone Back: files → channel list → the cat
-window.addEventListener("popstate", (e) =>
-  setView(e.state?.view === "chats" || !isPhone() ? "chats" : homeView(), false),
-);
+window.addEventListener("popstate", (e) => {
+  const v = e.state?.view;
+  setView(!isPhone() || v === "chats" ? "chats" : v === "files" ? "files" : homeView(), false);
+});
 
 // ---------- phones: tap the cat → channel list (Camera Shake + Whip Pan + white Flash + Push) ----------
 

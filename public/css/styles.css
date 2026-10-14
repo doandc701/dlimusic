@@ -28,10 +28,15 @@ h5,
   letter-spacing: -0.02em;
   color: var(--bs-body-color);
 }
-.navbar-brand:hover,
 .navbar-brand:focus-visible {
   color: var(--bs-body-color);
   opacity: 0.85;
+}
+@media (hover: hover) {
+  .navbar-brand:hover {
+    color: var(--bs-body-color);
+    opacity: 0.85;
+  }
 } /* the logo leads back to the start screen */
 .btn {
   font-weight: 500;
@@ -146,8 +151,10 @@ body {
   cursor: pointer;
   user-select: none;
 }
-.file-table th.sortable:hover {
-  color: var(--bs-primary);
+@media (hover: hover) {
+  .file-table th.sortable:hover {
+    color: var(--bs-primary);
+  }
 }
 .file-table th .sort-ico {
   opacity: 0.35;
@@ -319,10 +326,15 @@ body {
   color: var(--bs-secondary-color);
   border: 0;
 }
-.login-back:hover,
 .login-back:focus-visible {
   color: var(--bs-primary);
   background: var(--bs-tertiary-bg);
+}
+@media (hover: hover) {
+  .login-back:hover {
+    color: var(--bs-primary);
+    background: var(--bs-tertiary-bg);
+  }
 }
 .choice-btn {
   display: flex;
@@ -545,8 +557,10 @@ body {
 .choice-btn {
   --bs-btn-border-radius: 1rem;
 }
-.btn:not(:disabled):not(.btn-group > .btn):hover {
-  transform: translateY(-1px);
+@media (hover: hover) {
+  .btn:not(:disabled):not(.btn-group > .btn):hover {
+    transform: translateY(-1px);
+  }
 }
 .btn:not(:disabled):not(.btn-group > .btn):active {
   transform: translateY(0) scale(0.97);
@@ -580,9 +594,11 @@ body {
   --c: var(--fun-slate);
 }
 /* borderless icon buttons (player, history rows): a soft tinted bubble on hover */
-.btn.border-0:not(:disabled):hover {
-  --bs-btn-hover-bg: color-mix(in srgb, var(--c) 16%, transparent);
-  --bs-btn-hover-color: var(--c);
+@media (hover: hover) {
+  .btn.border-0:not(:disabled):hover {
+    --bs-btn-hover-bg: color-mix(in srgb, var(--c) 16%, transparent);
+    --bs-btn-hover-color: var(--c);
+  }
 }
 
 .btn-primary,
@@ -614,10 +630,12 @@ body {
   --g1: #f43f5e;
   --g2: #f97316;
 }
-.btn-primary:not(:disabled):hover,
-.btn-danger:not(:disabled):hover {
-  filter: brightness(1.08) saturate(1.1);
-  box-shadow: 0 6px 18px -6px color-mix(in srgb, var(--g2) 90%, transparent);
+@media (hover: hover) {
+  .btn-primary:not(:disabled):hover,
+  .btn-danger:not(:disabled):hover {
+    filter: brightness(1.08) saturate(1.1);
+    box-shadow: 0 6px 18px -6px color-mix(in srgb, var(--g2) 90%, transparent);
+  }
 }
 .btn-primary:disabled,
 .btn-danger:disabled {
@@ -1219,10 +1237,15 @@ body {
   font-size: 1.05rem;
   line-height: 1;
 }
-.fav-btn:hover,
 .fav-btn:focus-visible {
   color: #ec4899;
   background: color-mix(in srgb, #ec4899 12%, transparent);
+}
+@media (hover: hover) {
+  .fav-btn:hover {
+    color: #ec4899;
+    background: color-mix(in srgb, #ec4899 12%, transparent);
+  }
 }
 .fav-btn.on {
   color: #ec4899;
@@ -1243,8 +1266,10 @@ body {
   text-decoration: none;
   border-bottom: var(--bs-border-width) solid var(--bs-border-color);
 }
-.fav-entry:hover {
-  background: var(--bs-tertiary-bg);
+@media (hover: hover) {
+  .fav-entry:hover {
+    background: var(--bs-tertiary-bg);
+  }
 }
 .fav-avatar {
   background: linear-gradient(135deg, #ec4899, #8b5cf6);
@@ -1455,9 +1480,11 @@ body:has(.fav-view) #filterSheet .type-filter {
     background: var(--bs-tertiary-bg);
     border: 0;
   }
-  .rail-btn:hover {
-    background: color-mix(in srgb, var(--fun-violet) 20%, var(--bs-tertiary-bg));
-    color: var(--fun-violet);
+  @media (hover: hover) {
+    .rail-btn:hover {
+      background: color-mix(in srgb, var(--fun-violet) 20%, var(--bs-tertiary-bg));
+      color: var(--fun-violet);
+    }
   }
   .rail-toggle {
     margin-top: auto;
@@ -1812,8 +1839,10 @@ body:has(.fav-view) #filterSheet .type-filter {
   transition: opacity 0.2s;
 }
 /* hover: the name fades a little (same colour, no underline) */
-.dock-title:hover {
-  opacity: 0.7;
+@media (hover: hover) {
+  .dock-title:hover {
+    opacity: 0.7;
+  }
 }
 .dock-title:focus-visible {
   outline: 2px solid var(--fun-violet);
@@ -2063,5 +2092,17 @@ body:has(.fav-view) #filterSheet .type-filter {
 @keyframes cat-frames {
   to {
     object-position: 50% 100%;
+  }
+}
+
+/* Touch screens have no hover: a tap left Bootstrap's hover colour stuck on the button, and on iPhones a hover
+   change (above, behind @media (hover: hover)) made the first tap only "hover" and the second one click. */
+@media (hover: none) {
+  /* hover look = resting look (as variables, so pressed / "on" states keep their own colours);
+     .btn.btn outranks the theme rules that set the hover colours */
+  .btn.btn {
+    --bs-btn-hover-color: var(--bs-btn-color);
+    --bs-btn-hover-bg: var(--bs-btn-bg);
+    --bs-btn-hover-border-color: var(--bs-btn-border-color);
   }
 }

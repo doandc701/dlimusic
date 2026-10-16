@@ -200,7 +200,6 @@ const state = {
   selected: new Set(), // file ids
   lastClicked: null,
   query: "",
-  show: "all",
   sort: "default", // default = channel order (newest first), not persisted on purpose
   jobs: new Map(),
   loadToken: 0,
@@ -1269,7 +1268,6 @@ function visibleFiles({ withSearch = true } = {}) {
   const list = state.scan.files.filter(
     (f) =>
       (!q || norm(`${f.name} ${f.title || ""} ${f.performer || ""}`).includes(q)) &&
-      (state.show === "all" || (state.show === "done") === f.downloaded) &&
       (!state.scan.fav ||
         (state.favorites.has(f.fav) && // "Bài hát yêu thích": an un-hearted file leaves the list
           (state.favScope === "all" || f.fav.split("|")[0] === state.favScope))),
@@ -1337,7 +1335,6 @@ function stateCell(f) {
   }
   if (job && job.status === "queued") return `<span class="badge text-bg-secondary">Đang chờ</span>`;
   if (job && job.status === "failed") return `<span class="badge text-bg-danger" title="${esc(job.error)}">Lỗi</span>`;
-  if (f.downloaded) return `<span class="badge text-bg-success">Đã tải</span>`;
   return "";
 }
 
@@ -1658,11 +1655,6 @@ $("fileSearch").addEventListener("input", (e) => {
   state.query = e.target.value;
   renderFiles();
 });
-function setShow(show) {
-  state.show = show;
-  document.querySelectorAll("#showSeg button").forEach((x) => x.classList.toggle("active", x.dataset.show === show));
-  renderFiles();
-}
 
 function setType(type) {
   if (type === state.type) return;
@@ -1674,10 +1666,6 @@ function setType(type) {
   loadFiles();
 }
 
-$("showSeg").addEventListener("click", (e) => {
-  const b = e.target.closest("button");
-  if (b) setShow(b.dataset.show);
-});
 $("typeSeg").addEventListener("click", (e) => {
   const b = e.target.closest("button");
   if (b) setType(b.dataset.type);
@@ -1691,10 +1679,7 @@ $("sortSelM").innerHTML = $("sortSel").innerHTML;
 function syncFilterSheet() {
   $("typeSelM").value = state.type;
   $("sortSelM").value = state.sort;
-  document
-    .querySelectorAll("#showSegM button")
-    .forEach((x) => x.classList.toggle("active", x.dataset.show === state.show));
-  const active = (state.type !== "all") + (state.sort !== "default") + (state.show !== "all");
+  const active = (state.type !== "all") + (state.sort !== "default");
   $("filterBadge").textContent = active;
   show($("filterBadge"), active > 0);
   if (state.scan) $("filterCount").textContent = $("fileCount").textContent;
@@ -1702,10 +1687,6 @@ function syncFilterSheet() {
 
 $("typeSelM").addEventListener("change", (e) => setType(e.target.value));
 $("sortSelM").addEventListener("change", (e) => setSort(e.target.value));
-$("showSegM").addEventListener("click", (e) => {
-  const b = e.target.closest("button");
-  if (b) setShow(b.dataset.show);
-});
 $("filterSheet").addEventListener("show.bs.offcanvas", syncFilterSheet);
 
 const isPhone = () => matchMedia("(max-width: 575.98px), (max-height: 500px) and (orientation: landscape)").matches;
@@ -1792,7 +1773,7 @@ async function showSongInItsChat(f) {
   if (!$("files").querySelector(`tr[data-id="${msgId}"]`)) {
     state.query = "";
     $("fileSearch").value = "";
-    setShow("all"); // hidden by the search / "Chưa tải · Đã tải"
+    renderFiles(); // hidden by the search
   }
   flashRow($("files").querySelector(`tr[data-id="${msgId}"]`));
 }
@@ -1842,11 +1823,11 @@ function showPlayingList() {
   setRailOpen(false);
   let row = $("files").querySelector(`tr[data-id="${state.playingId}"]`);
   if (!row) {
-    // hidden by the search / "Chưa tải · Đã tải" / the favourites' chat choice: show everything
+    // hidden by the search / the favourites' chat choice: show everything
     state.query = "";
     $("fileSearch").value = "";
     if (scan.fav) state.favScope = "all";
-    setShow("all");
+    renderFiles();
     row = $("files").querySelector(`tr[data-id="${state.playingId}"]`);
   }
   flashRow(row);
@@ -2526,12 +2507,7 @@ function renderPreview() {
   const list = previewList();
   const i = list.findIndex((x) => x.id === f.id);
   $("previewTitle").textContent = displayName(f);
-  $("previewInfo").textContent = [
-    `${i + 1}/${list.length}`,
-    fmt(f.size),
-    fmtDur(f.duration),
-    f.downloaded ? "Đã tải" : "",
-  ]
+  $("previewInfo").textContent = [`${i + 1}/${list.length}`, fmt(f.size), fmtDur(f.duration)]
     .filter(Boolean)
     .join(" · ");
   $("previewPrev").disabled = i <= 0;
@@ -2852,8 +2828,7 @@ async function startDownload(target) {
     toast(`Đã thêm ${added} file vào hàng chờ → ${outDir}`);
     state.selected.clear();
     state.dlTarget = null;
-    renderFiles();
-    setPanelOpen(true);
+    renderFiles(); // progress: under "Tải xuống" in the header
   } catch (err) {
     if (err.code !== "NEED_DIR") return toast(err.message, "error");
     const picked = await pickFolder({ remember: true });
@@ -2923,8 +2898,9 @@ function setPanelOpen(open) {
 
 function renderJobs() {
   const jobs = [...state.jobs.values()].filter((j) => j.status === "queued" || j.status === "downloading");
-  show($("activeBox"), jobs.length > 0);
-  if (!jobs.length) return;
+  show($("dlMenu"), jobs.length > 0);
+  $("dlCount").textContent = jobs.length;
+  if (!jobs.length) return void bootstrap.Dropdown.getInstance($("dlBtn"))?.hide();
 
   const downloading = jobs.filter((j) => j.status === "downloading").length;
   const total = jobs.reduce((s, j) => s + (j.size || 0), 0);
@@ -2934,7 +2910,7 @@ function renderJobs() {
   const bar = $("dlBar").querySelector(".progress-bar");
   bar.style.width = total ? `${(got / total) * 100}%` : "0";
   bar.className = "progress-bar progress-bar-striped progress-bar-animated";
-  $("cancelBtn").disabled = !jobs.some((j) => j.status === "queued");
+  $("cancelBtn").disabled = !jobs.some((j) => j.status === "queued" || j.status === "downloading");
 
   jobs.sort((a, b) => (a.status === "downloading" ? 0 : 1) - (b.status === "downloading" ? 0 : 1));
   $("dlBody").innerHTML = jobs

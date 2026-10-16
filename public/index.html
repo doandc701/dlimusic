@@ -63,6 +63,36 @@
         ><img src="img/logo-64.png" class="brand-logo" alt="" /><span class="brand-text">DLiMusic</span></a
       >
       <div class="d-flex align-items-center gap-2 ms-auto flex-none">
+        <!-- downloads in progress: shown while there are some, the list opens from it -->
+        <div class="dropdown d-none" id="dlMenu">
+          <button
+            class="btn btn-sm btn-outline-secondary"
+            id="dlBtn"
+            type="button"
+            data-bs-toggle="dropdown"
+            data-bs-auto-close="outside"
+            aria-expanded="false"
+            title="Đang tải xuống"
+          >
+            <i class="bi bi-cloud-arrow-down"></i><span class="d-none d-md-inline">Tải xuống</span>
+            <span class="badge rounded-pill text-bg-secondary" id="dlCount">0</span>
+          </button>
+          <div class="dropdown-menu dropdown-menu-end dl-menu p-0 shadow" id="activeBox">
+            <div class="px-3 pt-3 pb-2 border-bottom">
+              <div class="d-flex align-items-center gap-2 mb-2">
+                <i class="bi bi-cloud-arrow-down text-primary"></i>
+                <strong class="flex-grow-1 small" id="dlTitle">Đang tải</strong>
+                <button class="btn btn-sm btn-outline-danger" id="cancelBtn" title="Huỷ các file đang tải và đang chờ">
+                  <i class="bi bi-x-circle"></i> Huỷ
+                </button>
+              </div>
+              <div class="progress progress-thin" id="dlBar">
+                <div class="progress-bar"></div>
+              </div>
+            </div>
+            <ul class="list-group list-group-flush active-list" id="dlBody"></ul>
+          </div>
+        </div>
         <button class="btn btn-sm btn-outline-secondary d-none" id="recentBtn" title="Phát gần đây">
           <i class="bi bi-clock-history"></i><span class="d-none d-md-inline">Gần đây</span>
           <span class="badge rounded-pill text-bg-secondary" id="recentCount">0</span>
@@ -349,11 +379,6 @@
                 <option value="dur-asc">Thời lượng ngắn → dài</option>
               </select>
             </div>
-            <div class="btn-group btn-group-sm d-none d-sm-inline-flex" role="group" id="showSeg">
-              <button class="btn btn-outline-secondary active" data-show="all">Tất cả</button>
-              <button class="btn btn-outline-secondary" data-show="new">Chưa tải</button>
-              <button class="btn btn-outline-secondary" data-show="done">Đã tải</button>
-            </div>
             <!-- right corner, above the list: what is selected + download -->
             <div class="ms-auto d-flex align-items-center gap-2 dl-tools">
               <span id="selInfo" class="small"></span>
@@ -412,23 +437,8 @@
         </div>
       </section>
 
-      <!-- downloads + history: docked column so it never covers the list or the buttons -->
+      <!-- history: docked column so it never covers the list or the buttons -->
       <aside class="dl-panel bg-body border-start d-none flex-column" id="dl">
-        <div class="border-bottom d-none" id="activeBox">
-          <div class="px-3 pt-3 pb-2">
-            <div class="d-flex align-items-center gap-2 mb-2">
-              <i class="bi bi-cloud-arrow-down text-primary"></i>
-              <strong class="flex-grow-1 small" id="dlTitle">Đang tải</strong>
-              <button class="btn btn-sm btn-outline-danger" id="cancelBtn" title="Huỷ các file đang chờ">
-                <i class="bi bi-x-circle"></i> Huỷ chờ
-              </button>
-            </div>
-            <div class="progress progress-thin" id="dlBar">
-              <div class="progress-bar"></div>
-            </div>
-          </div>
-          <ul class="list-group list-group-flush active-list" id="dlBody"></ul>
-        </div>
         <!-- songs played lately (shared by every device of the account) -->
         <div class="px-3 pt-3 pb-2 d-flex align-items-center gap-2">
           <i class="bi bi-clock-history"></i>
@@ -825,14 +835,6 @@
         <div>
           <label class="form-label small fw-semibold mb-1" for="sortSelM">Sắp xếp</label>
           <select class="form-select" id="sortSelM"></select>
-        </div>
-        <div>
-          <div class="form-label small fw-semibold mb-1">Hiển thị</div>
-          <div class="btn-group w-100" role="group" id="showSegM">
-            <button class="btn btn-outline-secondary" data-show="all">Tất cả</button>
-            <button class="btn btn-outline-secondary" data-show="new">Chưa tải</button>
-            <button class="btn btn-outline-secondary" data-show="done">Đã tải</button>
-          </div>
         </div>
         <div class="small text-body-secondary text-center" id="filterCount"></div>
         <button class="btn btn-primary" data-bs-dismiss="offcanvas">Xong</button>

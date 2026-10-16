@@ -57,15 +57,6 @@ test("© year is filled in from the clock, never written in the page", () => {
   assert.match(script, /\.copy-year[\s\S]{0,80}new Date\(\)\.getFullYear\(\)/);
 });
 
-test("each show filter group (desktop bar, phone sheet) has every filter exactly once", () => {
-  for (const group of ["showSeg", "showSegM"]) {
-    const start = markup.indexOf(`id="${group}"`);
-    const block = markup.slice(start, markup.indexOf("</div>", start));
-    const shows = [...block.matchAll(/data-show="(\w+)"/g)].map((m) => m[1]);
-    assert.deepEqual(shows, ["all", "new", "done"], group);
-  }
-});
-
 test("no two functions of the page share a name (the second silently replaces the first)", () => {
   const names = [...script.matchAll(/^\s*(?:async\s+)?function\s*\*?\s*([A-Za-z_$][\w$]*)\s*\(/gm)].map((m) => m[1]);
   const dup = [...new Set(names.filter((n, i) => names.indexOf(n) !== i))];

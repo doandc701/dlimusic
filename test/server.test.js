@@ -365,7 +365,7 @@ describe("validation", () => {
     assert.deepEqual(
       (await api("/api/cancel", { method: "POST", body: {} })).data,
       { cancelled: 0 },
-      "no keys: all queued, as before",
+      "no keys: every download (queued and running)",
     );
   });
 

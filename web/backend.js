@@ -879,9 +879,21 @@ function cancelScans(keys) {
   return n;
 }
 
+/** "Huỷ": every download, queued ones dropped and running ones aborted at their next chunk. */
+function cancelAll() {
+  let n = cancelQueued();
+  for (const job of jobs.values()) {
+    if (job.status === "downloading" && !job.abort) {
+      job.abort = true;
+      n++;
+    }
+  }
+  return n;
+}
+
 const cancelledError = () => Object.assign(new Error("Đã huỷ"), { cancelled: true });
 
-/** Scan keys sent by the UI for POST /api/cancel: undefined = all queued downloads. */
+/** Scan keys sent by the UI for POST /api/cancel: undefined = every download (queued and running). */
 function cancelKeys(value) {
   if (value === undefined) return undefined;
   if (!Array.isArray(value) || value.length > 1000 || !value.every((k) => typeof k === "string" && k.length <= 200))
@@ -1271,10 +1283,10 @@ async function route(method, url, body, signal) {
       return { removed: removeHistory(history.map((h) => h.id)) };
 
     case "POST /api/cancel": {
-      // { keys: [scan key…] } stops the downloads of those scans (queued and running); no keys = all queued.
+      // { keys: [scan key…] } stops the downloads of those scans (queued and running); no keys = all of them.
       const keys = cancelKeys(body.keys);
       if (keys === null) throw httpError(400, "Danh sách không hợp lệ");
-      return { cancelled: keys ? cancelScans(keys) : cancelQueued() };
+      return { cancelled: keys ? cancelScans(keys) : cancelAll() };
     }
 
     case "POST /api/clear":

@@ -190,8 +190,14 @@ body {
   flex: none;
   min-height: 0;
 }
-.dl-panel .active-list {
-  max-height: 35vh;
+/* "Tải xuống" (header): the downloads in progress, apart from "Phát gần đây" */
+.dl-menu {
+  width: min(360px, calc(100vw - 24px));
+  overflow: hidden;
+  border-radius: 0.9rem;
+}
+.dl-menu .active-list {
+  max-height: 50vh;
   overflow-y: auto;
 }
 .pick-list {
@@ -245,7 +251,7 @@ body {
   background: rgba(0, 0, 0, 0.4);
   z-index: 1044;
 }
-/* Under the name: the download status ("Đã tải", progress…) on every screen; size · duration too where that
+/* Under the name: the download status (progress…) on every screen; size · duration too where that
    column is hidden (below 992px). */
 .m-meta {
   display: flex;
@@ -652,6 +658,9 @@ body {
 #recentBtn {
   --c: var(--fun-amber);
 }
+#dlBtn {
+  --c: var(--fun-green);
+}
 #themeBtn {
   --c: var(--fun-violet);
 }
@@ -676,15 +685,6 @@ body {
 }
 [data-type="all"] {
   --c: var(--fun-indigo);
-}
-[data-show="all"] {
-  --c: var(--fun-indigo);
-}
-[data-show="new"] {
-  --c: var(--fun-amber);
-}
-[data-show="done"] {
-  --c: var(--fun-green);
 }
 #reloadBtn {
   --c: var(--fun-green);
@@ -1301,15 +1301,6 @@ body:has(.fav-view) #filterSheet .type-filter {
     padding-right: 0.4rem;
   }
 }
-/* phone filter sheet: four show filters share one row */
-#showSegM > .btn {
-  white-space: nowrap;
-  padding-left: 0.35rem;
-  padding-right: 0.35rem;
-  font-size: 0.875rem;
-  flex: 1 1 auto;
-}
-
 /* "Bài hát yêu thích": play bar (▶ Phát + which chats) */
 .fav-bar {
   display: none;

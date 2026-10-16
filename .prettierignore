@@ -7,3 +7,6 @@ package-lock.json
 .env
 .env.*
 downloads/
+mobile/.expo
+mobile/android
+mobile/ios

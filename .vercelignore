@@ -13,3 +13,6 @@ test/
 .env.local
 .env.*.local
 .vercel/
+
+# the React Native app (mobile/) is not part of the web deploy
+mobile/

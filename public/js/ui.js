@@ -381,7 +381,52 @@ $("userLogoutBtn").addEventListener("click", () => {
   signOut();
 });
 
+// ---------- page load splash: "DLiMusic" comes in letter by letter while the session reconnects ----------
+
+/**
+ * The letters come in more and more slowly, the last one is kept back: how long connecting takes is not
+ * known, so the name is only complete once it is done (then the rest come in quickly and the splash fades).
+ */
+const splash = (() => {
+  const el = $("bootSplash");
+  const letters = [...$("bootWord").children];
+  let shown = 0;
+  let timer = null;
+  let finished = false;
+  const reveal = () => letters[shown++]?.classList.add("in");
+  const creep = () => {
+    if (shown >= letters.length - 1) return;
+    reveal();
+    timer = setTimeout(creep, 140 * 1.3 ** shown);
+  };
+  timer = setTimeout(creep, 100);
+  setTimeout(() => self.finish(), 20_000); // still connecting after that: the login card says so
+  const self = {
+    get active() {
+      return !finished;
+    },
+    finish() {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timer);
+      const rest = () => {
+        if (shown < letters.length) {
+          reveal();
+          return void (timer = setTimeout(rest, 70));
+        }
+        setTimeout(() => {
+          el.classList.add("gone");
+          setTimeout(() => el.remove(), 400);
+        }, 350);
+      };
+      rest();
+    },
+  };
+  return self;
+})();
+
 function renderAuth(auth) {
+  if (splash.active && auth.step !== "connecting") splash.finish(); // signed in, or a step to show
   const prev = state.auth?.step;
   state.auth = auth;
   const ready = auth.step === "ready";

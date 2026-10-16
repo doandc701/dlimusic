@@ -5,13 +5,17 @@
 // cannot be faked — stores the session encrypted and answers with a random device token. Every other
 // call carries `Authorization: Bearer <token>`; only the token's account can be read or written.
 //
-//   POST /api/cloud/login    { session, api }        -> { token, accountId, data }
+//   POST /api/cloud/login    { session, api, keepSession? } -> { token, accountId, data }
+//                            keepSession: true (the phone app): the session only proves the account, it is not
+//                            stored — the one kept for the browser version stays (two devices on one session
+//                            would make Telegram drop it: AUTH_KEY_DUPLICATED)
 //   GET  /api/cloud/data                              -> { settings, history, visibleChats, favorites }
 //   POST /api/cloud/join     { data }                 -> { data }      (this device's copy merged with MongoDB's)
 //   POST /api/cloud/ops      { name, ops }            -> { ok }        (changes as operations, see core.js)
 //   GET  /api/cloud/session                           -> { session, api }   (restore on this device)
 //   POST /api/cloud/session  { session }              -> { ok }        (GramJS saved a new session)
-//   POST /api/cloud/logout                            -> { ok }        (forget the session, revoke the token)
+//   POST /api/cloud/logout   { keepSession? }         -> { ok }        (forget the session, revoke the token;
+//                                                                         keepSession: the token only)
 //   GET  /api/cloud/status                            -> { enabled }   (no token needed)
 
 import {
@@ -84,8 +88,10 @@ export function createCloudApi({ env, verify }) {
       }
       if (!/^\d{1,20}$/.test(acc)) throw fail(401, "Telegram không xác nhận phiên này", "CLOUD_VERIFY");
       const d = await db();
-      await setValue(d, id(acc, "session"), encrypt(body.session, key));
-      await saveApi(acc, api);
+      if (body.keepSession !== true) {
+        await setValue(d, id(acc, "session"), encrypt(body.session, key));
+        await saveApi(acc, api);
+      }
       return { token: await issueToken(d, acc), accountId: acc, data: await readData(acc) };
     },
 
@@ -121,10 +127,11 @@ export function createCloudApi({ env, verify }) {
       return { ok: true };
     },
 
-    "POST logout": async (req) => {
+    "POST logout": async (req, body) => {
       const { acc, token } = await account(req);
       const d = await db();
-      await deleteValue(d, id(acc, "session")); // settings, history, favourites stay for the next sign-in
+      // settings, history, favourites stay for the next sign-in
+      if (body.keepSession !== true) await deleteValue(d, id(acc, "session"));
       await revokeToken(d, token);
       return { ok: true };
     },

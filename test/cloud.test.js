@@ -390,6 +390,29 @@ describe("MongoDB storage", () => {
       );
     });
 
+    test("the phone app (keepSession): its session proves the account but the browser's stays stored", async () => {
+      const h = createCloudApi({ env: env(), verify });
+      const web = await call(h, "POST", "login", { body: { session: SESSION_A } });
+      const appSession = SESSION_A.replace(/A$/, "Y");
+      ACCOUNTS[appSession] = "111";
+      const app = await call(h, "POST", "login", { body: { session: appSession, keepSession: true } });
+      assert.equal(app.status, 200);
+      assert.equal(app.data.accountId, "111");
+      assert.equal(
+        (await call(h, "GET", "session", { token: web.data.token })).data.session,
+        SESSION_A,
+        "the browser's session was not replaced",
+      );
+      assert.equal((await call(h, "POST", "logout", { token: app.data.token, body: { keepSession: true } })).status, 200);
+      assert.equal((await call(h, "GET", "data", { token: app.data.token })).status, 401, "the app's token is revoked");
+      assert.equal(
+        (await call(h, "GET", "session", { token: web.data.token })).data.session,
+        SESSION_A,
+        "the browser's session is still there after the app signs out",
+      );
+      delete ACCOUNTS[appSession];
+    });
+
     test("requests: JSON content type, size limit, unknown actions, database down", async () => {
       const h = createCloudApi({ env: env(), verify });
       assert.equal((await call(h, "POST", "login", { body: { session: SESSION_A }, type: "text/plain" })).status, 415);

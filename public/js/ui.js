@@ -1262,9 +1262,10 @@ function jobFor(id) {
   return state.scan && state.jobs.get(`${state.scan.key}|${id}`);
 }
 
-function visibleFiles() {
+/** `withSearch: false`: the list as if the search box were empty (other filters and the sort still apply). */
+function visibleFiles({ withSearch = true } = {}) {
   if (!state.scan) return [];
-  const q = norm(state.query.trim());
+  const q = withSearch ? norm(state.query.trim()) : "";
   const list = state.scan.files.filter(
     (f) =>
       (!q || norm(`${f.name} ${f.title || ""} ${f.performer || ""}`).includes(q)) &&
@@ -1902,12 +1903,13 @@ let seeking = false; // user is dragging the seek bar
 const playable = (f) => !VISUAL.has(f.kind) && f.kind !== "document";
 
 /**
- * Play a file of the open list. The queue is that list as shown right now (search, filters, sort and,
- * in "Bài hát yêu thích", the chosen chat), so the next songs follow what is on screen.
+ * Play a file of the open list. The queue is that list as shown right now (filters, sort and, in
+ * "Bài hát yêu thích", the chosen chat) but not narrowed by the search: a search only finds where to
+ * start, then the songs after it in the list follow.
  */
 function play(id) {
   if (state.playingId === id && state.playingKey === state.scan.key) return togglePlay();
-  state.playQueue = visibleFiles()
+  state.playQueue = visibleFiles({ withSearch: false })
     .filter(playable)
     .map((f) => f.id);
   state.playOrder = orderFrom(id);
@@ -1918,7 +1920,7 @@ function play(id) {
 function extendQueue(scan) {
   if (state.playScan !== scan) return;
   const queued = new Set(state.playQueue);
-  const fresh = visibleFiles()
+  const fresh = visibleFiles({ withSearch: false })
     .filter(playable)
     .map((f) => f.id)
     .filter((id) => !queued.has(id));

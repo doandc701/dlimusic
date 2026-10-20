@@ -51,7 +51,16 @@
       ]
     },
     {
-      "source": "/(index.html|app.js|js/ui.js|js/theme.js|css/styles.css)?",
+      "source": "/(index.html|app.js|js/ui.js|js/theme.js|js/i18n.js|css/styles.css)?",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-cache"
+        }
+      ]
+    },
+    {
+      "source": "/js/lang/(.*)",
       "headers": [
         {
           "key": "Cache-Control",

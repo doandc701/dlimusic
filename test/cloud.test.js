@@ -403,7 +403,10 @@ describe("MongoDB storage", () => {
         SESSION_A,
         "the browser's session was not replaced",
       );
-      assert.equal((await call(h, "POST", "logout", { token: app.data.token, body: { keepSession: true } })).status, 200);
+      assert.equal(
+        (await call(h, "POST", "logout", { token: app.data.token, body: { keepSession: true } })).status,
+        200,
+      );
       assert.equal((await call(h, "GET", "data", { token: app.data.token })).status, 401, "the app's token is revoked");
       assert.equal(
         (await call(h, "GET", "session", { token: web.data.token })).data.session,

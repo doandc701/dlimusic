@@ -664,6 +664,31 @@ body {
 #themeBtn {
   --c: var(--fun-violet);
 }
+#langBtn {
+  --c: var(--fun-teal);
+  gap: 0.25rem;
+}
+/* "VI" / "EN" / "中" / "日": the same width whichever is shown, so the header does not shift */
+.lang-code {
+  min-width: 1.1rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1;
+}
+/* compact: four short names, about as wide as the header buttons around it */
+.lang-list {
+  --bs-dropdown-min-width: 8.5rem;
+  --bs-dropdown-padding-y: 0.25rem;
+  --bs-dropdown-item-padding-x: 0.75rem;
+  --bs-dropdown-item-padding-y: 0.3rem;
+  --bs-dropdown-font-size: 0.875rem;
+}
+.lang-list .dropdown-item .bi-check2 {
+  visibility: hidden;
+}
+.lang-list .dropdown-item.active .bi-check2 {
+  visibility: visible;
+}
 #filterBtn {
   --c: var(--fun-pink);
 }

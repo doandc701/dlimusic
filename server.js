@@ -62,6 +62,7 @@ const PUBLIC_DIR = path.join(ROOT_DIR, "public");
 const PUBLIC_ASSETS = {
   "/css/styles.css": "text/css; charset=utf-8",
   "/js/theme.js": "text/javascript; charset=utf-8",
+  "/js/i18n.js": "text/javascript; charset=utf-8",
   "/js/ui.js": "text/javascript; charset=utf-8",
   "/img/logo-64.png": "image/png",
   "/img/logo-192.png": "image/png",
@@ -70,6 +71,11 @@ const PUBLIC_ASSETS = {
   "/img/cat-dance-frames.webp": "image/webp",
   "/img/cat-dance-grid.webp": "image/webp",
 };
+// the language files (public/js/lang/<code>.js): any that is there, so adding a language needs no change here
+const langAsset = (p) =>
+  /^\/js\/lang\/[a-z]{2,3}(-[a-z0-9]+)?\.js$/i.test(p) && fs.existsSync(path.join(PUBLIC_DIR, p))
+    ? "text/javascript; charset=utf-8"
+    : null;
 const SETTINGS_FILE = path.resolve(process.env.SETTINGS_FILE || dataFile("settings.json"));
 const HISTORY_FILE = path.resolve(process.env.HISTORY_FILE || dataFile("history.json"));
 // Chats each Telegram account chose to show in the list: { "<account id>": ["<chat id>", …] }.
@@ -1545,7 +1551,7 @@ const server = http.createServer(async (req, res) => {
       });
       return res.end(html);
     }
-    const asset = req.method === "GET" && PUBLIC_ASSETS[url.pathname];
+    const asset = req.method === "GET" && (PUBLIC_ASSETS[url.pathname] || langAsset(url.pathname));
     if (asset) {
       res.writeHead(200, { "Content-Type": asset, "Cache-Control": "no-store" });
       return res.end(fs.readFileSync(path.join(PUBLIC_DIR, url.pathname)));

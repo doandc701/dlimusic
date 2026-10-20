@@ -314,6 +314,9 @@ describe("security hardening (R1-R7)", () => {
     for (const [p, type] of [
       ["/css/styles.css", /text\/css/],
       ["/js/theme.js", /javascript/],
+      ["/js/i18n.js", /javascript/],
+      ["/js/lang/en.js", /javascript/],
+      ["/js/lang/ja.js", /javascript/],
       ["/js/ui.js", /javascript/],
     ]) {
       const res = await authed(base + p);
@@ -329,7 +332,14 @@ describe("security hardening (R1-R7)", () => {
     assert.ok(
       Buffer.from(await logo.arrayBuffer()).equals(fs.readFileSync(path.join(ROOT, "public/img/logo-192.png"))),
     );
-    for (const p of ["/index.html/../server.js", "/js/../../.env", "/js/", "/css/x.css", "/public/index.html"]) {
+    for (const p of [
+      "/index.html/../server.js",
+      "/js/../../.env",
+      "/js/",
+      "/css/x.css",
+      "/public/index.html",
+      "/js/lang/xx.js", // no such language
+    ]) {
       assert.equal((await authed(base + p)).status, 404, p);
     }
   });

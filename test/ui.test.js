@@ -4,6 +4,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
+import vm from "node:vm";
 
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
 const markup = fs.readFileSync(path.join(ROOT, "public/index.html"), "utf8");
@@ -61,4 +62,69 @@ test("no two functions of the page share a name (the second silently replaces th
   const names = [...script.matchAll(/^\s*(?:async\s+)?function\s*\*?\s*([A-Za-z_$][\w$]*)\s*\(/gm)].map((m) => m[1]);
   const dup = [...new Set(names.filter((n, i) => names.indexOf(n) !== i))];
   assert.deepEqual(dup, []);
+});
+
+// the language files, in the order index.html loads them
+const LANG_FILES = [...markup.matchAll(/<script src="(js\/lang\/[\w-]+\.js)"><\/script>/g)].map((m) => m[1]);
+
+/** The language files + public/js/i18n.js, with just enough of a browser around them; returns window.tdlI18n. */
+function loadI18n() {
+  const window = {};
+  const context = vm.createContext({
+    window,
+    document: { documentElement: {}, title: "", body: null },
+    localStorage: { getItem: () => null },
+    MutationObserver: class {
+      observe() {}
+      takeRecords() {}
+    },
+    addEventListener() {},
+  });
+  for (const f of [...LANG_FILES, "js/i18n.js"])
+    vm.runInContext(fs.readFileSync(path.join(ROOT, "public", f), "utf8"), context);
+  return window.tdlI18n;
+}
+
+test("i18n: index.html loads every language file of public/js/lang/, before i18n.js", () => {
+  const files = fs
+    .readdirSync(path.join(ROOT, "public/js/lang"))
+    .filter((f) => f.endsWith(".js"))
+    .map((f) => `js/lang/${f}`);
+  assert.deepEqual([...LANG_FILES].sort(), files.sort());
+  assert.ok(markup.indexOf(LANG_FILES.at(-1)) < markup.indexOf('src="js/i18n.js"'));
+  const { LANGS } = loadI18n();
+  for (const [l, v] of Object.entries(LANGS)) for (const k of ["code", "name", "locale"]) assert.ok(v[k], `${l}.${k}`);
+});
+const normSpace = (s) => s.replace(/\s+/g, " ").trim();
+
+test("i18n: every language has the same sentences, each with the same {placeholders}", () => {
+  const { DICT, PATTERNS, t, setLang } = loadI18n();
+  const keys = Object.keys(DICT.en);
+  assert.ok(keys.length > 100);
+  const names = (s) => [...new Set([...s.matchAll(/\{(\w+)[}|]/g)].map((m) => m[1]))].sort();
+  const langs = Object.keys(DICT).filter((l) => l !== "vi");
+  assert.ok(langs.length >= 3);
+  for (const lang of langs) {
+    assert.deepEqual(Object.keys(DICT[lang]).sort(), [...keys].sort(), `${lang}: the same sentences as en.js`);
+    for (const vi of keys) assert.deepEqual(names(DICT[lang][vi]), names(vi), `${lang}: ${vi}`);
+  }
+  for (const p of PATTERNS) assert.ok(keys.includes(p), p);
+
+  // values are filled in, English picks singular / plural, a sentence without a translation stays Vietnamese
+  setLang("en");
+  assert.equal(t("Đã huỷ {n} file", { n: 1 }), "Cancelled 1 file");
+  assert.equal(t("Đã huỷ {n} file", { n: 3 }), "Cancelled 3 files");
+  assert.equal(t("Không có trong từ điển {n}", { n: 2 }), "Không có trong từ điển 2");
+});
+
+test("i18n: every sentence ui.js passes to t() has a translation", () => {
+  const keys = new Set(Object.keys(loadI18n().DICT.en).map(normSpace));
+  const used = [...script.matchAll(/\bt\(\s*("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')/g)].map((m) =>
+    normSpace(m[1].startsWith("'") ? m[1].slice(1, -1) : JSON.parse(m[1])),
+  );
+  assert.ok(used.length > 100);
+  assert.deepEqual(
+    used.filter((s) => !keys.has(s)),
+    [],
+  );
 });

@@ -120,9 +120,9 @@ if (matchMedia("(hover: hover)").matches) {
     trigger: "hover",
     container: "body",
     title(el) {
-      const t = el.getAttribute("title");
-      if (t) {
-        el.setAttribute("data-bs-original-title", t);
+      const tip = el.getAttribute("title");
+      if (tip) {
+        el.setAttribute("data-bs-original-title", tip);
         el.removeAttribute("title");
       } // a title changed since last time
       return el.getAttribute("data-bs-original-title") || "";
@@ -223,7 +223,7 @@ const CAPS = BACKEND ? BACKEND.caps : { pickFolder: true, openFolder: true };
 async function api(path, body, { signal } = {}) {
   if (BACKEND) {
     const { status, data } = await BACKEND.request(body === undefined ? "GET" : "POST", path, body, { signal });
-    if (status >= 400) throw Object.assign(new Error(data.error || "Lỗi"), { code: data.code, status });
+    if (status >= 400) throw Object.assign(new Error(data.error || t("Lỗi")), { code: data.code, status });
     return data;
   }
   const res = await fetch(
@@ -274,7 +274,7 @@ function toast(msg, kind = "success", { oneLine = false } = {}) {
 function renderTheme() {
   const dark = document.documentElement.getAttribute("data-bs-theme") === "dark";
   $("themeIcon").className = `bi ${dark ? "bi-moon-stars-fill" : "bi-sun-fill"}`;
-  $("themeBtn").setAttribute("title", dark ? "Chuyển sang giao diện sáng" : "Chuyển sang giao diện tối");
+  $("themeBtn").setAttribute("title", dark ? t("Chuyển sang giao diện sáng") : t("Chuyển sang giao diện tối"));
 }
 $("themeBtn").addEventListener("click", () => {
   const dark = document.documentElement.getAttribute("data-bs-theme") === "dark";
@@ -282,6 +282,58 @@ $("themeBtn").addEventListener("click", () => {
 });
 document.addEventListener("tdl:theme", renderTheme);
 renderTheme();
+
+// ---------- interface language (i18n.js translates the page; what this file draws is drawn again) ----------
+
+// the menu: one item per language file (js/lang/), each name in its own language
+$("langList").innerHTML = Object.entries(tdlI18n.LANGS)
+  .map(
+    ([l, v]) => `<li><button type="button" class="dropdown-item d-flex align-items-center gap-2" data-lang="${esc(l)}"
+      lang="${esc(v.html || l)}"><span class="flex-grow-1">${esc(v.name)}</span><i class="bi bi-check2"></i></button></li>`,
+  )
+  .join("");
+
+function renderLang() {
+  $("langCode").textContent = tdlI18n.LANGS[tdlI18n.lang].code;
+  for (const b of document.querySelectorAll("#langList [data-lang]")) {
+    const on = b.dataset.lang === tdlI18n.lang;
+    b.classList.toggle("active", on);
+    b.setAttribute("aria-current", String(on));
+  }
+}
+$("langList").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-lang]");
+  if (!b) return;
+  bootstrap.Dropdown.getOrCreateInstance($("langBtn")).hide(); // the page redraws below: close it explicitly
+  tdlI18n.setLang(b.dataset.lang);
+});
+renderLang();
+
+/** After the language changed: what this file built with t() is drawn again, without a reload. */
+function redrawForLang() {
+  renderLang();
+  renderTheme();
+  renderModes();
+  setSpeed($("player").defaultPlaybackRate, false);
+  setPhoneCode(phoneCode());
+  if (state.auth) {
+    if ($("floodLeft")) $("loginError").textContent = ""; // the countdown's sentence is built again
+    renderAuth(state.auth);
+  }
+  if (state.auth?.step !== "ready") return;
+  renderFavEntry();
+  if (state.dialogs.length) renderDialogs();
+  renderChatsInfo();
+  renderUserSync();
+  setScanning(state.scanning);
+  setSort(state.sort); // the size / length column header, and the open list
+  if (!state.scan) updateSelection();
+  renderJobs();
+  renderRecent();
+  renderPlayerFav();
+  fitBrand(); // the words got longer or shorter
+}
+tdlI18n.onChange(redrawForLang);
 
 // ---------- auth ----------
 
@@ -328,7 +380,8 @@ function fitBrand() {
 new ResizeObserver(fitBrand).observe(navbar);
 
 /** "+84912345678" -> "+84 912 345 678" */
-const fmtPhone = (p) => (p ? String(p).replace(/^\+(84|1|7|\d{2})(\d{3})(\d{3})(\d+)$/, "+$1 $2 $3 $4") : "Không có");
+const fmtPhone = (p) =>
+  p ? String(p).replace(/^\+(84|1|7|\d{2})(\d{3})(\d{3})(\d+)$/, "+$1 $2 $3 $4") : t("Không có");
 
 function renderUser(me) {
   const color = COLORS[Math.abs([...me.id].reduce((a, c) => a * 31 + c.charCodeAt(0), 7)) % COLORS.length];
@@ -338,9 +391,9 @@ function renderUser(me) {
     el.style.background = color;
   }
   $("userMenu").style.setProperty("--user-color", color); // the card's name band takes this account's colour
-  $("userBtn").setAttribute("aria-label", `Tài khoản: ${me.name}`);
+  $("userBtn").setAttribute("aria-label", t("Tài khoản: {name}", { name: me.name }));
   $("userCardName").textContent = me.name;
-  $("userCardUsername").textContent = me.username ? `@${me.username}` : "Chưa đặt username";
+  $("userCardUsername").textContent = me.username ? `@${me.username}` : t("Chưa đặt username");
   $("userCardPhone").textContent = fmtPhone(me.phone);
   $("userCardId").textContent = me.id;
   renderUserSync();
@@ -350,11 +403,11 @@ function renderUser(me) {
 function fmtSyncTime(at) {
   if (!at) return "";
   const d = new Date(at);
-  const time = d.toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" });
+  const time = d.toLocaleTimeString(tdlI18n.locale, { hour: "2-digit", minute: "2-digit" });
   const day =
     d.toDateString() === new Date().toDateString()
       ? ""
-      : ` ${d.toLocaleDateString("vi-VN", { day: "2-digit", month: "2-digit" })}`;
+      : ` ${d.toLocaleDateString(tdlI18n.locale, { day: "2-digit", month: "2-digit" })}`;
   return `<span class="text-body-secondary"> · ${time}${day}</span>`;
 }
 
@@ -362,10 +415,10 @@ function renderUserSync() {
   const c = state.cloud;
   $("userCardSync").innerHTML =
     !c || !c.enabled
-      ? `<span class="text-body-secondary">Chỉ lưu trên thiết bị này</span>`
+      ? `<span class="text-body-secondary">${t("Chỉ lưu trên thiết bị này")}</span>`
       : c.connected
-        ? `<span class="text-success"><i class="bi bi-check-circle-fill"></i> Đã đồng bộ</span>${fmtSyncTime(c.lastSync)}`
-        : `<span class="text-warning"><i class="bi bi-exclamation-triangle-fill"></i> Mất kết nối, đang thử lại</span>`;
+        ? `<span class="text-success"><i class="bi bi-check-circle-fill"></i> ${t("Đã đồng bộ")}</span>${fmtSyncTime(c.lastSync)}`
+        : `<span class="text-warning"><i class="bi bi-exclamation-triangle-fill"></i> ${t("Mất kết nối, đang thử lại")}</span>`;
 }
 
 $("userMenu").addEventListener("show.bs.dropdown", () => {
@@ -448,9 +501,9 @@ function renderAuth(auth) {
     if (LOGIN_STEPS[prev] || prev === "waiting" || prev === "qr") {
       // typed a code / password, or scanned the QR code
       // one line on a phone too: a long name is shortened ("Nguyễn Thị Phương Th…")
-      const full = auth.me?.name || "bạn";
+      const full = auth.me?.name || t("bạn");
       const name = [...full].length > 18 ? [...full].slice(0, 17).join("").trimEnd() + "…" : full;
-      toast(`Chào mừng ${name} quay trở lại 🥰`, "welcome", { oneLine: true });
+      toast(t("Chào mừng {name} quay trở lại 🥰", { name }), "welcome", { oneLine: true });
     }
     return;
   }
@@ -462,8 +515,8 @@ function renderAuth(auth) {
   if (choosing) {
     show($("loginForm"), false);
     show($("loginBack"), false); // first screen: nothing to go back to
-    $("loginTitle").textContent = "Chào mừng đến DLiMusic";
-    $("loginDesc").textContent = "Kết nối tài khoản Telegram để nghe và tải nhạc từ các kênh của bạn:";
+    $("loginTitle").textContent = t("Chào mừng đến DLiMusic");
+    $("loginDesc").textContent = t("Kết nối tài khoản Telegram để nghe và tải nhạc từ các kênh của bạn:");
     for (const b of document.querySelectorAll("#loginChoice button")) b.disabled = false;
     return;
   }
@@ -475,8 +528,8 @@ function renderAuth(auth) {
     show($("loginForm"), false);
     show($("loginBack"), false);
     show($("loginError"), false);
-    $("loginTitle").textContent = "Quét mã QR để đăng nhập";
-    $("loginDesc").textContent = "Dùng ứng dụng Telegram trên điện thoại";
+    $("loginTitle").textContent = t("Quét mã QR để đăng nhập");
+    $("loginDesc").textContent = t("Dùng ứng dụng Telegram trên điện thoại");
     renderQr(qr);
     return;
   }
@@ -499,17 +552,17 @@ function renderAuth(auth) {
   if (flood) showFloodCountdown(auth.floodUntil);
   else {
     stopFloodCountdown();
-    $("loginError").textContent = fieldError ? "" : waited ? FLOOD_OVER : auth.error || "";
+    $("loginError").textContent = fieldError ? "" : waited ? t(FLOOD_OVER) : auth.error || "";
   }
   if (step) {
-    $("loginTitle").textContent = step.title;
+    $("loginTitle").textContent = t(step.title);
     if (step.html)
-      $("loginDesc").innerHTML = step.html; // fixed text from this file, never user data
-    else $("loginDesc").textContent = step.desc;
+      $("loginDesc").innerHTML = t(step.html); // fixed text from this file, never user data
+    else $("loginDesc").textContent = t(step.desc);
     const input = $("loginInput");
     if (prev !== auth.step) {
       input.type = step.type;
-      input.placeholder = step.placeholder;
+      input.placeholder = t(step.placeholder);
       input.value = "";
       if (auth.step === "phone") fillPhone(auth.phone);
       input.inputMode = auth.step === "phone" || auth.step === "code" || auth.step === "api_id" ? "numeric" : "text";
@@ -521,10 +574,10 @@ function renderAuth(auth) {
     if (fieldError) setFieldError(auth.error);
     $("loginBtn").disabled = false;
   } else if (auth.step === "error") {
-    $("loginTitle").textContent = "Lỗi kết nối";
+    $("loginTitle").textContent = t("Lỗi kết nối");
     $("loginDesc").textContent = auth.error;
   } else {
-    $("loginTitle").textContent = auth.step === "waiting" ? "Đang xác thực…" : "Đang kết nối…";
+    $("loginTitle").textContent = auth.step === "waiting" ? t("Đang xác thực…") : t("Đang kết nối…");
     $("loginDesc").innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
   }
 }
@@ -535,22 +588,22 @@ const FLOOD_OVER = "Đã hết thời gian chờ của Telegram, bạn có thể
 let floodTimer = null;
 
 const hms = (ms) => {
-  const t = Math.max(0, Math.ceil(ms / 1000));
-  return [Math.floor(t / 3600), Math.floor((t % 3600) / 60), t % 60].map((n) => String(n).padStart(2, "0")).join(":");
+  const s = Math.max(0, Math.ceil(ms / 1000));
+  return [Math.floor(s / 3600), Math.floor((s % 3600) / 60), s % 60].map((n) => String(n).padStart(2, "0")).join(":");
 };
 
 function showFloodCountdown(until) {
   const box = $("loginError");
   if (!box.querySelector("#floodLeft")) {
     // fixed text from this file only
-    box.innerHTML = `<div>Telegram tạm khoá đăng nhập bằng mã cho số này vì thử quá nhiều lần.
-      <div class="flood-row">Thử lại sau <strong class="flood-left" id="floodLeft"></strong></div>
-      Bạn vẫn có thể đăng nhập ngay bằng <b>mã QR</b> bên dưới.</div>`;
+    box.innerHTML = `<div>${t("Telegram tạm khoá đăng nhập bằng mã cho số này vì thử quá nhiều lần.")}
+      <div class="flood-row">${t("Thử lại sau {time}", { time: '<strong class="flood-left" id="floodLeft"></strong>' })}</div>
+      ${t("Bạn vẫn có thể đăng nhập ngay bằng <b>mã QR</b> bên dưới.")}</div>`;
   }
   const tick = () => {
     if (Date.now() >= until) {
       stopFloodCountdown();
-      box.textContent = FLOOD_OVER;
+      box.textContent = t(FLOOD_OVER);
       return;
     }
     $("floodLeft").textContent = hms(until - Date.now());
@@ -578,7 +631,7 @@ function renderQr(qr) {
   }
   const tick = () => {
     const left = Math.ceil((qr.expires - Date.now()) / 1000);
-    $("qrTimer").textContent = left > 0 ? `Mã tự làm mới sau ${left} giây` : "Đang lấy mã mới…";
+    $("qrTimer").textContent = left > 0 ? t("Mã tự làm mới sau {n} giây", { n: left }) : t("Đang lấy mã mới…");
   };
   tick();
   clearInterval(qrTimer);
@@ -637,7 +690,7 @@ const PHONE_CODES = [
 $("phoneMenu").innerHTML = PHONE_CODES.map(
   ([code, cc, name]) =>
     `<li><button type="button" class="dropdown-item d-flex align-items-center gap-2" data-code="${code}">
-     <span class="fi fi-${cc}"></span><span>${name}</span><span class="ms-auto text-body-secondary small">+${code}</span></button></li>`,
+     <span class="fi fi-${cc}"></span><span>${t(name)}</span><span class="ms-auto text-body-secondary small">+${code}</span></button></li>`,
 ).join("");
 
 /** The selected country code ("84"), kept on the button. */
@@ -648,7 +701,7 @@ function setPhoneCode(code, remember) {
   $("phoneCode").dataset.code = entry[0];
   $("phoneFlag").className = `fi fi-${entry[1]}`;
   $("phoneDial").textContent = `+${entry[0]}`;
-  $("phoneCode").title = `${entry[2]} (+${entry[0]})`;
+  $("phoneCode").title = `${t(entry[2])} (+${entry[0]})`;
   for (const b of document.querySelectorAll("#phoneMenu [data-code]"))
     b.classList.toggle("active", b.dataset.code === entry[0]);
   if (remember)
@@ -714,7 +767,7 @@ $("otpBoxes").innerHTML = Array.from(
   { length: OTP_LEN },
   (_, i) =>
     `<input class="form-control otp-box" inputmode="numeric" pattern="[0-9]*" maxlength="1"
-     ${i === 0 ? 'autocomplete="one-time-code"' : 'autocomplete="off"'} aria-label="Số thứ ${i + 1}">`,
+     ${i === 0 ? 'autocomplete="one-time-code"' : 'autocomplete="off"'} aria-label="${t("Số thứ {n}", { n: i + 1 })}">`,
 ).join("");
 
 /** The code step shows the digit boxes instead of the single input (which then only carries the value). */
@@ -794,14 +847,14 @@ function setFieldError(msg) {
 
 const phoneMessage = () =>
   phoneCode() === "84"
-    ? "Số điện thoại Việt Nam gồm 9 số sau +84 (có thể gõ kèm số 0 ở đầu, vd 0912 345 678)."
-    : "Số điện thoại không hợp lệ.";
+    ? t("Số điện thoại Việt Nam gồm 9 số sau +84 (có thể gõ kèm số 0 ở đầu, vd 0912 345 678).")
+    : t("Số điện thoại không hợp lệ.");
 
 /** Validate the phone field; returns "+<code><number>" or null (and shows why). */
 function checkPhone() {
   const input = $("loginInput");
   if (!input.value.trim()) {
-    setFieldError("Hãy nhập số điện thoại.");
+    setFieldError(t("Hãy nhập số điện thoại."));
     return null;
   }
   const value = composePhone(phoneCode(), input.value);
@@ -820,14 +873,14 @@ $("loginForm").addEventListener("submit", async (e) => {
   e.preventDefault();
   let value = $("loginInput").value;
   if (state.auth.step === "code" && value.length < OTP_LEN) {
-    $("loginError").textContent = `Nhập đủ ${OTP_LEN} số của mã xác nhận.`;
+    $("loginError").textContent = t("Nhập đủ {n} số của mã xác nhận.", { n: OTP_LEN });
     show($("loginError"), true);
     otpInputs()[value.length]?.focus();
     return;
   }
   // novalidate: the browser's own bubbles are off, empty fields are flagged Bootstrap-style instead
   if (state.auth.step !== "code" && state.auth.step !== "phone" && !value.trim()) {
-    setFieldError("Không được để trống.");
+    setFieldError(t("Không được để trống."));
     $("loginInput").focus();
     return;
   }
@@ -853,9 +906,9 @@ $("loginForm").addEventListener("submit", async (e) => {
 /** "Đăng xuất" (in the account card): confirm, then back to the login screen. */
 async function signOut() {
   const ok = await ask({
-    title: '<i class="bi bi-box-arrow-right text-danger"></i> Đăng xuất',
-    body: "Bạn có muốn đăng xuất tài khoản khỏi DLiMusic?",
-    ok: "Đăng xuất",
+    title: `<i class="bi bi-box-arrow-right text-danger"></i> ${t("Đăng xuất")}`,
+    body: t("Bạn có muốn đăng xuất tài khoản khỏi DLiMusic?"),
+    ok: t("Đăng xuất"),
     okClass: "btn-danger",
   });
   if (!ok) return;
@@ -863,7 +916,7 @@ async function signOut() {
   resetWorkspace();
   renderAuth({ step: "phone", error: null, me: null, phone: state.auth?.phone || "" });
   api("/api/logout", {})
-    .then(() => toast("Xin chào và hẹn gặp lại", "bye"))
+    .then(() => toast(t("Xin chào và hẹn gặp lại"), "bye"))
     .catch((e) => toast(e.message, "error"));
 }
 
@@ -919,7 +972,7 @@ function dialogAvatar(d) {
 }
 
 const dialogSub = (d) =>
-  `<i class="bi ${TYPE_ICON[d.type]}"></i> ${TYPE_LABEL[d.type]}${d.username ? " · @" + esc(d.username) : ""}`;
+  `<i class="bi ${TYPE_ICON[d.type]}"></i> ${t(TYPE_LABEL[d.type])}${d.username ? " · @" + esc(d.username) : ""}`;
 
 async function loadDialogs() {
   try {
@@ -1010,16 +1063,16 @@ function dialogSortMenu() {
   const cur = DIALOG_SORTS[dialogSort];
   return `<div class="dropdown flex-none">
     <button class="btn btn-sm chats-bar-btn chats-sort-btn${dialogSort !== "recent" ? " is-sorted" : ""}" type="button" data-bs-toggle="dropdown"
-      aria-expanded="false" title="Sắp xếp: ${cur.label}" aria-label="Sắp xếp hội thoại: ${cur.label}"><i class="bi bi-arrow-down-up"></i></button>
+      aria-expanded="false" title="${t("Sắp xếp: {label}", { label: t(cur.label) })}" aria-label="${t("Sắp xếp hội thoại: {label}", { label: t(cur.label) })}"><i class="bi bi-arrow-down-up"></i></button>
     <ul class="dropdown-menu dropdown-menu-end shadow-sm">
-      <li><h6 class="dropdown-header">Sắp xếp hội thoại</h6></li>
+      <li><h6 class="dropdown-header">${t("Sắp xếp hội thoại")}</h6></li>
       ${Object.entries(DIALOG_SORTS)
         .map(
           ([
             k,
             s,
           ]) => `<li><button class="dropdown-item d-flex align-items-center gap-2${k === dialogSort ? " active" : ""}" type="button" data-dialog-sort="${k}">
-        <i class="bi ${s.icon}"></i><span class="flex-grow-1">${s.label}</span>${k === dialogSort ? '<i class="bi bi-check2"></i>' : ""}</button></li>`,
+        <i class="bi ${s.icon}"></i><span class="flex-grow-1">${t(s.label)}</span>${k === dialogSort ? '<i class="bi bi-check2"></i>' : ""}</button></li>`,
         )
         .join("")}
     </ul></div>`;
@@ -1036,15 +1089,15 @@ function renderDialogs() {
   $("chatsBar").innerHTML = total
     ? `
     <span class="text-truncate"><i class="bi ${state.visibleChats ? "bi-funnel-fill text-primary" : "bi-chat-dots"}"></i>
-      ${state.visibleChats ? `<strong>${shown.length}</strong>/${total} hội thoại` : `<strong>${total}</strong> hội thoại`}</span>
+      ${state.visibleChats ? t("<strong>{n}</strong>/{total} hội thoại", { n: shown.length, total }) : t("<strong>{n}</strong> hội thoại", { n: total })}</span>
     <span class="ms-auto"></span>${dialogSortMenu()}
     <button class="btn btn-sm chats-bar-btn flex-none" data-chats-edit>
-      <i class="bi bi-sliders"></i> ${state.visibleChats ? "Chọn lại" : "Chọn hiển thị"}</button>`
+      <i class="bi bi-sliders"></i> ${state.visibleChats ? t("Chọn lại") : t("Chọn hiển thị")}</button>`
     : "";
   if (!shown.length && state.dialogs.length) {
     $("dialogs").innerHTML = `<div class="text-center text-body-secondary small p-4">
-      <i class="bi bi-eye-slash fs-3 d-block mb-2"></i>Chưa chọn hội thoại nào để hiển thị.
-      <div class="mt-2"><button class="btn btn-sm btn-primary" data-chats-edit><i class="bi bi-sliders"></i> Chọn hội thoại</button></div></div>`;
+      <i class="bi bi-eye-slash fs-3 d-block mb-2"></i>${t("Chưa chọn hội thoại nào để hiển thị.")}
+      <div class="mt-2"><button class="btn btn-sm btn-primary" data-chats-edit><i class="bi bi-sliders"></i> ${t("Chọn hội thoại")}</button></div></div>`;
     return;
   }
   $("dialogs").innerHTML = list.length
@@ -1058,8 +1111,8 @@ function renderDialogs() {
         })
         .join("")
     : q
-      ? `<div class="text-body-secondary small p-3">Không tìm thấy. Nhấn Enter để mở “${esc($("dialogSearch").value.trim())}”.</div>`
-      : `<div class="text-body-secondary small p-3">Chưa có hội thoại nào. Dán link / username kênh vào ô tìm kiếm rồi nhấn Enter.</div>`;
+      ? `<div class="text-body-secondary small p-3">${t("Không tìm thấy. Nhấn Enter để mở “{q}”.", { q: esc($("dialogSearch").value.trim()) })}</div>`
+      : `<div class="text-body-secondary small p-3">${t("Chưa có hội thoại nào. Dán link / username kênh vào ô tìm kiếm rồi nhấn Enter.")}</div>`;
 }
 
 // ---------- choosing the chats shown in the list (per Telegram account) ----------
@@ -1071,8 +1124,10 @@ function renderChatsModal() {
   const list = sortDialogs(
     state.dialogs.filter((d) => !q || norm(d.title).includes(q) || norm(d.username).includes(q)),
   );
-  $("chatsCount").textContent =
-    `Đã chọn ${state.dialogs.filter((d) => chatsDraft.has(d.id)).length}/${state.dialogs.length}`;
+  $("chatsCount").textContent = t("Đã chọn {n}/{total}", {
+    n: state.dialogs.filter((d) => chatsDraft.has(d.id)).length,
+    total: state.dialogs.length,
+  });
   $("chatsList").innerHTML = list.length
     ? list
         .map(
@@ -1084,7 +1139,7 @@ function renderChatsModal() {
       <small class="d-block text-truncate text-body-secondary">${dialogSub(d)}</small></span></label>`,
         )
         .join("")
-    : `<div class="text-body-secondary small p-3">Không có hội thoại nào khớp.</div>`;
+    : `<div class="text-body-secondary small p-3">${t("Không có hội thoại nào khớp.")}</div>`;
 }
 
 async function openChatsModal() {
@@ -1115,7 +1170,7 @@ async function stopHiddenChats() {
   const hiddenKeys = new Set([...state.keyChat].filter(([, chat]) => isHiddenChat(chat)).map(([key]) => key));
   const stopped = [];
   if (isHiddenChat(state.chat)) {
-    stopped.push(`đóng “${state.scan?.title || $("chatTitle").textContent}”`);
+    stopped.push(t("đóng “{title}”", { title: state.scan?.title || $("chatTitle").textContent }));
     state.loadToken++; // a scan still in flight must not reopen it
     stopScan();
     setScanning(false);
@@ -1130,7 +1185,7 @@ async function stopHiddenChats() {
   }
   if (state.playingKey && hiddenKeys.has(state.playingKey)) {
     stopPlayer();
-    stopped.push("dừng phát nhạc");
+    stopped.push(t("dừng phát nhạc"));
   }
   const busy = [...state.jobs.values()].some(
     (j) => hiddenKeys.has(j.scanKey) && ["queued", "downloading"].includes(j.status),
@@ -1138,7 +1193,7 @@ async function stopHiddenChats() {
   if (busy) {
     try {
       const r = await api("/api/cancel", { keys: [...hiddenKeys] });
-      if (r.cancelled) stopped.push(`huỷ ${r.cancelled} file đang tải`);
+      if (r.cancelled) stopped.push(t("huỷ {n} file đang tải", { n: r.cancelled }));
     } catch (err) {
       toast(err.message, "error");
     }
@@ -1155,10 +1210,10 @@ async function saveVisibleChats(ids) {
     renderDialogs();
     renderChatsInfo();
     const saved = r.ids
-      ? `Đã lưu: hiện ${shownDialogs().length}/${state.dialogs.length} hội thoại`
-      : "Đã bỏ lọc: hiện tất cả hội thoại";
+      ? t("Đã lưu: hiện {n}/{total} hội thoại", { n: shownDialogs().length, total: state.dialogs.length })
+      : t("Đã bỏ lọc: hiện tất cả hội thoại");
     toast(
-      stopped.length ? `${saved}. Hội thoại bị ẩn: ${stopped.join(", ")}.` : saved,
+      stopped.length ? t("{saved}. Hội thoại bị ẩn: {stopped}.", { saved, stopped: stopped.join(", ") }) : saved,
       stopped.length ? "info" : "success",
     );
   } catch (err) {
@@ -1205,10 +1260,10 @@ $("chatsReset").addEventListener("click", () => saveVisibleChats(null));
 /** One-line summary in Settings. */
 function renderChatsInfo() {
   $("setChatsInfo").textContent = !state.dialogs.length
-    ? "Đăng nhập để chọn"
+    ? t("Đăng nhập để chọn")
     : state.visibleChats
-      ? `Đang hiện ${shownDialogs().length}/${state.dialogs.length} hội thoại`
-      : `Hiện tất cả (${state.dialogs.length} hội thoại)`;
+      ? t("Đang hiện {n}/{total} hội thoại", { n: shownDialogs().length, total: state.dialogs.length })
+      : t("Hiện tất cả ({n} hội thoại)", { n: state.dialogs.length });
 }
 
 $("dialogSearch").addEventListener("input", renderDialogs);
@@ -1251,7 +1306,7 @@ function setScanning(on) {
   const b = $("reloadBtn");
   b.disabled = on;
   b.classList.toggle("is-scanning", on);
-  b.title = on ? "Đang quét kênh…" : "Quét lại";
+  b.title = on ? t("Đang quét kênh…") : t("Quét lại");
 }
 
 /** Stop the chat scan in progress (another chat / type was chosen, or the chat was closed). */
@@ -1268,11 +1323,11 @@ async function loadFiles() {
   setScanning(true);
   showChat(true);
   const dialog = state.dialogs.find((d) => d.id === state.chat);
-  $("chatTitle").textContent = state.chat === FAV_CHAT ? "Bài hát yêu thích" : dialog?.title || state.chat;
+  $("chatTitle").textContent = state.chat === FAV_CHAT ? t("Bài hát yêu thích") : dialog?.title || state.chat;
   document
     .querySelectorAll("#typeSeg button")
     .forEach((b) => b.classList.toggle("active", b.dataset.type === state.type));
-  setMessage(`<div class="spinner-border text-primary"></div><p class="mt-2" id="scanMsg">Đang quét kênh…</p>`);
+  setMessage(`<div class="spinner-border text-primary"></div><p class="mt-2" id="scanMsg">${t("Đang quét kênh…")}</p>`);
   $("fileCount").textContent = "";
   state.scan = null;
   updateSelection();
@@ -1291,7 +1346,8 @@ async function loadFiles() {
     state.keyChat.set(scan.key, state.chat);
     $("chatTitle").textContent = scan.title;
     renderFiles();
-    if (scan.missing) toast(`${scan.missing} bài yêu thích không còn mở được (đã rời kênh hoặc tin đã bị xoá)`, "warn");
+    if (scan.missing)
+      toast(t("{n} bài yêu thích không còn mở được (đã rời kênh hoặc tin đã bị xoá)", { n: scan.missing }), "warn");
   } catch (err) {
     if (token !== state.loadToken) return;
     setMessage(
@@ -1358,7 +1414,7 @@ function setSort(sort) {
     th.querySelector(".sort-ico").className =
       `bi sort-ico ${on ? (asc ? "bi-caret-up-fill" : "bi-caret-down-fill") : "bi-chevron-expand"}`;
     if (th.dataset.sort === "size")
-      th.firstChild.textContent = on && sort.startsWith("dur") ? "Thời lượng " : "Dung lượng ";
+      th.firstChild.textContent = `${on && sort.startsWith("dur") ? t("Thời lượng") : t("Dung lượng")} `;
   }
   if (state.scan) renderFiles();
 }
@@ -1378,8 +1434,9 @@ function stateCell(f) {
     const pct = job.size ? Math.floor((job.received / job.size) * 100) : 0;
     return `<span class="badge text-bg-primary">${pct}%</span>`;
   }
-  if (job && job.status === "queued") return `<span class="badge text-bg-secondary">Đang chờ</span>`;
-  if (job && job.status === "failed") return `<span class="badge text-bg-danger" title="${esc(job.error)}">Lỗi</span>`;
+  if (job && job.status === "queued") return `<span class="badge text-bg-secondary">${t("Đang chờ")}</span>`;
+  if (job && job.status === "failed")
+    return `<span class="badge text-bg-danger" title="${esc(job.error)}">${t("Lỗi")}</span>`;
   return "";
 }
 
@@ -1389,13 +1446,13 @@ function playCell(f) {
   if (VISUAL.has(f.kind)) {
     const video = f.kind === "video";
     return `<button class="btn btn-sm btn-outline-primary play-btn" data-preview="${f.id}"
-      title="${video ? "Xem trước video (phát trực tiếp từ Telegram, không tải về)" : "Xem trước ảnh"}">
+      title="${video ? t("Xem trước video (phát trực tiếp từ Telegram, không tải về)") : t("Xem trước ảnh")}">
       <i class="bi ${video ? "bi-play-btn" : "bi-eye"}"></i></button>`;
   }
   if (f.kind === "document") return "";
   const on = state.playingId === f.id && state.isPlaying;
   return `<button class="btn btn-sm ${on ? "btn-primary" : "btn-outline-primary"} play-btn" data-play="${f.id}"
-    title="${on ? "Tạm dừng" : f.downloaded ? "Phát" : "Nghe thử (phát trực tiếp từ Telegram, không tải về)"}">
+    title="${on ? t("Tạm dừng") : f.downloaded ? t("Phát") : t("Nghe thử (phát trực tiếp từ Telegram, không tải về)")}">
     <i class="bi ${on ? "bi-pause-fill" : "bi-play-fill"}"></i></button>`;
 }
 
@@ -1408,7 +1465,7 @@ const isFav = (f) => !!state.scan && state.favorites.has(favId(f));
 function favCell(f) {
   const on = isFav(f);
   return `<button class="btn btn-sm fav-btn${on ? " on" : ""}" data-fav="${f.id}" aria-pressed="${on}"
-    title="${on ? "Bỏ khỏi yêu thích" : "Thêm vào yêu thích"}"><i class="bi ${on ? "bi-heart-fill" : "bi-heart"}"></i></button>`;
+    title="${on ? t("Bỏ khỏi yêu thích") : t("Thêm vào yêu thích")}"><i class="bi ${on ? "bi-heart-fill" : "bi-heart"}"></i></button>`;
 }
 
 /** ♥ on / off for a file of a list (the open one, or the one the player is playing from). */
@@ -1422,7 +1479,9 @@ async function toggleFav(id, scan = state.scan) {
   try {
     state.favorites = new Set((await api("/api/favorites", { id: key, on })).ids);
     toast(
-      on ? `Đã thêm “${displayName(f)}” vào yêu thích` : `Đã bỏ “${displayName(f)}” khỏi yêu thích`,
+      on
+        ? t("Đã thêm “{name}” vào yêu thích", { name: displayName(f) })
+        : t("Đã bỏ “{name}” khỏi yêu thích", { name: displayName(f) }),
       on ? "bye" : "info",
     );
   } catch (err) {
@@ -1449,7 +1508,7 @@ function renderPlayerFav() {
   b.classList.toggle("on", on);
   b.setAttribute("aria-pressed", String(on));
   b.innerHTML = `<i class="bi ${on ? "bi-heart-fill" : "bi-heart"}"></i>`;
-  b.setAttribute("data-bs-original-title", on ? "Bỏ khỏi yêu thích" : "Thêm vào yêu thích");
+  b.setAttribute("data-bs-original-title", on ? t("Bỏ khỏi yêu thích") : t("Thêm vào yêu thích"));
   b.removeAttribute("title");
 }
 $("playerFav").addEventListener("click", () => state.playScan && toggleFav(state.playingId, state.playScan));
@@ -1459,14 +1518,15 @@ function renderFavEntry() {
   const active = state.chat === FAV_CHAT;
   $("favEntry").classList.toggle("active", active);
   $("favEntrySub").classList.toggle("text-body-secondary", !active);
-  $("favEntrySub").innerHTML = `<i class="bi bi-music-note-beamed"></i> ${state.favorites.size} bài · từ mọi kênh`;
+  $("favEntrySub").innerHTML =
+    `<i class="bi bi-music-note-beamed"></i> ${t("{n} bài · từ mọi kênh", { n: state.favorites.size })}`;
 }
 
 $("favEntry").addEventListener("click", (e) => {
   e.preventDefault();
   openChat(FAV_CHAT);
 });
-$("favEntry").title = "Bài hát yêu thích";
+$("favEntry").title = t("Bài hát yêu thích");
 
 // ---------- sidebar as a rail of icons (576–1023px) ----------
 
@@ -1477,7 +1537,7 @@ function setRailOpen(open) {
   $("mainView").classList.toggle("rail-open", open && railMode());
   $("railToggle").setAttribute("aria-expanded", String(open));
   $("railToggle").innerHTML = `<i class="bi ${open ? "bi-chevron-left" : "bi-chevron-right"}"></i>`;
-  $("railToggle").setAttribute("data-bs-original-title", open ? "Thu gọn" : "Mở rộng danh sách kênh");
+  $("railToggle").setAttribute("data-bs-original-title", open ? t("Thu gọn") : t("Mở rộng danh sách kênh"));
 }
 $("railToggle").addEventListener("click", () => setRailOpen(!$("mainView").classList.contains("rail-open")));
 $("railBackdrop").addEventListener("click", () => setRailOpen(false));
@@ -1522,7 +1582,7 @@ function renderFavScope() {
   if (state.favScope !== "all" && !chats.has(state.favScope)) state.favScope = "all"; // that chat has no hearts left
   const total = [...chats.values()].reduce((n, c) => n + c.count, 0);
   $("favScope").innerHTML =
-    `<option value="all">Tất cả kênh — theo danh sách (${total})</option>` +
+    `<option value="all">${t("Tất cả kênh — theo danh sách ({n})", { n: total })}</option>` +
     [...chats]
       .sort((a, b) => collator.compare(a[1].name, b[1].name))
       .map(([id, c]) => `<option value="${esc(id)}">${esc(c.name)} (${c.count})</option>`)
@@ -1540,20 +1600,21 @@ function renderFiles() {
   const files = visibleFiles();
   const index = new Map(state.scan.files.map((f, i) => [f.id, i + 1]));
   const more = state.scan.more ? "+" : ""; // more pages to load: the total is not known yet
-  $("fileCount").textContent = `${files.length}/${state.scan.files.length}${more} file`;
+  const all = `${state.scan.files.length}${more}`;
+  $("fileCount").textContent = t("{n}/{total} file", { n: files.length, total: all });
   $("chatSub").textContent =
     files.length === state.scan.files.length
-      ? `${files.length}${more} file`
-      : `${files.length}/${state.scan.files.length}${more} file đang hiện`;
+      ? t("{n} file", { n: all })
+      : t("{n}/{total} file đang hiện", { n: files.length, total: all });
   syncFilterSheet();
   if (!files.length) {
     const favEmpty = state.scan.fav && !state.scan.files.some((f) => state.favorites.has(f.fav));
     setMessage(
       favEmpty
-        ? `<i class="bi bi-heart display-5 fav-empty"></i><p class="mt-2 mb-1">Chưa có bài hát yêu thích</p><p class="small">Mở một kênh và bấm <i class="bi bi-heart"></i> ở cuối mỗi dòng để thêm vào đây.</p>`
+        ? `<i class="bi bi-heart display-5 fav-empty"></i><p class="mt-2 mb-1">${t("Chưa có bài hát yêu thích")}</p><p class="small">${t('Mở một kênh và bấm <i class="bi bi-heart"></i> ở cuối mỗi dòng để thêm vào đây.')}</p>`
         : state.scan.files.length
-          ? "Không có file khớp bộ lọc"
-          : `<i class="bi bi-inbox display-5"></i><p class="mt-2">Kênh không có file loại này</p>`,
+          ? t("Không có file khớp bộ lọc")
+          : `<i class="bi bi-inbox display-5"></i><p class="mt-2">${t("Kênh không có file loại này")}</p>`,
     );
   } else {
     $("filesMsg").innerHTML = "";
@@ -1574,11 +1635,11 @@ function renderMore() {
     !scan || scan.fav
       ? ""
       : state.loadingMore
-        ? `<span class="spinner-border spinner-border-sm text-primary"></span> Đang tải thêm…`
+        ? `<span class="spinner-border spinner-border-sm text-primary"></span> ${t("Đang tải thêm…")}`
         : scan.more
-          ? `<button class="btn btn-sm btn-outline-primary" id="loadMoreBtn"><i class="bi bi-arrow-down-circle"></i> Tải thêm 500 file</button>`
+          ? `<button class="btn btn-sm btn-outline-primary" id="loadMoreBtn"><i class="bi bi-arrow-down-circle"></i> ${t("Tải thêm {n} file", { n: PAGE_SIZE })}</button>`
           : scan.files.length > PAGE_SIZE
-            ? `Đã tải hết ${scan.files.length} file`
+            ? t("Đã tải hết {n} file", { n: scan.files.length })
             : "";
 }
 
@@ -1646,10 +1707,12 @@ function updateSelection() {
   const files = state.scan ? state.scan.files.filter((f) => state.selected.has(f.id)) : [];
   const total = files.reduce((s, f) => s + (f.size || 0), 0);
   $("selInfo").innerHTML = files.length
-    ? `<span class="badge text-bg-primary rounded-pill">${files.length}</span> <span class="d-none d-sm-inline">file được chọn</span><span class="d-sm-none">bài</span>${total ? ` · <strong>${fmt(total)}</strong>` : ""}`
-    : `<span class="small text-body-secondary hint">Bấm vào bài để nghe · tích ô vuông để chọn tải, <kbd>Shift</kbd> + bấm để chọn liên tiếp</span>`;
+    ? `<span class="badge text-bg-primary rounded-pill">${files.length}</span> <span class="d-none d-sm-inline">${t("file được chọn")}</span><span class="d-sm-none">${t("bài")}</span>${total ? ` · <strong>${fmt(total)}</strong>` : ""}`
+    : `<span class="small text-body-secondary hint">${t("Bấm vào bài để nghe · tích ô vuông để chọn tải, <kbd>Shift</kbd> + bấm để chọn liên tiếp")}</span>`;
   $("downloadBtn").disabled = !files.length;
-  $("downloadBtn").querySelector("span").textContent = files.length ? `Tải xuống (${files.length})` : "Tải xuống";
+  $("downloadBtn").querySelector("span").textContent = files.length
+    ? t("Tải xuống ({n})", { n: files.length })
+    : t("Tải xuống");
 
   const visible = visibleFiles();
   const n = visible.filter((f) => state.selected.has(f.id)).length;
@@ -1798,7 +1861,7 @@ async function showSongInItsChat(f) {
   if (!msgPart) return;
   // the list id is the chat's own id; the chat list uses Telegram's marked ids (-100… channels, -… groups)
   const dialog = state.dialogs.find((d) => [chatPart, `-${chatPart}`, `-100${chatPart}`].includes(d.id));
-  if (!dialog) return toast("Kênh của bài này không có trong danh sách kênh", "warn");
+  if (!dialog) return toast(t("Kênh của bài này không có trong danh sách kênh"), "warn");
   const msgId = Number(msgPart);
   // a type filter that can show this song (video / photo / document lists would not)
   if (!["all", "music", "voice"].includes(state.type) || (f.kind === "voice") !== (state.type === "voice")) {
@@ -1814,7 +1877,7 @@ async function showSongInItsChat(f) {
   )
     await loadMore();
   if (!state.scan?.files.some((x) => x.id === msgId))
-    return toast("Không tìm thấy bài trong kênh (có thể tin đã bị xoá)", "warn");
+    return toast(t("Không tìm thấy bài trong kênh (có thể tin đã bị xoá)"), "warn");
   if (!$("files").querySelector(`tr[data-id="${msgId}"]`)) {
     state.query = "";
     $("fileSearch").value = "";
@@ -1860,7 +1923,7 @@ function showPlayingList() {
     $("chatView").classList.toggle("fav-view", scan.fav === true);
     state.scan = scan;
     showChat(true);
-    $("chatTitle").textContent = scan.fav ? "Bài hát yêu thích" : scan.title;
+    $("chatTitle").textContent = scan.fav ? t("Bài hát yêu thích") : scan.title;
     renderDialogs();
     renderFiles();
   }
@@ -1913,7 +1976,7 @@ $("reloadBtn").addEventListener("click", () => state.chat && !state.scanning && 
 $("folderBtn").addEventListener("click", () =>
   api("/api/open-folder", { key: state.scan?.key }).catch((e) => {
     if (e.code !== "NEED_DIR") return toast(e.message, "error");
-    toast("Chưa chọn thư mục tải xuống — hãy chọn trong Cài đặt", "warn");
+    toast(t("Chưa chọn thư mục tải xuống — hãy chọn trong Cài đặt"), "warn");
     openSettings();
   }),
 );
@@ -1992,7 +2055,7 @@ function playFrom(scan, id) {
   show($("playerBar"), true);
   $("npTitle").textContent = displayName(f);
   $("npSub").innerHTML =
-    `<span class="badge ${f.downloaded ? "text-bg-success" : "text-bg-warning"}">${f.downloaded ? "Từ máy" : "Nghe thử"}</span> ` +
+    `<span class="badge ${f.downloaded ? "text-bg-success" : "text-bg-warning"}">${f.downloaded ? t("Từ máy") : t("Nghe thử")}</span> ` +
     esc(f.performer || f.chat || scan.title || "");
   $("curTime").textContent = "0:00";
   $("durTime").textContent = f.duration ? fmtDur(f.duration) : "0:00";
@@ -2063,7 +2126,7 @@ function playNext(auto = false, { skip = false } = {}) {
     return;
   }
   if (next === undefined) {
-    if (!auto) toast("Đã hết danh sách phát", "info");
+    if (!auto) toast(t("Đã hết danh sách phát"), "info");
     return;
   }
   playFrom(state.playScan, next);
@@ -2093,11 +2156,11 @@ function renderModes() {
   const sh = $("shuffleBtn");
   sh.classList.toggle("on", state.shuffle);
   sh.setAttribute("aria-pressed", state.shuffle);
-  sh.title = `Phát ngẫu nhiên: ${state.shuffle ? "bật" : "tắt"}`;
+  sh.title = state.shuffle ? t("Phát ngẫu nhiên: bật") : t("Phát ngẫu nhiên: tắt");
   const rp = $("repeatBtn");
   rp.classList.toggle("on", state.repeat !== "off");
   rp.setAttribute("aria-pressed", state.repeat !== "off");
-  rp.title = REPEAT_TITLE[state.repeat];
+  rp.title = t(REPEAT_TITLE[state.repeat]);
   rp.innerHTML = `<i class="bi ${state.repeat === "one" ? "bi-repeat-1" : "bi-repeat"}"></i>`;
   try {
     localStorage.setItem("playModes", JSON.stringify({ shuffle: state.shuffle, repeat: state.repeat }));
@@ -2116,12 +2179,12 @@ $("shuffleBtn").addEventListener("click", () => {
   state.shuffle = !state.shuffle;
   if (state.playScan) state.playOrder = orderFrom(state.playingId); // the playing song stays, the rest re-orders
   renderModes();
-  toast(state.shuffle ? "Phát ngẫu nhiên: bật" : "Phát ngẫu nhiên: tắt — theo thứ tự danh sách", "info");
+  toast(state.shuffle ? t("Phát ngẫu nhiên: bật") : t("Phát ngẫu nhiên: tắt — theo thứ tự danh sách"), "info");
 });
 $("repeatBtn").addEventListener("click", () => {
   state.repeat = REPEAT_NEXT[state.repeat];
   renderModes();
-  toast(REPEAT_TITLE[state.repeat], "info");
+  toast(t(REPEAT_TITLE[state.repeat]), "info");
 });
 // ---------- playback speed (kept between visits, applies to every song) ----------
 
@@ -2147,7 +2210,7 @@ function setSpeed(rate, save = true) {
   $("speedList").innerHTML = SPEEDS.map(
     ([r, label]) =>
       `<button type="button" class="dropdown-item d-flex align-items-center gap-3${r === rate ? " active" : ""}" data-speed="${r}">
-      <small class="speed-tag">${r}x</small><span class="flex-grow-1">${label}</span>${r === rate ? '<i class="bi bi-check2"></i>' : ""}</button>`,
+      <small class="speed-tag">${r}x</small><span class="flex-grow-1">${t(label)}</span>${r === rate ? '<i class="bi bi-check2"></i>' : ""}</button>`,
   ).join("");
   if (save)
     try {
@@ -2376,7 +2439,13 @@ async function restorePlayback() {
         if (!saved.playing) return player.pause();
         player.play().catch(() => {
           // the browser blocks sound until the user clicks something on the page
-          toast(`Bấm ▶ để nghe tiếp “${displayName(f)}” từ ${fmtDur(Math.floor(saved.time || 0)) || "0:00"}`, "info");
+          toast(
+            t("Bấm ▶ để nghe tiếp “{name}” từ {time}", {
+              name: displayName(f),
+              time: fmtDur(Math.floor(saved.time || 0)) || "0:00",
+            }),
+            "info",
+          );
         });
       },
       { once: true },
@@ -2437,7 +2506,7 @@ function resumePlayback() {
     { once: true },
   );
   player.src = src; // a new request for the stream (the old one is dead)
-  toast(`Đã có mạng lại — phát tiếp từ ${fmtDur(Math.floor(time)) || "0:00"}`, "success");
+  toast(t("Đã có mạng lại — phát tiếp từ {time}", { time: fmtDur(Math.floor(time)) || "0:00" }), "success");
 }
 
 window.addEventListener("offline", () => {
@@ -2448,7 +2517,7 @@ window.addEventListener("offline", () => {
     time: lastTime || player.currentTime,
     playing: state.isPlaying || !player.paused,
   };
-  toast("Mất kết nối mạng — sẽ phát tiếp khi có mạng lại", "warn");
+  toast(t("Mất kết nối mạng — sẽ phát tiếp khi có mạng lại"), "warn");
 });
 window.addEventListener("online", () => {
   if (!resumeAt) return;
@@ -2474,13 +2543,13 @@ player.addEventListener("error", () => {
   // network, not a broken song: wait for the connection and continue where it stopped
   if ((!navigator.onLine || player.error?.code === MediaError.MEDIA_ERR_NETWORK) && connectionLost()) return;
   const f = state.playScan.files.find((x) => x.id === state.playingId);
-  const name = f ? `“${displayName(f)}”` : "bài này";
+  const name = f ? `“${displayName(f)}”` : t("bài này");
   if (++failedInARow > MAX_SKIPS) {
     failedInARow = 0;
-    return toast("Nhiều bài liên tiếp không phát được nên đã dừng. Kiểm tra mạng rồi thử lại.", "error");
+    return toast(t("Nhiều bài liên tiếp không phát được nên đã dừng. Kiểm tra mạng rồi thử lại."), "error");
   }
   const failed = state.playingId;
-  toast(`Không phát được ${name} — chuyển sang bài tiếp theo`, "warn");
+  toast(t("Không phát được {name} — chuyển sang bài tiếp theo", { name }), "warn");
   // unless the user picked another song meanwhile
   setTimeout(() => state.playingId === failed && playNext(true, { skip: true }), 600);
 });
@@ -2527,7 +2596,7 @@ function renderPreview() {
       "error",
       () => {
         v.remove();
-        fail("Trình duyệt không phát được video này (định dạng không hỗ trợ). Bạn vẫn có thể tải về.");
+        fail(t("Trình duyệt không phát được video này (định dạng không hỗ trợ). Bạn vẫn có thể tải về."));
       },
       { once: true },
     );
@@ -2542,7 +2611,7 @@ function renderPreview() {
       "error",
       () => {
         img.remove();
-        fail("Không xem được ảnh này.");
+        fail(t("Không xem được ảnh này."));
       },
       { once: true },
     );
@@ -2560,7 +2629,7 @@ function renderPreview() {
   $("previewNext").disabled = i < 0 || i >= list.length - 1;
   const sel = state.selected.has(f.id);
   $("previewSelect").className = `btn btn-sm ${sel ? "btn-primary" : "btn-outline-primary"}`;
-  $("previewSelect").querySelector("span").textContent = sel ? "Đã chọn" : "Chọn để tải";
+  $("previewSelect").querySelector("span").textContent = sel ? t("Đã chọn") : t("Chọn để tải");
   $("previewSelect").querySelector("i").className = `bi ${sel ? "bi-check2-square" : "bi-square"}`;
 }
 
@@ -2618,7 +2687,7 @@ async function hideOpenModals() {
 
 let askResolve = null;
 /** Bootstrap yes/no dialog; resolves true when confirmed. */
-async function ask({ title, body, ok = "Đồng ý", okClass = "btn-primary" }) {
+async function ask({ title, body, ok = t("Đồng ý"), okClass = "btn-primary" }) {
   await hideOpenModals();
   $("askTitle").innerHTML = title;
   $("askBody").innerHTML = body;
@@ -2673,14 +2742,14 @@ async function pickerLoad(p) {
         <i class="bi bi-folder-fill text-warning"></i><span class="text-truncate">${esc(d)}</span><i class="bi bi-chevron-right ms-auto text-body-secondary"></i></button>`,
         )
         .join("")
-    : `<div class="list-group-item small text-body-secondary text-center py-3">Không có thư mục con</div>`;
+    : `<div class="list-group-item small text-body-secondary text-center py-3">${t("Không có thư mục con")}</div>`;
 }
 
 /**
  * Let the user pick a folder. remember: null hides the "remember as default" checkbox, true/false sets it.
  * Resolves { path, remember } or null when cancelled.
  */
-async function pickFolder({ start, remember = null, title = "Chọn thư mục tải xuống" } = {}) {
+async function pickFolder({ start, remember = null, title = t("Chọn thư mục tải xuống") } = {}) {
   await hideOpenModals();
   if (BACKEND) {
     // The browser's own folder picker; the choice is remembered when "remember" is asked for.
@@ -2753,9 +2822,11 @@ function renderSettingsForm() {
   $("setDir").value = settingsDraft.downloadDir || "";
   $("setDirClear").disabled = !settingsDraft.downloadDir;
   $("setSub").checked = settingsDraft.subfolderPerChat;
-  const base = settingsDraft.downloadDir || "…/thư-mục-tải";
-  $("setExample").innerHTML =
-    `Ví dụ file sẽ lưu tại: <code>${esc(base)}${settingsDraft.subfolderPerChat ? "/Tên kênh" : ""}/Tên bài.mp3</code>`;
+  const base = settingsDraft.downloadDir || t("…/thư-mục-tải");
+  const sub = settingsDraft.subfolderPerChat ? `/${t("Tên kênh")}` : "";
+  $("setExample").innerHTML = t("Ví dụ file sẽ lưu tại: {path}", {
+    path: `<code>${esc(base)}${esc(sub)}/${esc(t("Tên bài"))}.mp3</code>`,
+  });
 }
 
 // ---------- MongoDB copy: its status is shown in the account card ----------
@@ -2799,7 +2870,7 @@ $("settingsSave").addEventListener("click", async () => {
       subfolderPerChat: settingsDraft.subfolderPerChat,
     });
     settingsModal.hide();
-    toast("Đã lưu cài đặt");
+    toast(t("Đã lưu cài đặt"));
   } catch (err) {
     toast(err.message, "error");
   }
@@ -2826,27 +2897,27 @@ function openConfirm() {
   const askDir = !state.settings.downloadDir;
   const dirRow = !CAPS.pickFolder
     ? `<div class="d-flex align-items-center gap-2 mt-2 p-2 border rounded bg-body-tertiary small">
-         <i class="bi bi-download text-primary"></i><span>Lưu vào <strong>thư mục Tải về</strong> của trình duyệt</span></div>`
+         <i class="bi bi-download text-primary"></i><span>${t("Lưu vào <strong>thư mục Tải về</strong> của trình duyệt")}</span></div>`
     : !askDir
       ? ""
       : `<div class="d-flex align-items-center gap-2 mt-2 p-2 border rounded bg-body-tertiary">
        <i class="bi bi-folder2-open text-primary"></i>
-       <div class="flex-grow-1 min-w-0 small text-break"><span class="text-body-secondary">Lưu vào:</span> ${
+       <div class="flex-grow-1 min-w-0 small text-break"><span class="text-body-secondary">${t("Lưu vào:")}</span> ${
          state.dlTarget
            ? `<span class="font-monospace">${esc(state.dlTarget.path)}${state.settings.subfolderPerChat ? `/${esc(state.scan.title)}` : ""}</span>`
-           : `<em class="text-warning-emphasis">Chưa chọn thư mục — sẽ hỏi khi bấm Bắt đầu tải</em>`
+           : `<em class="text-warning-emphasis">${t("Chưa chọn thư mục — sẽ hỏi khi bấm Bắt đầu tải")}</em>`
        }</div>
-       <button class="btn btn-sm btn-outline-primary flex-none" id="confirmDirBtn">${state.dlTarget ? "Đổi…" : "Chọn…"}</button></div>`;
+       <button class="btn btn-sm btn-outline-primary flex-none" id="confirmDirBtn">${state.dlTarget ? t("Đổi…") : t("Chọn…")}</button></div>`;
   $("confirmSub").innerHTML =
-    `<div><strong>${files.length}</strong> file · <strong>${fmt(total) || "?"}</strong></div>` +
+    `<div>${t("<strong>{n}</strong> file · <strong>{size}</strong>", { n: files.length, size: fmt(total) || "?" })}</div>` +
     dirRow +
     (already
-      ? `<div class="alert alert-info py-2 mt-2 mb-0 small"><i class="bi bi-info-circle"></i> ${already} file đã có sẵn sẽ được bỏ qua.</div>`
+      ? `<div class="alert alert-info py-2 mt-2 mb-0 small"><i class="bi bi-info-circle"></i> ${t("{n} file đã có sẵn sẽ được bỏ qua.", { n: already })}</div>`
       : "");
   $("confirmList").innerHTML = files
     .map(
       (f) =>
-        `<li class="list-group-item d-flex gap-2"><span class="flex-grow-1 text-break">${esc(displayName(f))}${displayName(f) !== f.name ? ` <small class="text-body-secondary">(${esc(f.name)})</small>` : ""}${f.downloaded ? ' <span class="badge text-bg-success">Đã có</span>' : ""}</span>` +
+        `<li class="list-group-item d-flex gap-2"><span class="flex-grow-1 text-break">${esc(displayName(f))}${displayName(f) !== f.name ? ` <small class="text-body-secondary">(${esc(f.name)})</small>` : ""}${f.downloaded ? ` <span class="badge text-bg-success">${t("Đã có")}</span>` : ""}</span>` +
         `<span class="text-body-secondary small text-nowrap">${fmt(f.size)}</span></li>`,
     )
     .join("");
@@ -2871,7 +2942,7 @@ async function startDownload(target) {
       ids: [...state.selected],
       ...(target && { dir: target.path, remember: target.remember }),
     });
-    toast(`Đã thêm ${added} file vào hàng chờ → ${outDir}`);
+    toast(t("Đã thêm {n} file vào hàng chờ → {dir}", { n: added, dir: t(outDir) })); // browser build: "thư mục Tải về…"
     state.selected.clear();
     state.dlTarget = null;
     renderFiles(); // progress: under "Tải xuống" in the header
@@ -2951,8 +3022,12 @@ function renderJobs() {
   const downloading = jobs.filter((j) => j.status === "downloading").length;
   const total = jobs.reduce((s, j) => s + (j.size || 0), 0);
   const got = jobs.reduce((s, j) => s + (j.received || 0), 0);
-  $("dlTitle").textContent =
-    `Đang tải ${downloading} · chờ ${jobs.length - downloading} · ${fmt(got) || "0 B"} / ${fmt(total)}`;
+  $("dlTitle").textContent = t("Đang tải {n} · chờ {m} · {got} / {total}", {
+    n: downloading,
+    m: jobs.length - downloading,
+    got: fmt(got) || "0 B",
+    total: fmt(total),
+  });
   const bar = $("dlBar").querySelector(".progress-bar");
   bar.style.width = total ? `${(got / total) * 100}%` : "0";
   bar.className = "progress-bar progress-bar-striped progress-bar-animated";
@@ -2968,7 +3043,7 @@ function renderJobs() {
       const striped = j.status === "downloading" ? " progress-bar-striped progress-bar-animated" : "";
       return `<li class="list-group-item py-2">
       <div class="d-flex gap-2 align-items-center"><span class="flex-grow-1 text-truncate small" title="${esc(j.display || j.name)}">${esc(j.display || j.name)}</span>
-      <span class="badge text-bg-${color}">${label}</span></div>
+      <span class="badge text-bg-${color}">${t(label)}</span></div>
       <div class="small text-body-secondary">${esc(detail)}</div>
       <div class="progress progress-thin mt-1"><div class="progress-bar bg-${color}${striped}" style="width:${pct}%"></div></div></li>`;
     })
@@ -2980,14 +3055,14 @@ function renderJobs() {
 /** "5 phút trước", "Hôm qua 21:04", "12/10 08:30" */
 function ago(at) {
   const min = Math.floor((Date.now() - at) / 60000);
-  if (min < 1) return "Vừa xong";
-  if (min < 60) return `${min} phút trước`;
+  if (min < 1) return t("Vừa xong");
+  if (min < 60) return t("{n} phút trước", { n: min });
   const d = new Date(at);
-  const hm = d.toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" });
+  const hm = d.toLocaleTimeString(tdlI18n.locale, { hour: "2-digit", minute: "2-digit" });
   const today = new Date();
-  if (d.toDateString() === today.toDateString()) return `Hôm nay ${hm}`;
-  if (d.toDateString() === new Date(today - 86_400_000).toDateString()) return `Hôm qua ${hm}`;
-  return `${d.toLocaleDateString("vi-VN", { day: "2-digit", month: "2-digit" })} ${hm}`;
+  if (d.toDateString() === today.toDateString()) return t("Hôm nay {time}", { time: hm });
+  if (d.toDateString() === new Date(today - 86_400_000).toDateString()) return t("Hôm qua {time}", { time: hm });
+  return `${d.toLocaleDateString(tdlI18n.locale, { day: "2-digit", month: "2-digit" })} ${hm}`;
 }
 
 function renderRecent() {
@@ -3011,10 +3086,10 @@ function renderRecent() {
         <div class="small text-truncate fw-medium">${esc(displayName(h))}</div>
         <div class="small text-body-secondary text-truncate">${esc(h.chat || "")}${h.duration ? ` · ${fmtDur(h.duration)}` : ""} · ${ago(h.at)}</div>
       </div>
-      <button class="btn btn-sm btn-outline-secondary btn-icon border-0 flex-none" data-recent-del="${esc(h.id)}" title="Bỏ khỏi danh sách"><i class="bi bi-x-lg"></i></button></li>`;
+      <button class="btn btn-sm btn-outline-secondary btn-icon border-0 flex-none" data-recent-del="${esc(h.id)}" title="${t("Bỏ khỏi danh sách")}"><i class="bi bi-x-lg"></i></button></li>`;
         })
         .join("")
-    : `<li class="list-group-item small text-body-secondary text-center py-4">${all.length ? "Không có bài khớp" : "Chưa nghe bài nào — bài bạn nghe sẽ hiện ở đây"}</li>`;
+    : `<li class="list-group-item small text-body-secondary text-center py-4">${all.length ? t("Không có bài khớp") : t("Chưa nghe bài nào — bài bạn nghe sẽ hiện ở đây")}</li>`;
 }
 
 async function loadRecent() {
@@ -3052,7 +3127,7 @@ async function playRecent(id) {
   try {
     const scan = await api("/api/recent/files");
     const f = scan.files.find((x) => x.fav === id);
-    if (!f) return toast("Bài này không còn mở được (đã rời kênh hoặc tin đã bị xoá)", "warn");
+    if (!f) return toast(t("Bài này không còn mở được (đã rời kênh hoặc tin đã bị xoá)"), "warn");
     state.playQueue = scan.files.filter(playable).map((x) => x.id);
     state.playOrder = orderFrom(f.id);
     playFrom(scan, f.id);
@@ -3075,9 +3150,9 @@ $("recentList").addEventListener("click", async (e) => {
 $("recentSearch").addEventListener("input", renderRecent);
 $("recentClearBtn").addEventListener("click", async () => {
   const ok = await ask({
-    title: '<i class="bi bi-trash3 text-danger"></i> Xoá danh sách phát gần đây',
-    body: `Xoá <strong>${state.recent.length}</strong> bài khỏi danh sách phát gần đây?`,
-    ok: "Xoá",
+    title: `<i class="bi bi-trash3 text-danger"></i> ${t("Xoá danh sách phát gần đây")}`,
+    body: t("Xoá <strong>{n}</strong> bài khỏi danh sách phát gần đây?", { n: state.recent.length }),
+    ok: t("Xoá"),
     okClass: "btn-danger",
   });
   if (!ok) return;
@@ -3117,7 +3192,7 @@ function applyJob(job) {
 
 $("cancelBtn").addEventListener("click", () =>
   api("/api/cancel", {})
-    .then((r) => toast(`Đã huỷ ${r.cancelled} file`, "info"))
+    .then((r) => toast(t("Đã huỷ {n} file", { n: r.cancelled }), "info"))
     .catch((e) => toast(e.message, "error")),
 );
 
@@ -3152,7 +3227,7 @@ const EVENTS = {
     // another tab's scan must not make the number jump.
     if (!scanId || scanId !== state.scanId) return;
     const msg = $("scanMsg");
-    if (msg) msg.textContent = `Đang quét kênh… ${count} file`;
+    if (msg) msg.textContent = t("Đang quét kênh… {n} file", { n: count });
   },
 };
 

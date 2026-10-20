@@ -229,7 +229,6 @@
     // player
     "Phát ngẫu nhiên: tắt": "随机播放：关",
     "Phát ngẫu nhiên: bật": "随机播放：开",
-    "Phát ngẫu nhiên: tắt — theo thứ tự danh sách": "随机播放：关 — 按列表顺序播放",
     "Bài trước (Shift + ←)": "上一首 (Shift + ←)",
     "Lùi 10 giây (phím ←)": "后退 10 秒（← 键）",
     "Lùi 10 giây": "后退 10 秒",

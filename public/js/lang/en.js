@@ -234,7 +234,6 @@
     // player
     "Phát ngẫu nhiên: tắt": "Shuffle: off",
     "Phát ngẫu nhiên: bật": "Shuffle: on",
-    "Phát ngẫu nhiên: tắt — theo thứ tự danh sách": "Shuffle: off — playing in list order",
     "Bài trước (Shift + ←)": "Previous (Shift + ←)",
     "Lùi 10 giây (phím ←)": "Back 10 seconds (← key)",
     "Lùi 10 giây": "Back 10 seconds",

@@ -2191,7 +2191,7 @@ $("shuffleBtn").addEventListener("click", () => {
   state.shuffle = !state.shuffle;
   if (state.playScan) state.playOrder = orderFrom(state.playingId); // the playing song stays, the rest re-orders
   renderModes();
-  toast(state.shuffle ? t("Phát ngẫu nhiên: bật") : t("Phát ngẫu nhiên: tắt — theo thứ tự danh sách"), "info");
+  toast(state.shuffle ? t("Phát ngẫu nhiên: bật") : t("Phát ngẫu nhiên: tắt"), "info");
 });
 $("repeatBtn").addEventListener("click", () => {
   state.repeat = REPEAT_NEXT[state.repeat];

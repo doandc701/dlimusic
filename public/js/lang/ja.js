@@ -233,7 +233,6 @@
     // player
     "Phát ngẫu nhiên: tắt": "シャッフル: オフ",
     "Phát ngẫu nhiên: bật": "シャッフル: オン",
-    "Phát ngẫu nhiên: tắt — theo thứ tự danh sách": "シャッフル: オフ — 一覧順に再生",
     "Bài trước (Shift + ←)": "前の曲 (Shift + ←)",
     "Lùi 10 giây (phím ←)": "10 秒戻る（← キー）",
     "Lùi 10 giây": "10 秒戻る",

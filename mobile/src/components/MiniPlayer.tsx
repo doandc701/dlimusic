@@ -1,17 +1,18 @@
 // The player docked at the bottom, like the web's on a phone: song (tap the name: its list), "Nghe thử" + chat,
-// ♡, speed; 🔀 ⏮ ▶ ⏭ 🔁; the seek bar (played part in colour, a round thumb to drag) between the times.
+// ♡, sleep timer, speed; 🔀 ⏮ ▶ ⏭ 🔁; the seek bar (played part in colour, a round thumb to drag) between the times.
 import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ActivityIndicator, Modal, Pressable, StyleSheet, View } from "react-native";
 
 import { displayName } from "../../../core.js";
 import { useT } from "../i18n";
-import { usePlayer, usePlayerClock } from "../player/PlayerProvider";
+import { usePlayer, usePlayerClock, type SleepMode } from "../player/PlayerProvider";
 import { useLibrary } from "../store/LibraryProvider";
 import { chatById } from "../telegram/library";
 import { FONT, GRADIENT, mix, tint, useTheme } from "../theme";
 import { Icon } from "./Icon";
+import { Sheet } from "./Sheet";
 import { useToast } from "./Toast";
 import { Badge, IconButton, T, fmtDur, haptic } from "./ui";
 
@@ -23,6 +24,7 @@ const SPEEDS: [number, string][] = [
   [1.7, "Rất nhanh"],
   [2, "Siêu nhanh"],
 ];
+const SLEEP_MINUTES = [10, 15, 20, 30, 45, 60];
 
 export function MiniPlayer() {
   const t = useTheme();
@@ -96,6 +98,7 @@ export function MiniPlayer() {
           }}
           label={tr(fav ? "Bỏ khỏi yêu thích" : "Thêm vào yêu thích")}
         />
+        <SleepButton songLeft={(dur - pos) / p.speed} />
         <Pressable
           onPress={() => {
             haptic();
@@ -214,6 +217,101 @@ export function MiniPlayer() {
         </View>
       </Modal>
     </View>
+  );
+}
+
+/** The alarm clock: "Hẹn giờ ngủ" — the time left while it is on; its choices in a sheet from the bottom. */
+function SleepButton({ songLeft }: { songLeft: number }) {
+  const t = useTheme();
+  const tr = useT();
+  const p = usePlayer();
+  const [open, setOpen] = useState(false);
+  const [nowMs, setNowMs] = useState(0); // the wall clock, read every second while a minutes timer runs
+  const { mode, endsAt } = p.sleep;
+  // the countdown goes on while paused (the dock draws again with the position only while playing)
+  useEffect(() => {
+    if (endsAt === null) return;
+    const tick = () => setNowMs(Date.now());
+    const first = setTimeout(tick, 0);
+    const id = setInterval(tick, 1000);
+    return () => {
+      clearTimeout(first);
+      clearInterval(id);
+    };
+  }, [endsAt]);
+  const songTime = fmtDur(Math.max(0, songLeft)) || "0:00";
+  const left =
+    mode === "off"
+      ? null
+      : endsAt !== null
+        ? fmtDur(Math.min(Number(mode) * 60, Math.max(0, (endsAt - nowMs) / 1000))) || "0:00"
+        : songTime;
+  const pick = (m: SleepMode) => {
+    haptic();
+    p.setSleep(m);
+    setOpen(false);
+  };
+  const choices: [SleepMode, string][] = [
+    ["off", tr("Tắt")],
+    ...SLEEP_MINUTES.map((n): [SleepMode, string] => [n, tr("{n} phút", { n })]),
+    ["song", tr("Hết bài này")],
+  ];
+  return (
+    <>
+      <Pressable
+        onPress={() => {
+          haptic();
+          setOpen(true);
+        }}
+        accessibilityRole="button"
+        accessibilityLabel={tr("Hẹn giờ ngủ")}
+        accessibilityValue={left ? { text: left } : undefined}
+        hitSlop={6}
+        style={({ pressed }) => [
+          styles.speedBtn,
+          styles.sleepBtn,
+          { backgroundColor: pressed ? tint(t.violet, 0.16) : "transparent" },
+        ]}
+      >
+        <Icon name={left ? "alarm-fill" : "alarm"} size={15} color={left ? "#ec4899" : t.violet} />
+        {left && (
+          <T weight="semibold" size={13} color="#ec4899" style={{ fontVariant: ["tabular-nums"] }}>
+            {left}
+          </T>
+        )}
+      </Pressable>
+      <Sheet open={open} onClose={() => setOpen(false)} title={tr("Hẹn giờ ngủ")} icon="alarm" bottom>
+        <View style={styles.sleepList}>
+          {choices.map(([m, label]) => {
+            const on = m === mode;
+            return (
+              <Pressable
+                key={String(m)}
+                onPress={() => pick(m)}
+                accessibilityRole="button"
+                accessibilityState={{ selected: on }}
+                style={({ pressed }) => [
+                  styles.sleepItem,
+                  { backgroundColor: on ? t.primary : pressed ? tint(t.violet, 0.16) : "transparent" },
+                ]}
+              >
+                <View style={{ flex: 1 }}>
+                  <T size={15} color={on ? "#fff" : undefined}>
+                    {label}
+                  </T>
+                  {m === "song" && (
+                    <T size={12} muted={!on} color={on ? "#fff" : undefined} style={{ fontVariant: ["tabular-nums"] }}>
+                      {tr("Còn {time}", { time: songTime })}
+                    </T>
+                  )}
+                </View>
+                {on && <Icon name="check2" size={16} color="#fff" />}
+              </Pressable>
+            );
+          })}
+        </View>
+      </Sheet>
+    </>
   );
 }
 
@@ -354,6 +452,17 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     borderBottomWidth: StyleSheet.hairlineWidth,
     marginBottom: 6,
+  },
+  sleepBtn: { flexDirection: "row", gap: 4, paddingHorizontal: 6 },
+  sleepList: { gap: 2 },
+  sleepItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    minHeight: 44,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
   },
   speedItem: { flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 16, paddingVertical: 7 },
 });

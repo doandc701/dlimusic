@@ -7,6 +7,8 @@
   locale: "zh-CN", // dates and times
   html: "zh-Hans", // <html lang>
   dict: {
+    // file list
+    "Ngày đăng lên kênh": "发布到频道的时间",
     // page, header, account card
     "DLiMusic · Chạm là nghe, nhấn là tải": "DLiMusic · 点一下就听，按一下就存",
     "Chạm là nghe, nhấn là tải": "点一下就听，按一下就存",

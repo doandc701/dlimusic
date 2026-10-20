@@ -1553,15 +1553,27 @@ matchMedia("(min-width: 576px) and (max-width: 1023.98px) and (min-height: 501px
   setRailOpen(false),
 );
 
+/** When the song was posted in its chat: "16/09/2024 21:04" (the chosen language's date format). */
+function postedAt(f) {
+  if (!f.date) return "";
+  const d = new Date(f.date * 1000);
+  const day = d.toLocaleDateString(tdlI18n.locale, { day: "2-digit", month: "2-digit", year: "numeric" });
+  const hm = d.toLocaleTimeString(tdlI18n.locale, { hour: "2-digit", minute: "2-digit" });
+  return `<span class="posted" title="${esc(t("Ngày đăng lên kênh"))}"><i class="bi bi-clock"></i> ${day} ${hm}</span>`;
+}
+
 function rowHtml(f, num) {
   const sel = state.selected.has(f.id);
+  const posted = postedAt(f);
+  const file = displayName(f) !== f.name ? `<i class="bi bi-file-earmark-music"></i> ${esc(f.name)}` : "";
   const cls = [sel && "row-sel", state.playingId === f.id && "playing"].filter(Boolean).join(" ");
   return `<tr class="${cls}" data-id="${f.id}">
     <td class="ps-3"><input class="form-check-input" type="checkbox" ${sel ? "checked" : ""} tabindex="-1"></td>
     <td class="play">${playCell(f)}</td>
     <td class="text-body-secondary small">${num}</td>
     <td class="text-truncate name-cell"><div class="name-main">${esc(displayName(f))}</div>
-      ${displayName(f) !== f.name ? `<div class="small text-body-secondary text-truncate name-file"><i class="bi bi-file-earmark-music"></i> ${esc(f.name)}</div>` : ""}
+      ${file ? `<div class="small text-body-secondary text-truncate name-file">${file}</div>` : ""}
+      ${posted ? `<div class="small text-body-secondary text-truncate name-file name-posted">${posted}</div>` : ""}
       ${f.chat ? `<div class="small text-truncate fav-chat"><i class="bi bi-megaphone"></i> ${esc(f.chat)}</div>` : ""}
       <div class="m-meta small text-body-secondary"><span class="m-size">${[fmt(f.size), fmtDur(f.duration)].filter(Boolean).join(" · ")}</span><span class="state-m">${stateCell(f)}</span></div></td>
     <td class="text-end text-body-secondary small">${fmt(f.size)}${f.duration ? `<div>${fmtDur(f.duration)}</div>` : ""}</td>

@@ -7,6 +7,8 @@
   locale: "ja-JP", // dates and times
   html: "ja", // <html lang>
   dict: {
+    // file list
+    "Ngày đăng lên kênh": "チャンネルへの投稿日時",
     // page, header, account card
     "DLiMusic · Chạm là nghe, nhấn là tải": "DLiMusic · タップで再生、クリックで保存",
     "Chạm là nghe, nhấn là tải": "タップで再生、クリックで保存",

@@ -501,6 +501,12 @@ body {
   .file-table td.name-cell .m-meta {
     margin-top: 0;
   }
+  /* the posting date keeps its own line, under the file name and size */
+  .file-table td.name-cell .name-posted {
+    flex: 1 1 100%;
+    max-width: 100%;
+    order: 1;
+  }
 }
 /* ---------- Playful palette: each group of buttons gets its own colour (--c) ---------- */
 :root,

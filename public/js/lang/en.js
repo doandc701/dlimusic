@@ -7,6 +7,8 @@
   locale: "en-GB", // dates and times
   html: "en", // <html lang>
   dict: {
+    // file list
+    "Ngày đăng lên kênh": "Posted in the channel",
     // page, header, account card
     "DLiMusic · Chạm là nghe, nhấn là tải": "DLiMusic · Tap to play, click to save",
     "Chạm là nghe, nhấn là tải": "Tap to play, click to save",

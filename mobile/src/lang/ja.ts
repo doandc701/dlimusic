@@ -7,6 +7,8 @@ export default {
   label: "日本語", // in the language list, always in its own language
   locale: "ja-JP", // dates and times
   dict: {
+    // chat screen
+    "Ngày đăng lên kênh": "チャンネルへの投稿日時",
     "Đăng nhập DLiMusic": "DLiMusic にログイン",
     "Nhập số điện thoại của bạn.": "電話番号を入力してください。",
     "Nhập mã xác nhận": "確認コードを入力",

@@ -7,6 +7,8 @@ export default {
   label: "English", // in the language list, always in its own language
   locale: "en-US", // dates and times
   dict: {
+    // chat screen
+    "Ngày đăng lên kênh": "Posted in the channel",
     "Đăng nhập DLiMusic": "Sign in to DLiMusic",
     "Nhập số điện thoại của bạn.": "Enter your phone number.",
     "Nhập mã xác nhận": "Enter the code",

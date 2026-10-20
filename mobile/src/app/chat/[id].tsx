@@ -44,6 +44,14 @@ const SORTS: [Sort, string][] = [
 ];
 const collator = new Intl.Collator("vi", { sensitivity: "base", numeric: true });
 const nameOf = (s: Song) => norm(displayName(s));
+/** When a song was posted in its chat: "16/09/2024 21:04" in the picked language's date format. */
+const postedAt = (date: number, locale: string) => {
+  const d = new Date(date * 1000);
+  return `${d.toLocaleDateString(locale, { day: "2-digit", month: "2-digit", year: "numeric" })} ${d.toLocaleTimeString(
+    locale,
+    { hour: "2-digit", minute: "2-digit" },
+  )}`;
+};
 const SORT_FN: Record<Exclude<Sort, "default">, (a: Song, b: Song) => number> = {
   oldest: (a, b) => a.date - b.date || a.id - b.id,
   "name-asc": (a, b) => collator.compare(nameOf(a), nameOf(b)),
@@ -322,7 +330,7 @@ export default function ChatFiles() {
         ref={listRef}
         data={shown}
         keyExtractor={(s) => s.key}
-        extraData={[selected, now?.song.key, playing, favorites]}
+        extraData={[selected, now?.song.key, playing, favorites, tr.locale]}
         onEndReached={() => {
           if (fav || !hasMore || loading || endFor.current === songs.length) return;
           endFor.current = songs.length;
@@ -451,6 +459,15 @@ export default function ChatFiles() {
                     <Icon name="file-earmark-music" size={11} color={t.textMuted} />
                     <T size={12} muted numberOfLines={1} style={{ flexShrink: 1 }}>
                       {item.name}
+                    </T>
+                  </View>
+                )}
+                {/* when it was posted in the chat */}
+                {item.date > 0 && (
+                  <View style={styles.line} accessibilityLabel={tr("Ngày đăng lên kênh")}>
+                    <Icon name="clock" size={11} color={t.textMuted} />
+                    <T size={12} muted numberOfLines={1} style={{ flexShrink: 1 }}>
+                      {postedAt(item.date, tr.locale)}
                     </T>
                   </View>
                 )}

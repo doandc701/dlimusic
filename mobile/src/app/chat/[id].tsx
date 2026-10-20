@@ -33,7 +33,7 @@ const TYPES: [FileType, string][] = [
 ];
 type Sort = "default" | "oldest" | "name-asc" | "name-desc" | "size-desc" | "size-asc" | "dur-desc" | "dur-asc";
 const SORTS: [Sort, string][] = [
-  ["default", "Mặc định (mới nhất trước)"],
+  ["default", "Mặc định (mới nhất)"],
   ["oldest", "Cũ nhất trước"],
   ["name-asc", "Tên A → Z"],
   ["name-desc", "Tên Z → A"],

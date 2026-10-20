@@ -176,7 +176,7 @@
     "Mở thư mục lưu": "打开保存文件夹",
     "Tìm tên bài, ca sĩ, tên file…": "搜索歌名、歌手、文件名…",
     "Sắp xếp": "排序",
-    "Mặc định (mới nhất trước)": "默认（最新在前）",
+    "Mặc định (mới nhất)": "默认（最新）",
     "Cũ nhất trước": "最早在前",
     "Dung lượng lớn → nhỏ": "大小：从大到小",
     "Dung lượng nhỏ → lớn": "大小：从小到大",
@@ -222,8 +222,7 @@
     "Đã tải hết {n} file": "已加载全部 {n} 个文件",
     "file được chọn": "个文件已选",
     bài: "首已选",
-    "Bấm vào bài để nghe · tích ô vuông để chọn tải, <kbd>Shift</kbd> + bấm để chọn liên tiếp":
-      "点击歌曲即可播放 · 勾选方框选择下载，<kbd>Shift</kbd> + 点击可连续选择",
+    "<kbd>Shift</kbd> + bấm để chọn liên tiếp": "<kbd>Shift</kbd> + 点击可连续选择",
     "Không tìm thấy bài trong kênh (có thể tin đã bị xoá)": "在频道中找不到这首歌（消息可能已被删除）",
     "Chưa chọn thư mục tải xuống — hãy chọn trong Cài đặt": "尚未选择下载文件夹 — 请在设置中选择",
     // player

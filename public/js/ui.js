@@ -1720,7 +1720,7 @@ function updateSelection() {
   const total = files.reduce((s, f) => s + (f.size || 0), 0);
   $("selInfo").innerHTML = files.length
     ? `<span class="badge text-bg-primary rounded-pill">${files.length}</span> <span class="d-none d-sm-inline">${t("file được chọn")}</span><span class="d-sm-none">${t("bài")}</span>${total ? ` · <strong>${fmt(total)}</strong>` : ""}`
-    : `<span class="small text-body-secondary hint">${t("Bấm vào bài để nghe · tích ô vuông để chọn tải, <kbd>Shift</kbd> + bấm để chọn liên tiếp")}</span>`;
+    : `<span class="small text-body-secondary hint">${t("<kbd>Shift</kbd> + bấm để chọn liên tiếp")}</span>`;
   $("downloadBtn").disabled = !files.length;
   $("downloadBtn").querySelector("span").textContent = files.length
     ? t("Tải xuống ({n})", { n: files.length })

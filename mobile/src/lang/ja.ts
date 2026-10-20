@@ -44,7 +44,7 @@ export default {
     Ảnh: "写真",
     "Tài liệu": "ドキュメント",
     Voice: "ボイス",
-    "Mặc định (mới nhất trước)": "デフォルト（新しい順）",
+    "Mặc định (mới nhất)": "デフォルト（新しい順）",
     "Cũ nhất trước": "古い順",
     "Dung lượng lớn → nhỏ": "サイズ：大きい順",
     "Dung lượng nhỏ → lớn": "サイズ：小さい順",

@@ -44,7 +44,7 @@ export default {
     Ảnh: "图片",
     "Tài liệu": "文档",
     Voice: "语音",
-    "Mặc định (mới nhất trước)": "默认（最新优先）",
+    "Mặc định (mới nhất)": "默认（最新）",
     "Cũ nhất trước": "最早优先",
     "Dung lượng lớn → nhỏ": "大小：从大到小",
     "Dung lượng nhỏ → lớn": "大小：从小到大",

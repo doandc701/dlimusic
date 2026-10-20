@@ -178,7 +178,7 @@
     "Mở thư mục lưu": "保存フォルダーを開く",
     "Tìm tên bài, ca sĩ, tên file…": "曲名・アーティスト・ファイル名で検索…",
     "Sắp xếp": "並べ替え",
-    "Mặc định (mới nhất trước)": "デフォルト（新しい順）",
+    "Mặc định (mới nhất)": "デフォルト（新しい順）",
     "Cũ nhất trước": "古い順",
     "Dung lượng lớn → nhỏ": "サイズ: 大きい順",
     "Dung lượng nhỏ → lớn": "サイズ: 小さい順",
@@ -225,8 +225,7 @@
     "Đã tải hết {n} file": "全 {n} 件を読み込みました",
     "file được chọn": "件選択中",
     bài: "曲選択中",
-    "Bấm vào bài để nghe · tích ô vuông để chọn tải, <kbd>Shift</kbd> + bấm để chọn liên tiếp":
-      "曲をクリックで再生 · チェックでダウンロード対象に、<kbd>Shift</kbd> + クリックで範囲選択",
+    "<kbd>Shift</kbd> + bấm để chọn liên tiếp": "<kbd>Shift</kbd> + クリックで範囲選択",
     "Không tìm thấy bài trong kênh (có thể tin đã bị xoá)":
       "チャンネル内に曲が見つかりません（メッセージが削除された可能性があります）",
     "Chưa chọn thư mục tải xuống — hãy chọn trong Cài đặt": "ダウンロードフォルダーが未選択です — 設定で選んでください",

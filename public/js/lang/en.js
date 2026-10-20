@@ -179,7 +179,7 @@
     "Mở thư mục lưu": "Open download folder",
     "Tìm tên bài, ca sĩ, tên file…": "Search songs, artists, file names…",
     "Sắp xếp": "Sort",
-    "Mặc định (mới nhất trước)": "Default (newest first)",
+    "Mặc định (mới nhất)": "Default (newest)",
     "Cũ nhất trước": "Oldest first",
     "Dung lượng lớn → nhỏ": "Size: largest first",
     "Dung lượng nhỏ → lớn": "Size: smallest first",
@@ -226,8 +226,7 @@
     "Đã tải hết {n} file": "All {n} files loaded",
     "file được chọn": "selected",
     bài: "selected",
-    "Bấm vào bài để nghe · tích ô vuông để chọn tải, <kbd>Shift</kbd> + bấm để chọn liên tiếp":
-      "Click a song to play · tick the box to download, <kbd>Shift</kbd> + click to select a range",
+    "<kbd>Shift</kbd> + bấm để chọn liên tiếp": "<kbd>Shift</kbd> + click to select a range",
     "Không tìm thấy bài trong kênh (có thể tin đã bị xoá)":
       "Song not found in the channel (the message may have been deleted)",
     "Chưa chọn thư mục tải xuống — hãy chọn trong Cài đặt": "No download folder yet — choose one in Settings",

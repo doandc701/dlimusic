@@ -44,7 +44,7 @@ export default {
     Ảnh: "Photos",
     "Tài liệu": "Documents",
     Voice: "Voice",
-    "Mặc định (mới nhất trước)": "Default (newest first)",
+    "Mặc định (mới nhất)": "Default (newest)",
     "Cũ nhất trước": "Oldest first",
     "Dung lượng lớn → nhỏ": "Size: largest first",
     "Dung lượng nhỏ → lớn": "Size: smallest first",

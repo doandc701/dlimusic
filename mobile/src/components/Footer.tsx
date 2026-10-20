@@ -2,6 +2,7 @@
 import { StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { useT } from "../i18n";
 import { useTheme } from "../theme";
 import { T } from "./ui";
 
@@ -9,6 +10,7 @@ export const SLOGAN = "Chạm là nghe, nhấn là tải";
 
 export function Footer({ bar }: { bar?: boolean }) {
   const t = useTheme();
+  const tr = useT();
   const insets = useSafeAreaInsets();
   return (
     <View
@@ -19,7 +21,7 @@ export function Footer({ bar }: { bar?: boolean }) {
       ]}
     >
       <T size={12} muted style={{ textAlign: "center", letterSpacing: 0.12 }}>
-        © {new Date().getFullYear()} DLiMusic · {SLOGAN}
+        © {new Date().getFullYear()} DLiMusic · {tr(SLOGAN)}
       </T>
     </View>
   );

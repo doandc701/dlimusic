@@ -14,11 +14,13 @@ import Animated, {
 
 import { DancingCat } from "@/components/DancingCat";
 import { T } from "@/components/ui";
+import { useT } from "@/i18n";
 import { usePlayer } from "@/player/PlayerProvider";
 import { useAuth } from "@/telegram/AuthProvider";
 
 export default function Home() {
   const auth = useAuth();
+  const tr = useT();
   const { playing, speed } = usePlayer();
   const { height } = useWindowDimensions();
   const shake = useSharedValue(0);
@@ -76,11 +78,11 @@ export default function Home() {
   return (
     <View style={styles.page}>
       <Animated.View style={[styles.center, frame]}>
-        <Pressable onPress={tapCat} accessibilityRole="button" accessibilityLabel="Chạm vào mèo để chọn kênh">
+        <Pressable onPress={tapCat} accessibilityRole="button" accessibilityLabel={tr("Chạm vào mèo để chọn kênh")}>
           <DancingCat dancing={playing} height={catHeight} rate={speed} />
         </Pressable>
         <T size={13} muted style={{ marginTop: 8 }}>
-          Chạm vào mèo để chọn kênh
+          {tr("Chạm vào mèo để chọn kênh")}
         </T>
       </Animated.View>
       <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, styles.flash, white]} />

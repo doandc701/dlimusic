@@ -18,6 +18,7 @@ import { AppHeader } from "@/components/AppHeader";
 import { Footer } from "@/components/Footer";
 import { MiniPlayer } from "@/components/MiniPlayer";
 import { ToastProvider } from "@/components/Toast";
+import { LanguageProvider, useT } from "@/i18n";
 import { PlayerProvider } from "@/player/PlayerProvider";
 import { LibraryProvider } from "@/store/LibraryProvider";
 import { AuthProvider, useAuth } from "@/telegram/AuthProvider";
@@ -29,6 +30,7 @@ SplashScreen.preventAutoHideAsync();
 function Shell() {
   const t = useTheme();
   const { state } = useAuth();
+  const { ready: langReady } = useT();
   const [fontsLoaded] = useFonts({
     BeVietnamPro_400Regular,
     BeVietnamPro_500Medium,
@@ -36,7 +38,7 @@ function Shell() {
     BeVietnamPro_700Bold,
     "bootstrap-icons": require("@/assets/fonts/bootstrap-icons.ttf"),
   });
-  const ready = fontsLoaded && state !== "checking";
+  const ready = fontsLoaded && langReady && state !== "checking";
   useEffect(() => {
     if (ready) SplashScreen.hideAsync();
   }, [ready]);
@@ -63,15 +65,17 @@ export default function RootLayout() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <ThemeProvider>
-        <AuthProvider>
-          <LibraryProvider>
-            <PlayerProvider>
-              <ToastProvider>
-                <Shell />
-              </ToastProvider>
-            </PlayerProvider>
-          </LibraryProvider>
-        </AuthProvider>
+        <LanguageProvider>
+          <AuthProvider>
+            <LibraryProvider>
+              <PlayerProvider>
+                <ToastProvider>
+                  <Shell />
+                </ToastProvider>
+              </PlayerProvider>
+            </LibraryProvider>
+          </AuthProvider>
+        </LanguageProvider>
       </ThemeProvider>
     </GestureHandlerRootView>
   );

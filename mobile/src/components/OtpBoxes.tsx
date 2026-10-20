@@ -3,12 +3,14 @@
 import { useRef, useState } from "react";
 import { StyleSheet, TextInput, View } from "react-native";
 
+import { useT } from "../i18n";
 import { FONT, mix, tint, useTheme } from "../theme";
 
 export const OTP_LEN = 5; // Telegram login codes are 5 digits
 
 export function OtpBoxes({ onDone, invalid }: { onDone: (code: string) => void; invalid?: boolean }) {
   const t = useTheme();
+  const tr = useT();
   const [digits, setDigits] = useState<string[]>(Array(OTP_LEN).fill(""));
   const [focus, setFocus] = useState(0);
   const refs = useRef<(TextInput | null)[]>([]);
@@ -28,7 +30,7 @@ export function OtpBoxes({ onDone, invalid }: { onDone: (code: string) => void; 
   }
 
   return (
-    <View style={styles.row} accessibilityRole="none" accessibilityLabel="Mã xác nhận">
+    <View style={styles.row} accessibilityRole="none" accessibilityLabel={tr("Mã xác nhận")}>
       {digits.map((d, i) => (
         <TextInput
           allowFontScaling={false}
@@ -53,7 +55,7 @@ export function OtpBoxes({ onDone, invalid }: { onDone: (code: string) => void; 
           autoFocus={i === 0}
           maxLength={i === 0 ? OTP_LEN : 2}
           selectTextOnFocus
-          accessibilityLabel={`Số thứ ${i + 1}`}
+          accessibilityLabel={tr("Số thứ {n}", { n: i + 1 })}
           style={[
             styles.box,
             {

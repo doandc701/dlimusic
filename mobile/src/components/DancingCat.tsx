@@ -5,6 +5,7 @@
 import { Image } from "expo-image";
 import { useEffect, useState } from "react";
 import { AccessibilityInfo, StyleSheet, View } from "react-native";
+import { useT } from "@/i18n";
 import { useTheme } from "@/theme";
 import Animated, { Easing, useAnimatedStyle, useSharedValue, withRepeat, withTiming } from "react-native-reanimated";
 
@@ -26,6 +27,7 @@ export function DancingCat({ dancing, height = 200, rate = 1 }: { dancing: boole
 
 function StillCat({ height, still }: { height: number; still: boolean }) {
   const t = useTheme();
+  const tr = useT();
   const bob = useSharedValue(0);
   useEffect(() => {
     if (!still) bob.set(withRepeat(withTiming(1, { duration: 1600, easing: Easing.inOut(Easing.sin) }), -1, true));
@@ -59,13 +61,14 @@ function StillCat({ height, still }: { height: number; still: boolean }) {
         source={require("@/assets/images/cat-headphones.webp")}
         style={StyleSheet.absoluteFill}
         contentFit="contain"
-        accessibilityLabel="Mèo đeo tai nghe đang thưởng thức nhạc"
+        accessibilityLabel={tr("Mèo đeo tai nghe đang thưởng thức nhạc")}
       />
     </Animated.View>
   );
 }
 
 function Kittens({ height, rate }: { height: number; rate: number }) {
+  const tr = useT();
   const w = (height * FRAME_W) / FRAME_H;
   const [frame, setFrame] = useState(0);
   useEffect(() => {
@@ -79,7 +82,7 @@ function Kittens({ height, rate }: { height: number; rate: number }) {
       style={{ width: w, height, overflow: "hidden" }}
       accessible
       accessibilityRole="image"
-      accessibilityLabel="Hai chú mèo con đang nhảy theo nhạc"
+      accessibilityLabel={tr("Hai chú mèo con đang nhảy theo nhạc")}
     >
       <Image
         source={require("@/assets/images/cat-dance-grid.webp")}

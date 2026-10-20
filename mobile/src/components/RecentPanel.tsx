@@ -6,6 +6,7 @@ import { Alert, FlatList, Modal, Pressable, StyleSheet, TextInput, View } from "
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { displayName } from "../../../core.js";
+import { useT, type Translate } from "../i18n";
 import { usePlayer } from "../player/PlayerProvider";
 import { useLibrary, type RecentItem } from "../store/LibraryProvider";
 import { FavoritesScan } from "../telegram/library";
@@ -17,22 +18,24 @@ import { IconButton, T, fmtDur, haptic } from "./ui";
 export const norm = (s: string) =>
   s.normalize("NFKD").replace(/[̀-ͯ]/g, "").replace(/đ/g, "d").replace(/Đ/g, "D").toLowerCase();
 
-/** "5 phút trước", "Hôm qua 21:04", "12/10 08:30" (the web's ago()) */
-function ago(at: number) {
+/** "5 phút trước", "Hôm qua 21:04", "12/10 08:30" (the web's ago()), in the picked language */
+function ago(at: number, tr: Translate) {
   const min = Math.floor((Date.now() - at) / 60000);
-  if (min < 1) return "Vừa xong";
-  if (min < 60) return `${min} phút trước`;
+  if (min < 1) return tr("Vừa xong");
+  if (min < 60) return tr("{n} phút trước", { n: min });
   const d = new Date(at);
   const two = (n: number) => String(n).padStart(2, "0");
   const hm = `${two(d.getHours())}:${two(d.getMinutes())}`;
   const today = new Date();
-  if (d.toDateString() === today.toDateString()) return `Hôm nay ${hm}`;
-  if (d.toDateString() === new Date(today.getTime() - 86_400_000).toDateString()) return `Hôm qua ${hm}`;
+  if (d.toDateString() === today.toDateString()) return tr("Hôm nay {time}", { time: hm });
+  if (d.toDateString() === new Date(today.getTime() - 86_400_000).toDateString())
+    return tr("Hôm qua {time}", { time: hm });
   return `${two(d.getDate())}/${two(d.getMonth() + 1)} ${hm}`;
 }
 
 export function RecentPanel({ open, onClose }: { open: boolean; onClose: () => void }) {
   const t = useTheme();
+  const tr = useT();
   const insets = useSafeAreaInsets();
   const toast = useToast();
   const { recent, removeRecent, clearRecent } = useLibrary();
@@ -56,15 +59,19 @@ export function RecentPanel({ open, onClose }: { open: boolean; onClose: () => v
       return toast(String((e as Error)?.message ?? e), "error");
     }
     const song = scan.songs.find((s) => s.key === h.id);
-    if (!song) return toast("Không tìm thấy bài này trong kênh (có thể tin đã bị xoá)", "warn");
+    if (!song) return toast(tr("Không tìm thấy bài này trong kênh (có thể tin đã bị xoá)"), "warn");
     play(scan, song);
   }
 
   function clearAll() {
-    Alert.alert("Xoá danh sách phát gần đây", `Xoá ${recent.length} bài khỏi danh sách phát gần đây?`, [
-      { text: "Huỷ", style: "cancel" },
-      { text: "Xoá", style: "destructive", onPress: clearRecent },
-    ]);
+    Alert.alert(
+      tr("Xoá danh sách phát gần đây"),
+      tr("Xoá {n} bài khỏi danh sách phát gần đây?", { n: recent.length }),
+      [
+        { text: tr("Huỷ"), style: "cancel" },
+        { text: tr("Xoá"), style: "destructive", onPress: clearRecent },
+      ],
+    );
   }
 
   return (
@@ -74,12 +81,12 @@ export function RecentPanel({ open, onClose }: { open: boolean; onClose: () => v
         <View style={styles.head}>
           <Icon name="clock-history" size={15} color={t.text} />
           <T weight="semibold" style={{ flex: 1 }}>
-            Phát gần đây{" "}
+            {tr("Phát gần đây")}{" "}
             <T muted weight="regular">
               ({recent.length})
             </T>
           </T>
-          <IconButton icon="x-lg" color={t.pink} size={16} onPress={onClose} label="Đóng" />
+          <IconButton icon="x-lg" color={t.pink} size={16} onPress={onClose} label={tr("Đóng")} />
         </View>
         <View style={[styles.search, { borderColor: t.border }]}>
           <View style={[styles.searchIco, { borderRightColor: t.border, backgroundColor: t.bg }]}>
@@ -89,7 +96,7 @@ export function RecentPanel({ open, onClose }: { open: boolean; onClose: () => v
             allowFontScaling={false}
             value={query}
             onChangeText={setQuery}
-            placeholder="Tìm bài đã nghe…"
+            placeholder={tr("Tìm bài đã nghe…")}
             placeholderTextColor={t.textMuted}
             style={[styles.searchInput, { color: t.text }]}
           />
@@ -100,7 +107,7 @@ export function RecentPanel({ open, onClose }: { open: boolean; onClose: () => v
           style={{ borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: t.border }}
           ListEmptyComponent={
             <T size={13} muted style={{ textAlign: "center", paddingVertical: 24 }}>
-              {recent.length ? "Không có bài khớp" : "Chưa nghe bài nào — bài bạn nghe sẽ hiện ở đây"}
+              {tr(recent.length ? "Không có bài khớp" : "Chưa nghe bài nào — bài bạn nghe sẽ hiện ở đây")}
             </T>
           }
           renderItem={({ item }) => {
@@ -132,7 +139,9 @@ export function RecentPanel({ open, onClose }: { open: boolean; onClose: () => v
                     {displayName(item)}
                   </T>
                   <T size={13} muted numberOfLines={1}>
-                    {[item.chat, item.duration ? fmtDur(item.duration) : "", ago(item.at)].filter(Boolean).join(" · ")}
+                    {[item.chat, item.duration ? fmtDur(item.duration) : "", ago(item.at, tr)]
+                      .filter(Boolean)
+                      .join(" · ")}
                   </T>
                 </View>
                 <IconButton
@@ -141,7 +150,7 @@ export function RecentPanel({ open, onClose }: { open: boolean; onClose: () => v
                   size={14}
                   box={30}
                   onPress={() => removeRecent(item.id)}
-                  label="Bỏ khỏi danh sách"
+                  label={tr("Bỏ khỏi danh sách")}
                 />
               </Pressable>
             );
@@ -165,7 +174,7 @@ export function RecentPanel({ open, onClose }: { open: boolean; onClose: () => v
           >
             <Icon name="trash3" size={13} color={t.coral} />
             <T size={13} weight="medium" color={t.coral}>
-              Xoá danh sách
+              {tr("Xoá danh sách")}
             </T>
           </Pressable>
         </View>

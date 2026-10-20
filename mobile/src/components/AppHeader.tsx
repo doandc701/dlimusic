@@ -1,27 +1,30 @@
 // The header, like the web's navbar: logo + "DLiMusic"; signed in: "Phát gần đây" (amber, with the count),
 // light / dark, and the account's avatar that opens the account card (name band in the account's colour,
-// phone, id, sync, Cài đặt / Đăng xuất).
+// phone, id, sync, Cài đặt / Đăng xuất). Signed out: a language button too (the sign-in can be read first).
 import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";
 import { useState } from "react";
 import { Alert, Image, Modal, Pressable, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { useT } from "../i18n";
 import { useLibrary } from "../store/LibraryProvider";
 import { useAuth } from "../telegram/AuthProvider";
 import { FONT, mix, tint, useTheme, useThemeToggle } from "../theme";
 import { Icon, type IconName } from "./Icon";
+import { LanguageButton } from "./LanguagePicker";
 import { RecentPanel } from "./RecentPanel";
 import { SettingsSheet } from "./SettingsSheet";
 import { HEADER_H, useToast } from "./Toast";
 import { RoundButton, T, colorFor, haptic, initialOf } from "./ui";
 
-/** "+84912345678" -> "+84 912 345 678" (like the web's card) */
+/** "+84912345678" -> "+84 912 345 678" (like the web's card); none: "Không có" (translated where shown) */
 const fmtPhone = (p?: string | null) =>
   p ? `+${p}`.replace(/^\+\+/, "+").replace(/^\+(84|1|7|\d{2})(\d{3})(\d{3})(\d+)$/, "+$1 $2 $3 $4") : "Không có";
 
 export function AppHeader({ signedIn }: { signedIn: boolean }) {
   const t = useTheme();
+  const tr = useT();
   const toggleTheme = useThemeToggle();
   const insets = useSafeAreaInsets();
   const { recent } = useLibrary();
@@ -34,7 +37,7 @@ export function AppHeader({ signedIn }: { signedIn: boolean }) {
           onPress={() => signedIn && router.dismissTo("/")}
           style={styles.brand}
           accessibilityRole="link"
-          accessibilityLabel="DLiMusic — màn hình chính"
+          accessibilityLabel={tr("DLiMusic — màn hình chính")}
         >
           <Image source={require("@/assets/images/logo-192.png")} style={styles.logo} />
           <T weight="bold" size={16.8} style={{ letterSpacing: -0.3 }}>
@@ -49,7 +52,7 @@ export function AppHeader({ signedIn }: { signedIn: boolean }) {
                 setPanel("recent");
               }}
               accessibilityRole="button"
-              accessibilityLabel={`Phát gần đây (${recent.length})`}
+              accessibilityLabel={tr("Phát gần đây ({n})", { n: recent.length })}
               style={({ pressed }) => [
                 styles.recentBtn,
                 { borderColor: tint(t.amber, 0.4), backgroundColor: pressed ? t.amber : "transparent" },
@@ -63,10 +66,11 @@ export function AppHeader({ signedIn }: { signedIn: boolean }) {
               </View>
             </Pressable>
           )}
+          {!signedIn && <LanguageButton />}
           <RoundButton
             icon={t.dark ? "moon-stars-fill" : "sun-fill"}
             color={t.violet}
-            label={t.dark ? "Chuyển sang giao diện sáng" : "Chuyển sang giao diện tối"}
+            label={tr(t.dark ? "Chuyển sang giao diện sáng" : "Chuyển sang giao diện tối")}
             onPress={toggleTheme}
           />
           {signedIn && <UserButton onPress={() => setPanel("card")} />}
@@ -117,6 +121,7 @@ function UserAvatar({ size }: { size: number }) {
 }
 
 function UserButton({ onPress }: { onPress: () => void }) {
+  const tr = useT();
   const { me } = useAuth();
   const name = [me?.firstName, me?.lastName].filter(Boolean).join(" ");
   return (
@@ -126,7 +131,7 @@ function UserButton({ onPress }: { onPress: () => void }) {
         onPress();
       }}
       accessibilityRole="button"
-      accessibilityLabel={`Tài khoản: ${name}`}
+      accessibilityLabel={tr("Tài khoản: {name}", { name })}
       hitSlop={6}
     >
       <UserAvatar size={27} />
@@ -146,6 +151,7 @@ function UserCard({
   top: number;
 }) {
   const t = useTheme();
+  const tr = useT();
   const auth = useAuth();
   const toast = useToast();
   const me = auth.me;
@@ -155,32 +161,32 @@ function UserCard({
   // like the web's: synced (at what time), trying again, or this phone only (no sync server)
   const { sync } = useLibrary();
   const syncAt = sync?.lastSync
-    ? ` · ${new Date(sync.lastSync).toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" })}`
+    ? ` · ${new Date(sync.lastSync).toLocaleTimeString(tr.locale, { hour: "2-digit", minute: "2-digit" })}`
     : "";
   const syncRow: [string, string | undefined] =
     !sync || sync.off
-      ? [sync ? "Chỉ lưu trên thiết bị này" : "Đang kết nối…", undefined]
+      ? [tr(sync ? "Chỉ lưu trên thiết bị này" : "Đang kết nối…"), undefined]
       : sync.connected
-        ? [`Đã đồng bộ${syncAt}`, t.green]
-        : ["Mất kết nối, đang thử lại", t.amber];
+        ? [tr("Đã đồng bộ") + syncAt, t.green]
+        : [tr("Mất kết nối, đang thử lại"), t.amber];
   const rows: [IconName, string, string, string?][] = [
-    ["telephone", "Số điện thoại", fmtPhone(me?.phone)],
-    ["person-badge", "ID tài khoản", id],
-    ["cloud", "Đồng bộ", ...syncRow],
+    ["telephone", tr("Số điện thoại"), tr(fmtPhone(me?.phone))],
+    ["person-badge", tr("ID tài khoản"), id],
+    ["cloud", tr("Đồng bộ"), ...syncRow],
   ];
 
   function signOut() {
     onClose();
-    Alert.alert("Đăng xuất", "Bạn có muốn đăng xuất tài khoản khỏi DLiMusic?", [
-      { text: "Huỷ", style: "cancel" },
+    Alert.alert(tr("Đăng xuất"), tr("Bạn có muốn đăng xuất tài khoản khỏi DLiMusic?"), [
+      { text: tr("Huỷ"), style: "cancel" },
       {
-        text: "Đăng xuất",
+        text: tr("Đăng xuất"),
         style: "destructive",
         onPress: () => {
           router.dismissTo("/");
           auth
             .signOut()
-            .then(() => toast("Xin chào và hẹn gặp lại", "bye"))
+            .then(() => toast(tr("Xin chào và hẹn gặp lại"), "bye"))
             .catch((e) => toast(String(e?.message ?? e), "error"));
         },
       },
@@ -189,7 +195,7 @@ function UserCard({
 
   return (
     <Modal visible={open} transparent animationType="fade" onRequestClose={onClose}>
-      <Pressable style={StyleSheet.absoluteFill} onPress={onClose} accessibilityLabel="Đóng" />
+      <Pressable style={StyleSheet.absoluteFill} onPress={onClose} accessibilityLabel={tr("Đóng")} />
       <View style={[styles.card, { top, backgroundColor: t.surface, borderColor: t.border }]}>
         <LinearGradient
           colors={[mix(color, t.dark ? "#212529" : "#ffffff", 0.38), mix(color, t.dark ? "#212529" : "#ffffff", 0.12)]}
@@ -207,7 +213,7 @@ function UserCard({
               {name}
             </T>
             <T size={13} muted numberOfLines={1}>
-              {me?.username ? `@${me.username}` : "Chưa đặt username"}
+              {me?.username ? `@${me.username}` : tr("Chưa đặt username")}
             </T>
           </View>
         </LinearGradient>
@@ -227,8 +233,8 @@ function UserCard({
           ))}
         </View>
         <View style={[styles.actions, { borderTopColor: t.border }]}>
-          <CardButton icon="gear" title="Cài đặt" color={t.violet} onPress={onSettings} />
-          <CardButton icon="box-arrow-right" title="Đăng xuất" color={t.coral} onPress={signOut} />
+          <CardButton icon="gear" title={tr("Cài đặt")} color={t.violet} onPress={onSettings} />
+          <CardButton icon="box-arrow-right" title={tr("Đăng xuất")} color={t.coral} onPress={signOut} />
         </View>
       </View>
     </Modal>

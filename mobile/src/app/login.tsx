@@ -8,12 +8,14 @@ import { OtpBoxes } from "@/components/OtpBoxes";
 import { PhoneField } from "@/components/PhoneField";
 import { useToast } from "@/components/Toast";
 import { GradientButton, T } from "@/components/ui";
+import { t as tNow, useT } from "@/i18n";
 import { useAuth } from "@/telegram/AuthProvider";
 import { LoginFlow, apiReady, type LoginStep } from "@/telegram/login";
 import { composePhone, phoneMessage } from "@/telegram/phone";
 import { FONT, useTheme } from "@/theme";
 
-// the same words as the web's sign-in (public/js/ui.js LOGIN_STEPS; the button always says "Tiếp tục")
+// the same words as the web's sign-in (public/js/ui.js LOGIN_STEPS; the button always says "Tiếp tục"),
+// translated where they are shown
 const TEXT: Record<Exclude<LoginStep, "done">, { title: string; desc: string }> = {
   phone: { title: "Đăng nhập DLiMusic", desc: "Nhập số điện thoại của bạn." },
   code: { title: "Nhập mã xác nhận", desc: "DLiMusic vừa gửi mã vào app Telegram của bạn (không phải SMS)." },
@@ -22,6 +24,7 @@ const TEXT: Record<Exclude<LoginStep, "done">, { title: string; desc: string }> 
 
 export default function Login() {
   const t = useTheme();
+  const tr = useT();
   const auth = useAuth();
   const toast = useToast();
   const [step, setStep] = useState<Exclude<LoginStep, "done">>("phone");
@@ -41,9 +44,10 @@ export default function Login() {
         setBusy(false);
         if (s === "done") {
           auth.refresh().then((user) => {
-            const full = [user?.firstName, user?.lastName].filter(Boolean).join(" ") || "bạn";
+            // tNow: this callback outlives the render it was made in, the language may have changed since
+            const full = [user?.firstName, user?.lastName].filter(Boolean).join(" ") || tNow("bạn");
             const name = [...full].length > 18 ? [...full].slice(0, 17).join("").trimEnd() + "…" : full;
-            toast(`Chào mừng ${name} quay trở lại 🥰`, "welcome");
+            toast(tNow("Chào mừng {name} quay trở lại 🥰", { name }), "welcome");
           });
           return;
         }
@@ -70,7 +74,7 @@ export default function Login() {
   /** "+<code><number>", or null (and why, on the field). */
   function checkPhone(typed = value, c = code) {
     if (!typed.trim()) {
-      setError("Hãy nhập số điện thoại.");
+      setError("Hãy nhập số điện thoại."); // kept in Vietnamese, translated where it is shown
       return null;
     }
     const full = composePhone(c, typed);
@@ -100,14 +104,14 @@ export default function Login() {
         <View style={[styles.card, { backgroundColor: t.surface, borderColor: t.border }]}>
           <Image source={require("@/assets/images/logo-192.png")} style={styles.logo} />
           <T weight="semibold" size={22} style={{ textAlign: "center", letterSpacing: -0.2 }}>
-            {text.title}
+            {tr(text.title)}
           </T>
           <T muted style={{ textAlign: "center", marginTop: 6, marginBottom: 16 }}>
-            {text.desc}
+            {tr(text.desc)}
           </T>
           {!apiReady() && (
             <T color={t.coral} style={{ marginBottom: 12 }}>
-              Thiếu API ID / API hash: thêm API_ID, API_HASH vào file .env của dự án rồi chạy lại.
+              {tr("Thiếu API ID / API hash: thêm API_ID, API_HASH vào file .env của dự án rồi chạy lại.")}
             </T>
           )}
 
@@ -135,7 +139,7 @@ export default function Login() {
               value={value}
               onChangeText={setValue}
               onSubmitEditing={() => submit()}
-              placeholder="Mật khẩu"
+              placeholder={tr("Mật khẩu")}
               placeholderTextColor={t.textMuted}
               secureTextEntry
               autoComplete="password"
@@ -149,11 +153,11 @@ export default function Login() {
           )}
           {error && (
             <T size={13} color={t.coral} style={{ marginTop: 6 }}>
-              {error}
+              {tr(error)}
             </T>
           )}
           <GradientButton
-            title="Tiếp tục"
+            title={tr("Tiếp tục")}
             onPress={() => submit()}
             busy={busy}
             radius={6}

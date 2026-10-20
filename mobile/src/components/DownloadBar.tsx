@@ -3,12 +3,14 @@
 import { StyleSheet, View } from "react-native";
 
 import { cancelAll, clearFinished, useDownloads } from "../download/downloads";
+import { useT } from "../i18n";
 import { useTheme } from "../theme";
 import { Icon } from "./Icon";
 import { IconButton, Pill, T } from "./ui";
 
 export function DownloadBar() {
   const t = useTheme();
+  const tr = useT();
   const { jobs, dirName } = useDownloads();
   if (!jobs.length) return null;
   const now = jobs.find((j) => j.status === "downloading");
@@ -35,18 +37,23 @@ export function DownloadBar() {
         <View style={{ flex: 1, minWidth: 0 }}>
           <T size={13} weight="semibold" numberOfLines={1}>
             {running
-              ? `Đang tải ${done + 1}/${jobs.length} · ${pct}%`
-              : `Đã tải xong ${done}/${jobs.length} file${failed.length ? ` · ${failed.length} lỗi` : ""}`}
+              ? tr("Đang tải {n}/{total} · {pct}%", { n: done + 1, total: jobs.length, pct })
+              : tr("Đã tải xong {n}/{total} file", { n: done, total: jobs.length }) +
+                (failed.length ? tr(" · {n} lỗi", { n: failed.length }) : "")}
             {dirName ? <T size={13} muted>{` → ${dirName}`}</T> : null}
           </T>
           <T size={12} muted numberOfLines={1}>
-            {now ? now.name : failed.length ? failed[failed.length - 1].error : "Đã lưu vào thư mục đã chọn"}
+            {now
+              ? now.name
+              : failed.length
+                ? tr(failed[failed.length - 1].error ?? "")
+                : tr("Đã lưu vào thư mục đã chọn")}
           </T>
         </View>
         {running ? (
-          <Pill title="Huỷ" icon="x-lg" color={t.coral} small onPress={cancelAll} />
+          <Pill title={tr("Huỷ")} icon="x-lg" color={t.coral} small onPress={cancelAll} />
         ) : (
-          <IconButton icon="x-lg" color={t.textMuted} size={14} onPress={clearFinished} label="Ẩn" />
+          <IconButton icon="x-lg" color={t.textMuted} size={14} onPress={clearFinished} label={tr("Ẩn")} />
         )}
       </View>
       <View style={[styles.track, { backgroundColor: t.surfaceAlt }]}>

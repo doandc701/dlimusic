@@ -1,7 +1,7 @@
 // Phone numbers, the same way as the web's sign-in (public/js/ui.js): the country code is picked in front
 // (+84 by default), the field holds the rest.
 
-export type Country = { code: string; cc: string; name: string };
+export type Country = { code: string; cc: string; name: string }; // name: Vietnamese, translated where shown
 
 export const COUNTRIES: Country[] = [
   { code: "84", cc: "vn", name: "Việt Nam" },

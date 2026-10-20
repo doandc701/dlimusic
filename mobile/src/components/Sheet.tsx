@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 import { Modal, Pressable, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { useT } from "../i18n";
 import { useTheme } from "../theme";
 import { Icon, type IconName } from "./Icon";
 import { IconButton, T } from "./ui";
@@ -27,6 +28,7 @@ export function Sheet({
   bottom?: boolean; // a sheet from the bottom instead of the full screen
 }) {
   const t = useTheme();
+  const tr = useT();
   const insets = useSafeAreaInsets();
   const head = (
     <View style={[styles.head, { borderBottomColor: t.border }]}>
@@ -34,7 +36,7 @@ export function Sheet({
       <T weight="semibold" size={19} style={{ flex: 1 }}>
         {title}
       </T>
-      <IconButton icon="x-lg" color={t.text} size={16} onPress={onClose} label="Đóng" />
+      <IconButton icon="x-lg" color={t.text} size={16} onPress={onClose} label={tr("Đóng")} />
     </View>
   );
   const foot = footer ? <View style={[styles.foot, { borderTopColor: t.border }]}>{footer}</View> : null;

@@ -4,6 +4,7 @@ import * as Haptics from "expo-haptics";
 import { useEffect, useState } from "react";
 import { FlatList, Pressable, StyleSheet, TextInput, View } from "react-native";
 
+import { useT } from "../i18n";
 import { storage } from "../storage";
 import { COUNTRIES, countryOf, flag } from "../telegram/phone";
 import { FONT, useTheme } from "../theme";
@@ -29,6 +30,7 @@ export function PhoneField({
   invalid?: boolean;
 }) {
   const t = useTheme();
+  const tr = useT();
   const [open, setOpen] = useState(false);
   const country = countryOf(code);
 
@@ -55,7 +57,7 @@ export function PhoneField({
         <Pressable
           onPress={() => setOpen(true)}
           accessibilityRole="button"
-          accessibilityLabel={`Mã quốc gia: ${country.name} (+${country.code})`}
+          accessibilityLabel={tr("Mã quốc gia: {name} (+{code})", { name: tr(country.name), code: country.code })}
           style={({ pressed }) => [styles.code, { borderRightColor: border, opacity: pressed ? 0.6 : 1 }]}
         >
           <T size={17}>{flag(country.cc)}</T>
@@ -67,7 +69,7 @@ export function PhoneField({
           value={value}
           onChangeText={onChange}
           onSubmitEditing={onSubmit}
-          placeholder={code === "84" ? "912 345 678" : "Số điện thoại"}
+          placeholder={code === "84" ? "912 345 678" : tr("Số điện thoại")}
           placeholderTextColor={t.textMuted}
           keyboardType="phone-pad"
           autoComplete="tel"
@@ -75,11 +77,11 @@ export function PhoneField({
           maxLength={20}
           autoFocus
           style={[styles.input, { color: t.text }]}
-          accessibilityLabel="Số điện thoại"
+          accessibilityLabel={tr("Số điện thoại")}
         />
       </View>
 
-      <Sheet open={open} onClose={() => setOpen(false)} title="Mã quốc gia" icon="globe2" bottom>
+      <Sheet open={open} onClose={() => setOpen(false)} title={tr("Mã quốc gia")} icon="globe2" bottom>
         <FlatList
           data={COUNTRIES}
           keyExtractor={(c) => c.code}
@@ -98,7 +100,7 @@ export function PhoneField({
               >
                 <T size={20}>{flag(item.cc)}</T>
                 <T style={{ flex: 1 }} color={active ? "#fff" : undefined}>
-                  {item.name}
+                  {tr(item.name)}
                 </T>
                 <T size={13} muted={!active} color={active ? "#fff" : undefined}>
                   +{item.code}

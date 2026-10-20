@@ -6,6 +6,7 @@ import { useState } from "react";
 import { ActivityIndicator, Modal, Pressable, StyleSheet, View } from "react-native";
 
 import { displayName } from "../../../core.js";
+import { useT } from "../i18n";
 import { usePlayer, usePlayerClock } from "../player/PlayerProvider";
 import { useLibrary } from "../store/LibraryProvider";
 import { chatById } from "../telegram/library";
@@ -25,6 +26,7 @@ const SPEEDS: [number, string][] = [
 
 export function MiniPlayer() {
   const t = useTheme();
+  const tr = useT();
   const toast = useToast();
   const p = usePlayer();
   const { isFavorite, toggleFavorite } = useLibrary();
@@ -68,15 +70,15 @@ export function MiniPlayer() {
           <View style={styles.sub}>
             {now.phase === "error" ? (
               <T size={12} color={t.coral} numberOfLines={1}>
-                {now.error}
+                {tr(now.error ?? "")}
               </T>
             ) : fetching ? (
               <T size={12} muted numberOfLines={1}>
-                Đang tải {Math.round(clock.progress * 100)}%
+                {tr("Đang tải {pct}%", { pct: Math.round(clock.progress * 100) })}
               </T>
             ) : (
               <>
-                <Badge text="Nghe thử" />
+                <Badge text={tr("Nghe thử")} />
                 <T size={12} muted numberOfLines={1} style={{ flexShrink: 1 }}>
                   {now.song.performer || chat}
                 </T>
@@ -90,9 +92,9 @@ export function MiniPlayer() {
           size={18}
           onPress={() => {
             const on = toggleFavorite(now.song.key);
-            toast(on ? "Đã thêm vào Bài hát yêu thích" : "Đã bỏ khỏi Bài hát yêu thích", on ? "bye" : "info");
+            toast(tr(on ? "Đã thêm vào Bài hát yêu thích" : "Đã bỏ khỏi Bài hát yêu thích"), on ? "bye" : "info");
           }}
-          label={fav ? "Bỏ khỏi yêu thích" : "Thêm vào yêu thích"}
+          label={tr(fav ? "Bỏ khỏi yêu thích" : "Thêm vào yêu thích")}
         />
         <Pressable
           onPress={() => {
@@ -100,7 +102,7 @@ export function MiniPlayer() {
             setSpeedOpen(true);
           }}
           accessibilityRole="button"
-          accessibilityLabel="Tốc độ phát"
+          accessibilityLabel={tr("Tốc độ phát")}
           hitSlop={6}
           style={({ pressed }) => [
             styles.speedBtn,
@@ -124,12 +126,18 @@ export function MiniPlayer() {
           on={p.shuffle}
           color={modeColor(p.shuffle)}
           onPress={() => p.setShuffle(!p.shuffle)}
-          label={`Phát ngẫu nhiên: ${p.shuffle ? "bật" : "tắt"}`}
+          label={tr(p.shuffle ? "Phát ngẫu nhiên: bật" : "Phát ngẫu nhiên: tắt")}
         />
-        <IconButton icon="skip-start-fill" color={t.violet} size={20} onPress={() => p.next(-1)} label="Bài trước" />
+        <IconButton
+          icon="skip-start-fill"
+          color={t.violet}
+          size={20}
+          onPress={() => p.next(-1)}
+          label={tr("Bài trước")}
+        />
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={playing ? "Tạm dừng" : "Phát"}
+          accessibilityLabel={tr(playing ? "Tạm dừng" : "Phát")}
           onPress={() => {
             haptic();
             p.toggle();
@@ -145,13 +153,21 @@ export function MiniPlayer() {
             )}
           </LinearGradient>
         </Pressable>
-        <IconButton icon="skip-end-fill" color={t.violet} size={20} onPress={() => p.next(1)} label="Bài tiếp theo" />
+        <IconButton
+          icon="skip-end-fill"
+          color={t.violet}
+          size={20}
+          onPress={() => p.next(1)}
+          label={tr("Bài tiếp theo")}
+        />
         <ModeButton
           icon={p.repeat === "one" ? "repeat-1" : "repeat"}
           on={p.repeat !== "off"}
           color={modeColor(p.repeat !== "off")}
           onPress={() => p.setRepeat(p.repeat === "off" ? "all" : p.repeat === "all" ? "one" : "off")}
-          label={`Lặp lại: ${p.repeat === "off" ? "tắt" : p.repeat === "all" ? "cả danh sách" : "một bài"}`}
+          label={tr(
+            p.repeat === "off" ? "Lặp lại: tắt" : p.repeat === "all" ? "Lặp lại: cả danh sách" : "Lặp lại: một bài",
+          )}
         />
       </View>
 
@@ -189,7 +205,7 @@ export function MiniPlayer() {
                   {rate}x
                 </T>
                 <T size={14} style={{ flex: 1 }} color={on ? "#fff" : undefined}>
-                  {label}
+                  {tr(label)}
                 </T>
                 {on && <Icon name="check2" size={15} color="#fff" />}
               </Pressable>
@@ -237,6 +253,7 @@ function SeekBar({
   onSeek: (s: number) => void;
 }) {
   const t = useTheme();
+  const tr = useT();
   const [width, setWidth] = useState(1);
   const [drag, setDrag] = useState<number | null>(null);
   const shown = drag ?? (duration ? Math.min(1, value / duration) : 0);
@@ -255,7 +272,7 @@ function SeekBar({
       }}
       onResponderTerminate={() => setDrag(null)}
       accessibilityRole="adjustable"
-      accessibilityLabel="Vị trí"
+      accessibilityLabel={tr("Vị trí")}
     >
       <View style={[styles.track, { backgroundColor: t.surfaceAlt }]}>
         {/* the part already fetched, grey like the web's (--seek-loaded: secondary colour 40% into its background) */}

@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { Pressable, StyleSheet, View } from "react-native";
 
 import type { Chat } from "../telegram/library";
+import { useT } from "../i18n";
 import { useTheme } from "../theme";
 import { Icon, type IconName } from "./Icon";
 import { Avatar, T, haptic } from "./ui";
@@ -15,6 +16,7 @@ export const TYPE: Record<Chat["type"], { icon: IconName; label: string }> = {
 
 export function ChatRow({ chat, onPress, left }: { chat: Chat; onPress: () => void; left?: ReactNode }) {
   const t = useTheme();
+  const tr = useT();
   const kind = TYPE[chat.type];
   return (
     <Pressable
@@ -36,7 +38,7 @@ export function ChatRow({ chat, onPress, left }: { chat: Chat; onPress: () => vo
         <View style={styles.sub}>
           <Icon name={kind.icon} size={12} color={t.textMuted} />
           <T size={13} muted numberOfLines={1} style={{ flexShrink: 1 }}>
-            {kind.label}
+            {tr(kind.label)}
             {chat.username ? ` · @${chat.username}` : ""}
           </T>
         </View>

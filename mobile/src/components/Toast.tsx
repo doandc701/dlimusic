@@ -6,6 +6,7 @@ import { Pressable, StyleSheet, View } from "react-native";
 import Animated, { FadeInUp, FadeOutUp } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { useT } from "../i18n";
 import { useTheme } from "../theme";
 import { Icon, type IconName } from "./Icon";
 import { T } from "./ui";
@@ -27,6 +28,7 @@ export const useToast = () => use(ToastContext)!;
 
 export function ToastProvider({ children }: { children: ReactNode }) {
   const t = useTheme();
+  const tr = useT();
   const insets = useSafeAreaInsets();
   const [shown, setShown] = useState<Shown | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -55,12 +57,12 @@ export function ToastProvider({ children }: { children: ReactNode }) {
             ]}
             accessibilityRole="alert"
           >
-            <Pressable onPress={() => setShown(null)} style={styles.inner} accessibilityLabel="Đóng">
+            <Pressable onPress={() => setShown(null)} style={styles.inner} accessibilityLabel={tr("Đóng")}>
               <LinearGradient colors={[k.k, k.k2]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.ico}>
                 <Icon name={k.icon} size={14} color="#fff" />
               </LinearGradient>
               <T weight="medium" size={13} style={{ flexShrink: 1 }}>
-                {shown.msg}
+                {tr(shown.msg)}
               </T>
             </Pressable>
           </Animated.View>

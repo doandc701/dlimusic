@@ -15,12 +15,14 @@ import { Sheet } from "@/components/Sheet";
 import { useToast } from "@/components/Toast";
 import { Checkbox, GradientButton, Pill, RoundButton, T, fmtDur, fmtSize, haptic } from "@/components/ui";
 import { download } from "@/download/downloads";
+import { useT } from "@/i18n";
 import { playable, usePlayer } from "@/player/PlayerProvider";
 import { prefetchHead, warmUp } from "@/player/prefetch";
 import { useLibrary } from "@/store/LibraryProvider";
 import { FavoritesScan, SongScan, chatById, type FileList, type FileType, type Song } from "@/telegram/library";
 import { FONT, GRADIENT, tint, useTheme } from "@/theme";
 
+// labels in Vietnamese, translated where shown
 const TYPES: [FileType, string][] = [
   ["all", "Tất cả"],
   ["music", "Nhạc"],
@@ -63,6 +65,7 @@ const KIND_OF: Record<FileType, (s: Song) => boolean> = {
 
 export default function ChatFiles() {
   const t = useTheme();
+  const tr = useT();
   const toast = useToast();
   const params = useLocalSearchParams<{ id: string; title?: string; song?: string }>();
   const fav = params.id === "fav";
@@ -91,7 +94,7 @@ export default function ChatFiles() {
   // length, or a short page that says there is more would read again and again
   const endFor = useRef(-1);
 
-  const title = fav ? "Bài hát yêu thích" : (params.title ?? chatById(params.id)?.title ?? "Kênh");
+  const title = fav ? tr("Bài hát yêu thích") : (params.title ?? chatById(params.id)?.title ?? tr("Kênh"));
 
   function read(l: FileList) {
     setLoading(true);
@@ -150,8 +153,8 @@ export default function ChatFiles() {
   const filters = (type !== "all" ? 1 : 0) + (sort !== "default" ? 1 : 0);
   const sub =
     shown.length === songs.length || fav
-      ? `${shown.length}${hasMore && !fav ? "+" : ""} file`
-      : `${shown.length}/${songs.length}${hasMore ? "+" : ""} file đang hiện`;
+      ? tr("{n} file", { n: `${shown.length}${hasMore && !fav ? "+" : ""}` })
+      : tr("{n}/{total} file đang hiện", { n: shown.length, total: `${songs.length}${hasMore ? "+" : ""}` });
   const chosen = shown.filter((s) => selected.has(s.key));
   const allTicked = shown.length > 0 && chosen.length === shown.length;
   const tick = (key: string) => {
@@ -178,7 +181,7 @@ export default function ChatFiles() {
   const scopeChat = scopes.find(([id]) => id === scope)?.[1];
   const scopeLabel =
     scope === "all" || !scopeChat
-      ? `Tất cả kênh — theo danh sách (${favTotal})`
+      ? `${tr("Tất cả kênh — theo danh sách")} (${favTotal})`
       : `${scopeChat.name} (${scopeChat.count})`;
 
   return (
@@ -187,7 +190,7 @@ export default function ChatFiles() {
         <RoundButton
           icon="chevron-left"
           color={t.violet}
-          label="Danh sách kênh"
+          label={tr("Danh sách kênh")}
           onPress={() => (router.canGoBack() ? router.back() : router.replace("/chats"))}
         />
         <View style={{ flex: 1, minWidth: 0 }}>
@@ -199,7 +202,7 @@ export default function ChatFiles() {
           </T>
         </View>
         <Pill
-          title="Lọc"
+          title={tr("Lọc")}
           icon="sliders"
           color={t.pink}
           badge={filters || undefined}
@@ -209,7 +212,7 @@ export default function ChatFiles() {
           icon="arrow-clockwise"
           color={t.green}
           square
-          label={loading ? "Đang quét kênh…" : "Quét lại"}
+          label={tr(loading ? "Đang quét kênh…" : "Quét lại")}
           onPress={() => !loading && rescan()}
         />
       </View>
@@ -223,7 +226,7 @@ export default function ChatFiles() {
             allowFontScaling={false}
             value={query}
             onChangeText={setQuery}
-            placeholder="Tìm tên bài, ca sĩ, tên file…"
+            placeholder={tr("Tìm tên bài, ca sĩ, tên file…")}
             placeholderTextColor={t.textMuted}
             style={[styles.searchInput, { color: t.text }]}
             returnKeyType="search"
@@ -237,7 +240,7 @@ export default function ChatFiles() {
             onPress={() => setScopeOpen(true)}
             style={[styles.select, { borderColor: t.border }]}
             accessibilityRole="button"
-            accessibilityLabel="Chọn kênh"
+            accessibilityLabel={tr("Chọn kênh")}
           >
             <View style={[styles.searchIco, { borderRightColor: t.border, backgroundColor: t.bg }]}>
               <Icon name="collection-play" size={15} color={t.text} />
@@ -260,10 +263,10 @@ export default function ChatFiles() {
             </T>
           </View>
           <T size={13} muted style={{ flex: 1 }}>
-            bài · {fmtSize(chosen.reduce((n, s) => n + (s.size || 0), 0))}
+            {tr("bài · {size}", { n: chosen.length, size: fmtSize(chosen.reduce((n, s) => n + (s.size || 0), 0)) })}
           </T>
           <GradientButton
-            title={`Tải xuống (${chosen.length})`}
+            title={tr("Tải xuống ({n})", { n: chosen.length })}
             icon="download"
             colors={["#10b981", "#06b6d4"]}
             radius={999}
@@ -271,10 +274,13 @@ export default function ChatFiles() {
             size={13}
             onPress={async () => {
               const r = await download(chosen.map((song) => ({ song, media: list.message(song.id)?.media })));
-              if (!r) return toast("Chưa chọn thư mục để lưu", "warn");
+              if (!r) return toast(tr("Chưa chọn thư mục để lưu"), "warn");
               setSelected(new Set());
-              if (!r.added && r.already) return toast(`${r.already} file đã có sẵn trong thư mục`, "info");
-              toast(`Đã thêm ${r.added} file vào hàng chờ${r.already ? ` · ${r.already} file đã có sẵn` : ""}`);
+              if (!r.added && r.already) return toast(tr("{n} file đã có sẵn trong thư mục", { n: r.already }), "info");
+              toast(
+                tr("Đã thêm {n} file vào hàng chờ", { n: r.added }) +
+                  (r.already ? tr(" · {n} file đã có sẵn", { n: r.already }) : ""),
+              );
             }}
           />
         </View>
@@ -286,7 +292,7 @@ export default function ChatFiles() {
             checked={allTicked}
             mixed={!allTicked && chosen.length > 0}
             onPress={() => setSelected(allTicked ? new Set() : new Set(shown.map((s) => s.key)))}
-            label="Chọn tất cả"
+            label={tr("Chọn tất cả")}
           />
         </View>
         <View style={styles.colPlay} />
@@ -297,10 +303,10 @@ export default function ChatFiles() {
           }}
           style={styles.thName}
           accessibilityRole="button"
-          accessibilityLabel="Sắp theo tên"
+          accessibilityLabel={tr("Sắp theo tên")}
         >
           <T weight="bold" color={sort.startsWith("name") ? t.primary : undefined}>
-            Tên bài
+            {tr("Tên bài")}
           </T>
           <Icon
             name={
@@ -328,23 +334,23 @@ export default function ChatFiles() {
             <View style={styles.empty}>
               {error ? (
                 <T color={t.coral} style={{ textAlign: "center" }}>
-                  {error}
+                  {tr(error)}
                 </T>
               ) : fav && !favorites.length ? (
                 <>
                   <Icon name="heart" size={44} color="#ec4899" />
-                  <T style={{ marginTop: 8 }}>Chưa có bài hát yêu thích</T>
+                  <T style={{ marginTop: 8 }}>{tr("Chưa có bài hát yêu thích")}</T>
                   <T size={13} muted style={{ textAlign: "center", marginTop: 4 }}>
-                    Mở một kênh và bấm ♡ ở cuối mỗi dòng để thêm vào đây.
+                    {tr("Mở một kênh và bấm ♡ ở cuối mỗi dòng để thêm vào đây.")}
                   </T>
                 </>
               ) : songs.length ? (
-                <T muted>Không có file khớp bộ lọc</T>
+                <T muted>{tr("Không có file khớp bộ lọc")}</T>
               ) : (
                 <>
                   <Icon name="inbox" size={44} color={t.textMuted} />
                   <T muted style={{ marginTop: 8 }}>
-                    Kênh không có file loại này
+                    {tr("Kênh không có file loại này")}
                   </T>
                 </>
               )}
@@ -356,16 +362,25 @@ export default function ChatFiles() {
             <View style={styles.more}>
               <ActivityIndicator color={t.primary} size="small" />
               <T size={13.6} muted>
-                {songs.length ? "Đang tải thêm…" : count ? `Đang quét kênh… ${count} file` : "Đang quét kênh…"}
+                {songs.length
+                  ? tr("Đang tải thêm…")
+                  : count
+                    ? tr("Đang quét kênh… {n} file", { n: count })
+                    : tr("Đang quét kênh…")}
               </T>
             </View>
           ) : !fav && hasMore && songs.length ? (
             <View style={styles.more}>
-              <Pill title="Tải thêm 500 file" icon="arrow-down-circle" color={t.violet} onPress={() => read(list)} />
+              <Pill
+                title={tr("Tải thêm {n} file", { n: PAGE_SIZE })}
+                icon="arrow-down-circle"
+                color={t.violet}
+                onPress={() => read(list)}
+              />
             </View>
           ) : !fav && songs.length > PAGE_SIZE ? (
             <T size={13.6} muted style={{ textAlign: "center", padding: 14 }}>
-              Đã tải hết {songs.length} file
+              {tr("Đã tải hết {n} file", { n: songs.length })}
             </T>
           ) : null
         }
@@ -456,14 +471,14 @@ export default function ChatFiles() {
                   haptic();
                   const added = toggleFavorite(item.key);
                   toast(
-                    added ? "Đã thêm vào Bài hát yêu thích" : "Đã bỏ khỏi Bài hát yêu thích",
+                    tr(added ? "Đã thêm vào Bài hát yêu thích" : "Đã bỏ khỏi Bài hát yêu thích"),
                     added ? "bye" : "info",
                   );
                 }}
                 hitSlop={8}
                 style={styles.heart}
                 accessibilityRole="button"
-                accessibilityLabel={heart ? "Bỏ khỏi yêu thích" : "Thêm vào yêu thích"}
+                accessibilityLabel={tr(heart ? "Bỏ khỏi yêu thích" : "Thêm vào yêu thích")}
               >
                 <Icon name={heart ? "heart-fill" : "heart"} size={17} color={heart ? "#ec4899" : t.textMuted} />
               </Pressable>
@@ -475,23 +490,30 @@ export default function ChatFiles() {
       <Sheet
         open={filterOpen}
         onClose={() => setFilterOpen(false)}
-        title="Bộ lọc & sắp xếp"
+        title={tr("Bộ lọc & sắp xếp")}
         icon="sliders"
         bottom
-        footer={<GradientButton title="Xong" radius={999} height={42} onPress={() => setFilterOpen(false)} />}
+        footer={<GradientButton title={tr("Xong")} radius={999} height={42} onPress={() => setFilterOpen(false)} />}
       >
-        <Field label="Loại file" value={TYPES.find(([k]) => k === type)?.[1] ?? ""} onPress={() => setPick("type")} />
-        <Field label="Sắp xếp" value={SORTS.find(([k]) => k === sort)?.[1] ?? ""} onPress={() => setPick("sort")} />
+        <Field
+          label={tr("Loại file")}
+          value={tr(TYPES.find(([k]) => k === type)?.[1] ?? "")}
+          onPress={() => setPick("type")}
+        />
+        <Field
+          label={tr("Sắp xếp")}
+          value={tr(SORTS.find(([k]) => k === sort)?.[1] ?? "")}
+          onPress={() => setPick("sort")}
+        />
         <T size={13} muted style={{ textAlign: "center" }}>
-          {shown.length}/{songs.length}
-          {hasMore && !fav ? "+" : ""} file
+          {tr("{n} file", { n: `${shown.length}/${songs.length}${hasMore && !fav ? "+" : ""}` })}
         </T>
       </Sheet>
 
       <Sheet
         open={pick !== null}
         onClose={() => setPick(null)}
-        title={pick === "type" ? "Loại file" : "Sắp xếp"}
+        title={tr(pick === "type" ? "Loại file" : "Sắp xếp")}
         icon={pick === "type" ? "funnel" : "sort-down"}
         bottom
       >
@@ -514,7 +536,7 @@ export default function ChatFiles() {
                 style={[styles.option, active && { backgroundColor: t.primary }]}
               >
                 <T style={{ flex: 1 }} color={active ? "#fff" : undefined}>
-                  {label}
+                  {tr(label)}
                 </T>
                 {active && <Icon name="check2" size={15} color="#fff" />}
               </Pressable>
@@ -523,9 +545,9 @@ export default function ChatFiles() {
         />
       </Sheet>
 
-      <Sheet open={scopeOpen} onClose={() => setScopeOpen(false)} title="Kênh" icon="collection-play" bottom>
+      <Sheet open={scopeOpen} onClose={() => setScopeOpen(false)} title={tr("Kênh")} icon="collection-play" bottom>
         <FlatList
-          data={[["all", { name: "Tất cả kênh — theo danh sách", count: favTotal }] as const, ...scopes]}
+          data={[["all", { name: tr("Tất cả kênh — theo danh sách"), count: favTotal }] as const, ...scopes]}
           keyExtractor={([id]) => id}
           style={{ marginHorizontal: -16 }}
           renderItem={({ item: [id, c] }) => {

@@ -11,10 +11,12 @@ import { ChatsModal } from "@/components/ChatsModal";
 import { Icon, type IconName } from "@/components/Icon";
 import { norm } from "@/components/RecentPanel";
 import { Pill, T, haptic } from "@/components/ui";
+import { useT } from "@/i18n";
 import { useLibrary, type ChatSort } from "@/store/LibraryProvider";
 import { reloadChats, useChats } from "@/telegram/useChats";
 import { FONT, useTheme } from "@/theme";
 
+// labels in Vietnamese, translated where shown
 const SORTS: Record<ChatSort, { label: string; icon: IconName }> = {
   recent: { label: "Mới hoạt động", icon: "clock-history" }, // Telegram's own order
   az: { label: "Tên A → Z", icon: "sort-alpha-down" },
@@ -26,6 +28,7 @@ const collator = new Intl.Collator("vi", { sensitivity: "base", numeric: true })
 
 export default function Chats() {
   const t = useTheme();
+  const tr = useT();
   const { chats, error, loading } = useChats();
   const { favorites, visibleChats, chatSort, setChatSort } = useLibrary();
   const [query, setQuery] = useState("");
@@ -67,7 +70,7 @@ export default function Chats() {
             allowFontScaling={false}
             value={query}
             onChangeText={setQuery}
-            placeholder="Tìm kênh hoặc dán link t.me/…"
+            placeholder={tr("Tìm kênh hoặc dán link t.me/…")}
             placeholderTextColor={t.textMuted}
             style={[styles.searchInput, { color: t.text }]}
             returnKeyType="search"
@@ -86,7 +89,7 @@ export default function Chats() {
           { borderBottomColor: t.border, backgroundColor: pressed ? t.bg : t.surface },
         ]}
         accessibilityRole="button"
-        accessibilityLabel="Bài hát yêu thích"
+        accessibilityLabel={tr("Bài hát yêu thích")}
       >
         <LinearGradient
           colors={["#ec4899", "#8b5cf6"]}
@@ -97,11 +100,11 @@ export default function Chats() {
           <Icon name="heart-fill" size={16} color="#fff" />
         </LinearGradient>
         <View style={{ flex: 1, minWidth: 0 }}>
-          <T weight="semibold">Bài hát yêu thích</T>
+          <T weight="semibold">{tr("Bài hát yêu thích")}</T>
           <View style={styles.sub}>
             <Icon name="music-note-beamed" size={12} color={t.textMuted} />
             <T size={13} muted>
-              {favorites.length} bài · từ mọi kênh
+              {tr("{n} bài · từ mọi kênh", { n: favorites.length })}
             </T>
           </View>
         </View>
@@ -117,7 +120,7 @@ export default function Chats() {
           <T size={12.5} weight="bold">
             {filtered ? `${shown.length}/${total}` : total}
           </T>{" "}
-          hội thoại
+          {tr("hội thoại", { n: filtered ? shown.length : total })}
         </T>
         <Pill
           icon="arrow-down-up"
@@ -125,10 +128,10 @@ export default function Chats() {
           small
           active={chatSort !== "recent"}
           onPress={() => setSortOpen(true)}
-          label="Sắp xếp hội thoại"
+          label={tr("Sắp xếp hội thoại")}
         />
         <Pill
-          title={filtered ? "Chọn lại" : "Chọn hiển thị"}
+          title={tr(filtered ? "Chọn lại" : "Chọn hiển thị")}
           icon="sliders"
           color={t.pink}
           small
@@ -142,8 +145,10 @@ export default function Chats() {
         refreshControl={<RefreshControl refreshing={loading && !!chats} tintColor={t.violet} onRefresh={reloadChats} />}
         ListEmptyComponent={
           <T muted size={13} style={{ textAlign: "center", padding: 24 }}>
-            {error ??
-              (chats ? (query ? "Không có hội thoại khớp" : "Không có hội thoại") : "Đang tải danh sách hội thoại…")}
+            {tr(
+              error ??
+                (chats ? (query ? "Không có hội thoại khớp" : "Không có hội thoại") : "Đang tải danh sách hội thoại…"),
+            )}
           </T>
         }
         renderItem={({ item }) => (
@@ -158,7 +163,7 @@ export default function Chats() {
         <Pressable style={StyleSheet.absoluteFill} onPress={() => setSortOpen(false)} />
         <View style={[styles.menu, { top: menuTop + 2, backgroundColor: t.surface, borderColor: t.border }]}>
           <T size={12.5} muted style={{ paddingHorizontal: 12, paddingVertical: 6 }}>
-            Sắp xếp hội thoại
+            {tr("Sắp xếp hội thoại")}
           </T>
           {(Object.keys(SORTS) as ChatSort[]).map((k) => {
             const on = k === chatSort;
@@ -174,7 +179,7 @@ export default function Chats() {
               >
                 <Icon name={SORTS[k].icon} size={13} color={on ? "#fff" : t.text} />
                 <T size={13.6} style={{ flex: 1 }} color={on ? "#fff" : undefined}>
-                  {SORTS[k].label}
+                  {tr(SORTS[k].label)}
                 </T>
                 {on && <Icon name="check2" size={14} color="#fff" />}
               </Pressable>

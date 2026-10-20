@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { FlatList, Pressable, StyleSheet, TextInput, View } from "react-native";
 
+import { useT } from "../i18n";
 import { useLibrary } from "../store/LibraryProvider";
 import { useChats } from "../telegram/useChats";
 import { FONT, tint, useTheme } from "../theme";
@@ -14,6 +15,7 @@ import { Checkbox, GradientButton, T, haptic } from "./ui";
 
 export function ChatsModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const t = useTheme();
+  const tr = useT();
   const { chats } = useChats();
   const { visibleChats, setVisibleChats } = useLibrary();
   const all = useMemo(() => chats ?? [], [chats]);
@@ -56,15 +58,15 @@ export function ChatsModal({ open, onClose }: { open: boolean; onClose: () => vo
     <Sheet
       open={open}
       onClose={close}
-      title="Hội thoại hiển thị"
+      title={tr("Hội thoại hiển thị")}
       icon="sliders"
       footer={
         <>
-          <OutlineBtn title="Hiện tất cả" color={t.violet} onPress={() => save(null)} />
+          <OutlineBtn title={tr("Hiện tất cả")} color={t.violet} onPress={() => save(null)} />
           <View style={{ flex: 1 }} />
-          <OutlineBtn title="Huỷ" color={t.slate} onPress={close} />
+          <OutlineBtn title={tr("Huỷ")} color={t.slate} onPress={close} />
           <GradientButton
-            title="Lưu"
+            title={tr("Lưu")}
             icon="check-lg"
             radius={999}
             height={38}
@@ -83,19 +85,19 @@ export function ChatsModal({ open, onClose }: { open: boolean; onClose: () => vo
             allowFontScaling={false}
             value={query}
             onChangeText={setQuery}
-            placeholder="Tìm hội thoại…"
+            placeholder={tr("Tìm hội thoại…")}
             placeholderTextColor={t.textMuted}
             style={[styles.searchInput, { color: t.text }]}
           />
         </View>
         <View style={styles.bulk}>
           <View style={[styles.group, { borderColor: tint(t.violet, 0.4) }]}>
-            <GroupBtn icon="check2-all" title="Chọn tất cả" onPress={() => setShown(true)} />
+            <GroupBtn icon="check2-all" title={tr("Chọn tất cả")} onPress={() => setShown(true)} />
             <View style={{ width: 1, backgroundColor: tint(t.violet, 0.4) }} />
-            <GroupBtn icon="x-lg" title="Bỏ hết" onPress={() => setShown(false)} />
+            <GroupBtn icon="x-lg" title={tr("Bỏ hết")} onPress={() => setShown(false)} />
           </View>
           <T size={13} muted style={{ marginLeft: "auto" }}>
-            Đã chọn {ticked.size}/{all.length}
+            {tr("Đã chọn {n}/{total}", { n: ticked.size, total: all.length })}
           </T>
         </View>
       </View>

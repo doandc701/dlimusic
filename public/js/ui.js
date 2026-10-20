@@ -49,6 +49,28 @@ const pickerModal = new bootstrap.Modal($("pickerModal"));
 const previewModal = new bootstrap.Modal($("previewModal"));
 const chatsModal = new bootstrap.Modal($("chatsModal"));
 
+// ---------- dropdowns: one open at a time, and a tap anywhere else closes it ----------
+// Bootstrap closes them on a click outside, but iPhones send no click for a tap on something that is not
+// clickable (the page, a picture…): close on the press itself instead, wherever it lands.
+const openDropdowns = () =>
+  [...document.querySelectorAll('[data-bs-toggle="dropdown"].show')]
+    .map((toggle) => ({ toggle, dd: bootstrap.Dropdown.getInstance(toggle) }))
+    .filter((x) => x.dd);
+document.addEventListener(
+  "pointerdown",
+  (e) => {
+    for (const { toggle, dd } of openDropdowns()) {
+      if (toggle.contains(e.target) || dd._menu?.contains(e.target)) continue; // its own button / menu
+      if (dd._config.autoClose === false || dd._config.autoClose === "inside") continue;
+      dd.hide();
+    }
+  },
+  true,
+);
+document.addEventListener("show.bs.dropdown", (e) => {
+  for (const { toggle, dd } of openDropdowns()) if (toggle !== e.target && !dd._menu?.contains(e.target)) dd.hide();
+});
+
 // ---------- Bootstrap look for every <select> and every tooltip ----------
 //
 // A <select>'s open list is drawn by the browser / OS and cannot be styled, so each <select class="form-select">
@@ -2244,6 +2266,108 @@ try {
 } catch {}
 setSpeed(savedSpeed, false);
 
+// ---------- sleep timer: pause after some minutes (across songs), or when the playing song ends ----------
+
+const SLEEP_MINUTES = [10, 15, 20, 30, 45, 60];
+const SLEEP_FADE = 10_000; // the volume goes down over the last 10 seconds, then the song pauses
+// mode: "off" | "min" (endsAt: a wall-clock time, so a throttled background tab still stops on time) | "end"
+const sleep = { mode: "off", endsAt: 0, timer: null, fadeFrom: null };
+
+/** Seconds left of the playing song, at the current speed (null when not known). */
+function songLeft() {
+  const p = $("player");
+  if (!p.src || !Number.isFinite(p.duration)) return null;
+  return Math.max(0, (p.duration - p.currentTime) / (p.playbackRate || 1));
+}
+
+/** Milliseconds until the timer stops the music (null: off, or the song's length is not known yet). */
+function sleepLeft() {
+  if (sleep.mode === "min") return Math.max(0, sleep.endsAt - Date.now());
+  if (sleep.mode === "end") {
+    const s = songLeft();
+    return s === null ? null : s * 1000;
+  }
+  return null;
+}
+
+function renderSleep() {
+  const left = sleepLeft();
+  const on = sleep.mode !== "off";
+  $("sleepBtn").classList.toggle("on", on);
+  show($("sleepLeft"), on && left !== null);
+  if (on && left !== null) $("sleepLeft").textContent = fmtDur(Math.ceil(left / 1000));
+}
+
+function renderSleepList() {
+  const item = (key, label, sub = "") =>
+    `<button type="button" class="dropdown-item d-flex align-items-center gap-2${sleepKey() === key ? " active" : ""}" data-sleep="${key}">
+      <span class="flex-grow-1">${label}${sub ? `<small class="d-block sleep-sub">${sub}</small>` : ""}</span>${sleepKey() === key ? '<i class="bi bi-check2"></i>' : ""}</button>`;
+  const s = songLeft();
+  $("sleepList").innerHTML = [
+    item("off", t("Tắt")),
+    ...SLEEP_MINUTES.map((n) => item(String(n), t("{n} phút", { n }))),
+    item("end", t("Hết bài này"), s !== null ? fmtDur(Math.ceil(s)) : ""),
+  ].join("");
+}
+const sleepKey = () => (sleep.mode === "min" ? String(sleep.minutes) : sleep.mode);
+
+/** The volume back to where it was before the fade (the next song plays at the normal volume). */
+function endFade() {
+  if (sleep.fadeFrom !== null) $("player").volume = sleep.fadeFrom;
+  sleep.fadeFrom = null;
+}
+
+function setSleep(mode, minutes = 0) {
+  clearInterval(sleep.timer);
+  endFade();
+  Object.assign(sleep, { mode, minutes, endsAt: mode === "min" ? Date.now() + minutes * 60_000 : 0, timer: null });
+  if (mode !== "off") sleep.timer = setInterval(sleepTick, 1000);
+  renderSleep();
+}
+
+/** Every second (and on every timeupdate): the countdown on the button, the fade, and the stop. */
+function sleepTick() {
+  if (sleep.mode === "off") return;
+  const p = $("player");
+  const left = sleepLeft();
+  renderSleep();
+  if (left === null) return;
+  if (sleep.mode === "min" && left <= 0) return sleepStop();
+  // iPhones ignore volume set by a page: there it just pauses, without the fade
+  if (left <= SLEEP_FADE && !p.paused) {
+    sleep.fadeFrom ??= p.volume;
+    p.volume = sleep.fadeFrom * Math.max(0, left / SLEEP_FADE);
+  } else if (left > SLEEP_FADE) endFade(); // sought back out of the last seconds
+}
+
+/** Time is up: pause (the song stays, ▶ goes on from there), the volume back, the timer off. */
+function sleepStop() {
+  const playing = !$("player").paused;
+  $("player").pause();
+  setSleep("off");
+  if (playing) toast(t("Hết giờ hẹn, nhạc đã tạm dừng"), "info");
+}
+
+$("sleepBtn").parentElement.addEventListener("show.bs.dropdown", renderSleepList);
+$("sleepList").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-sleep]");
+  if (!b) return;
+  bootstrap.Dropdown.getOrCreateInstance($("sleepBtn")).hide();
+  const key = b.dataset.sleep;
+  if (key === "off") {
+    setSleep("off");
+    return toast(t("Hẹn giờ ngủ: tắt"), "info");
+  }
+  if (key === "end") {
+    setSleep("end");
+    return toast(t("Nhạc sẽ dừng khi hết bài này"), "info");
+  }
+  setSleep("min", Number(key));
+  toast(t("Nhạc sẽ dừng sau {n} phút", { n: Number(key) }), "info");
+});
+$("player").addEventListener("timeupdate", sleepTick);
+renderSleep();
+
 $("prevBtn").addEventListener("click", playPrev);
 $("nextBtn").addEventListener("click", () => playNext());
 
@@ -2346,6 +2470,11 @@ player.addEventListener("ended", () => {
   // The stream was cut (network) long before the song's real end: continue it instead of moving on.
   const f = state.playScan?.files.find((x) => x.id === state.playingId);
   if (f?.duration && lastTime < f.duration - 5 && connectionLost()) return;
+  // sleep timer "Hết bài này": stop here, not even "repeat one" plays it again
+  if (sleep.mode === "end") {
+    setSleep("off");
+    return toast(t("Hết giờ hẹn, nhạc đã tạm dừng"), "info");
+  }
   playNext(true);
 });
 // ---------- the start screen's cat: dancing kittens while music plays, the cat with headphones otherwise ----------

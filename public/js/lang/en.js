@@ -231,6 +231,15 @@
       "Song not found in the channel (the message may have been deleted)",
     "Chưa chọn thư mục tải xuống — hãy chọn trong Cài đặt": "No download folder yet — choose one in Settings",
     // player
+    // sleep timer
+    "Hẹn giờ ngủ": "Sleep timer",
+    Tắt: "Off",
+    "{n} phút": "{n} {n|minute|minutes}",
+    "Hết bài này": "End of this song",
+    "Hẹn giờ ngủ: tắt": "Sleep timer: off",
+    "Nhạc sẽ dừng khi hết bài này": "Music will stop when this song ends",
+    "Nhạc sẽ dừng sau {n} phút": "Music will stop in {n} {n|minute|minutes}",
+    "Hết giờ hẹn, nhạc đã tạm dừng": "Sleep timer ended, music paused",
     "Phát ngẫu nhiên: tắt": "Shuffle: off",
     "Phát ngẫu nhiên: bật": "Shuffle: on",
     "Bài trước (Shift + ←)": "Previous (Shift + ←)",

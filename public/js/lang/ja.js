@@ -230,6 +230,15 @@
       "チャンネル内に曲が見つかりません（メッセージが削除された可能性があります）",
     "Chưa chọn thư mục tải xuống — hãy chọn trong Cài đặt": "ダウンロードフォルダーが未選択です — 設定で選んでください",
     // player
+    // sleep timer
+    "Hẹn giờ ngủ": "スリープタイマー",
+    Tắt: "オフ",
+    "{n} phút": "{n} 分",
+    "Hết bài này": "この曲の終わり",
+    "Hẹn giờ ngủ: tắt": "スリープタイマー: オフ",
+    "Nhạc sẽ dừng khi hết bài này": "この曲が終わったら停止します",
+    "Nhạc sẽ dừng sau {n} phút": "{n} 分後に停止します",
+    "Hết giờ hẹn, nhạc đã tạm dừng": "タイマー終了、再生を一時停止しました",
     "Phát ngẫu nhiên: tắt": "シャッフル: オフ",
     "Phát ngẫu nhiên: bật": "シャッフル: オン",
     "Bài trước (Shift + ←)": "前の曲 (Shift + ←)",

@@ -226,6 +226,15 @@
     "Không tìm thấy bài trong kênh (có thể tin đã bị xoá)": "在频道中找不到这首歌（消息可能已被删除）",
     "Chưa chọn thư mục tải xuống — hãy chọn trong Cài đặt": "尚未选择下载文件夹 — 请在设置中选择",
     // player
+    // sleep timer
+    "Hẹn giờ ngủ": "睡眠定时",
+    Tắt: "关闭",
+    "{n} phút": "{n} 分钟",
+    "Hết bài này": "播完本曲",
+    "Hẹn giờ ngủ: tắt": "睡眠定时：关",
+    "Nhạc sẽ dừng khi hết bài này": "本曲播完后将停止",
+    "Nhạc sẽ dừng sau {n} phút": "音乐将在 {n} 分钟后停止",
+    "Hết giờ hẹn, nhạc đã tạm dừng": "定时已到，音乐已暂停",
     "Phát ngẫu nhiên: tắt": "随机播放：关",
     "Phát ngẫu nhiên: bật": "随机播放：开",
     "Bài trước (Shift + ←)": "上一首 (Shift + ←)",

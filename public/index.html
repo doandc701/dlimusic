@@ -618,6 +618,24 @@
         </div>
       </div>
       <div class="dock-right">
+        <!-- sleep timer (like YouTube's): pause after some minutes, or when this song ends -->
+        <div class="dropup sleep-wrap">
+          <button
+            class="btn btn-sm btn-outline-secondary border-0 sleep-btn"
+            id="sleepBtn"
+            type="button"
+            data-bs-toggle="dropdown"
+            aria-expanded="false"
+            title="Hẹn giờ ngủ"
+            aria-label="Hẹn giờ ngủ"
+          >
+            <i class="bi bi-alarm"></i><span class="sleep-left d-none" id="sleepLeft"></span>
+          </button>
+          <div class="dropdown-menu dropdown-menu-end sleep-menu">
+            <h6 class="dropdown-header">Hẹn giờ ngủ</h6>
+            <div id="sleepList"></div>
+          </div>
+        </div>
         <div class="dropup speed-wrap">
           <button
             class="btn btn-sm btn-outline-secondary border-0 speed-btn"

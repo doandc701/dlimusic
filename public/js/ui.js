@@ -2011,7 +2011,8 @@ function playFrom(scan, id) {
         title: displayName(f),
         artist: f.performer || f.chat || scan.title || "",
         album: "DLiMusic",
-        artwork: [{ src: "img/logo-192.png", sizes: "192x192", type: "image/png" }],
+        // square and opaque: the lock screen / Control Center shows transparent corners as white
+        artwork: [{ src: "img/artwork-512.jpg", sizes: "512x512", type: "image/jpeg" }],
       });
     } catch {}
   }

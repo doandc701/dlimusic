@@ -109,7 +109,13 @@ if (!html.includes(UI_TAG)) throw new Error(`${UI_TAG} not found in public/index
 html = html.replace(UI_TAG, `<script src="app.js"></script>\n${UI_TAG}`);
 fs.writeFileSync(path.join(OUT, "index.html"), html);
 for (const dir of ["css", "js", "img"])
-  fs.cpSync(path.join(ROOT, "public", dir), path.join(OUT, dir), { recursive: true });
+  fs.cpSync(path.join(ROOT, "public", dir), path.join(OUT, dir), {
+    recursive: true,
+    filter: (src) => !src.endsWith(".md"), // notes for whoever edits the files (js/lang/README.md)
+  });
+// for search engines: what to crawl, and the page's address
+for (const file of ["robots.txt", "sitemap.xml"])
+  fs.copyFileSync(path.join(ROOT, "public", file), path.join(OUT, file));
 
 const size = (f) => (fs.statSync(path.join(OUT, f)).size / 1024).toFixed(0) + " KB";
 const files = fs.readdirSync(OUT, { recursive: true }).filter((f) => fs.statSync(path.join(OUT, f)).isFile());

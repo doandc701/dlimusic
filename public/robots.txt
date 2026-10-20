@@ -1,0 +1,6 @@
+User-agent: *
+Allow: /
+Disallow: /api/
+Disallow: /__dl
+
+Sitemap: https://dlimusic.vercel.app/sitemap.xml

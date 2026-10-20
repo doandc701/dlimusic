@@ -219,6 +219,7 @@ const BASE_HEADERS = {
   "Referrer-Policy": "no-referrer",
   "Cross-Origin-Opener-Policy": "same-origin",
   "Cross-Origin-Resource-Policy": "same-origin", // other sites cannot embed our media / API responses
+  "X-Robots-Tag": "noindex, nofollow", // a private copy on this computer: never in search results
 };
 
 /** CSP for the page: only our own script files (public/js) and the pinned CDN files may run. */

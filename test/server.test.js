@@ -306,6 +306,7 @@ describe("security hardening (R1-R7)", () => {
     assert.equal(res.headers.get("x-content-type-options"), "nosniff");
     assert.equal(res.headers.get("referrer-policy"), "no-referrer");
     assert.equal(res.headers.get("cross-origin-resource-policy"), "same-origin");
+    assert.equal(res.headers.get("x-robots-tag"), "noindex, nofollow", "the local copy stays out of search results");
     const html = await res.text();
     assert.ok(!/<script>/.test(html), "no inline <script> on the page");
   });

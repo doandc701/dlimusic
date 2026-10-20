@@ -6,9 +6,55 @@
     <title>DLiMusic · Chạm là nghe, nhấn là tải</title>
     <meta
       name="description"
-      content="DLiMusic · Chạm là nghe, nhấn là tải — nghe thử và tải nhạc từ các kênh Telegram của bạn."
+      content="DLiMusic: nghe thử và tải nhạc, voice, video từ các kênh của bạn ngay trên trình duyệt. Phát liên tục, yêu thích, đồng bộ giữa các thiết bị. Miễn phí."
     />
-    <link rel="icon" type="image/png" href="img/logo-64.png" />
+    <!-- search engines and link previews (the public web build; the local server sends noindex itself) -->
+    <meta name="robots" content="index, follow, max-image-preview:large" />
+    <link rel="canonical" href="https://dlimusic.vercel.app/" />
+    <meta name="application-name" content="DLiMusic" />
+    <meta name="apple-mobile-web-app-title" content="DLiMusic" />
+    <meta name="theme-color" content="#7c3aed" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#111827" media="(prefers-color-scheme: dark)" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="DLiMusic" />
+    <meta property="og:url" content="https://dlimusic.vercel.app/" />
+    <meta property="og:title" content="DLiMusic · Chạm là nghe, nhấn là tải" />
+    <meta
+      property="og:description"
+      content="Nghe thử và tải nhạc từ các kênh của bạn ngay trên trình duyệt."
+    />
+    <meta property="og:image" content="https://dlimusic.vercel.app/img/og-image.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="Logo DLiMusic — Chạm là nghe, nhấn là tải" />
+    <meta property="og:locale" content="vi_VN" />
+    <meta property="og:locale:alternate" content="en_US" />
+    <meta property="og:locale:alternate" content="zh_CN" />
+    <meta property="og:locale:alternate" content="ja_JP" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="DLiMusic · Chạm là nghe, nhấn là tải" />
+    <meta
+      name="twitter:description"
+      content="Nghe thử và tải nhạc từ các kênh của bạn ngay trên trình duyệt."
+    />
+    <meta name="twitter:image" content="https://dlimusic.vercel.app/img/og-image.png" />
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "WebApplication",
+        "name": "DLiMusic",
+        "alternateName": "DLiMusic · Chạm là nghe, nhấn là tải",
+        "url": "https://dlimusic.vercel.app/",
+        "description": "Nghe thử và tải nhạc, voice, video từ các kênh của bạn ngay trên trình duyệt.",
+        "applicationCategory": "MultimediaApplication",
+        "operatingSystem": "Web, iOS, Android",
+        "inLanguage": ["vi", "en", "zh", "ja"],
+        "image": "https://dlimusic.vercel.app/img/og-image.png",
+        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "VND" }
+      }
+    </script>
+    <link rel="icon" type="image/png" sizes="64x64" href="img/logo-64.png" />
+    <link rel="icon" type="image/png" sizes="192x192" href="img/logo-192.png" />
     <link rel="apple-touch-icon" href="img/apple-touch-icon.png" />
     <script src="js/theme.js"></script>
     <!-- languages: one file each in js/lang/ (README.md there), then the code that uses them -->
@@ -64,6 +110,16 @@
   </head>
 
   <body class="d-flex flex-column app-body">
+    <!-- the page's main heading for search engines and screen readers (the header shows the logo instead) -->
+    <h1 class="visually-hidden">DLiMusic · Chạm là nghe, nhấn là tải</h1>
+    <noscript>
+      <div class="container py-5 text-center">
+        <p class="lead">
+          DLiMusic: nghe thử và tải nhạc từ các kênh của bạn ngay trên trình duyệt. Hãy bật JavaScript để
+          dùng.
+        </p>
+      </div>
+    </noscript>
     <!-- page load: shown while the saved session reconnects; the name's last letter lands when it is done -->
     <div class="boot-splash" id="bootSplash" role="status" aria-label="Đang tải DLiMusic">
       <img src="img/logo-192.png" class="boot-logo" alt="" />

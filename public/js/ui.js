@@ -969,6 +969,7 @@ function resetWorkspace() {
   state.chat = null;
   state.dialogs = [];
   state.visibleChats = null;
+  forgetAvatars();
   state.favorites.clear();
   state.selected.clear();
   state.jobs.clear();
@@ -990,11 +991,182 @@ function resetWorkspace() {
 const TYPE_ICON = { channel: "bi-megaphone", group: "bi-people", user: "bi-person", bot: "bi-robot" };
 const TYPE_LABEL = { channel: "Kênh", group: "Nhóm", user: "Người dùng", bot: "Bot" };
 
-/** Coloured circle with the first letter of the chat title. */
+/**
+ * Coloured circle with the first letter of the chat title; with the chat's Telegram picture on top
+ * once it is known (d.photo = the picture's id, from /api/dialogs or /api/search).
+ */
 function dialogAvatar(d) {
   const color = COLORS[Math.abs([...d.id].reduce((a, c) => a * 31 + c.charCodeAt(0), 7)) % COLORS.length];
   const initial = esc([...d.title.replace(/[^\p{L}\p{N}]/gu, "")][0] || "#").toUpperCase();
-  return `<span class="avatar rounded-circle" style="background:${color}">${initial}</span>`;
+  const photo = /^-?\d{1,20}$/.test(d.id) && /^-?\d{1,25}$/.test(String(d.photo || "")) ? d.photo : null;
+  if (!photo) return `<span class="avatar rounded-circle" style="background:${color}">${initial}</span>`;
+  const url = avatarPhotos.get(`${d.id}:${photo}`);
+  return `<span class="avatar rounded-circle" style="background:${color}" data-avatar="${d.id}" data-photo="${photo}">${initial}${url ? avatarImg(url) : ""}</span>`;
+}
+
+// ---------- chat pictures (Telegram's small profile photos), loaded for the rows on screen ----------
+
+const avatarImg = (url) => `<img class="avatar-img" src="${esc(url)}" alt="" loading="lazy" decoding="async">`;
+const avatarPhotos = new Map(); // "id:photoId" -> data: URL (this page; filled from IndexedDB at start)
+const avatarMissing = new Map(); // "id:photoId" -> when the server had no picture for it (asked again later)
+const AVATAR_RETRY_MS = 5 * 60_000;
+const avatarPending = new Map(); // "id:photoId" -> [id, photoId] waiting for the next batch
+const avatarAsked = new Set(); // "id:photoId" asked for (pending or in flight)
+let avatarTimer = null;
+const AVATAR_BATCH = 40;
+const AVATAR_STORE_MAX = 400;
+
+/** The pictures of earlier visits, kept in IndexedDB so the list shows them at once next time. */
+const avatarDb = (() => {
+  const open = new Promise((resolve) => {
+    try {
+      const req = indexedDB.open("tdl-avatars", 1);
+      req.onupgradeneeded = () => req.result.createObjectStore("photos");
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => resolve(null);
+      req.onblocked = () => resolve(null);
+    } catch {
+      resolve(null); // private mode / storage blocked: only this page remembers them
+    }
+  });
+  const tx = (mode, fn) =>
+    open.then(
+      (d) =>
+        d &&
+        new Promise((resolve) => {
+          try {
+            const t = d.transaction("photos", mode);
+            const r = fn(t.objectStore("photos"));
+            t.oncomplete = () => resolve(r?.result);
+            t.onerror = t.onabort = () => resolve(null);
+          } catch {
+            resolve(null);
+          }
+        }),
+    );
+  // { k: "id:photoId", url, at } records, newest kept when there are too many
+  const ready = tx("readonly", (st) => st.getAll()).then((rows) => {
+    for (const r of rows || []) if (r?.k && r.url && !avatarPhotos.has(r.k)) avatarPhotos.set(r.k, r.url);
+    if ((rows || []).length > AVATAR_STORE_MAX) {
+      const old = rows.sort((a, b) => (a.at || 0) - (b.at || 0)).slice(0, rows.length - AVATAR_STORE_MAX);
+      tx("readwrite", (st) => old.forEach((r) => st.delete(r.k)));
+    }
+    fillAvatars();
+  });
+  return {
+    ready,
+    put(k, url) {
+      const id = k.split(":")[0];
+      tx("readwrite", (st) => {
+        // a chat changed its picture: drop the old one
+        for (const old of avatarPhotos.keys()) if (old !== k && old.split(":")[0] === id) st.delete(old);
+        st.put({ k, url, at: Date.now() }, k);
+      });
+    },
+    clear: () => tx("readwrite", (st) => st.clear()),
+  };
+})();
+
+/** Put the known pictures into the avatars on the page that still show only their letter. */
+function fillAvatars(root = document) {
+  for (const el of root.querySelectorAll(".avatar[data-avatar]")) {
+    if (el.querySelector(".avatar-img")) continue;
+    const url = avatarPhotos.get(`${el.dataset.avatar}:${el.dataset.photo}`);
+    if (url) el.insertAdjacentHTML("beforeend", avatarImg(url));
+  }
+}
+
+/** An avatar came on screen: ask for its picture with the others of the next ~150 ms (40 per request). */
+function wantAvatar(el) {
+  const { avatar: id, photo } = el.dataset;
+  const k = `${id}:${photo}`;
+  if (avatarPhotos.has(k) || avatarAsked.has(k) || Date.now() - (avatarMissing.get(k) || 0) < AVATAR_RETRY_MS) return;
+  avatarAsked.add(k);
+  avatarPending.set(k, [id, photo]);
+  clearTimeout(avatarTimer);
+  avatarTimer = setTimeout(flushAvatars, 150);
+}
+
+async function flushAvatars() {
+  await avatarDb.ready; // what an earlier visit kept is not asked again
+  const batch = [...avatarPending].slice(0, AVATAR_BATCH);
+  for (const [k] of batch) avatarPending.delete(k);
+  if (avatarPending.size) avatarTimer = setTimeout(flushAvatars, 50);
+  const todo = batch.filter(([k]) => !avatarPhotos.has(k));
+  if (!todo.length || state.auth?.step !== "ready") {
+    for (const [k] of batch) avatarAsked.delete(k);
+    return;
+  }
+  let got = {};
+  try {
+    got = await api(`/api/avatars?ids=${todo.map(([, [id]]) => encodeURIComponent(id)).join(",")}`);
+  } catch {
+    // offline / signed out: letters stay; tried again when the rows are shown again
+  }
+  for (const [k, [id]] of todo) {
+    avatarAsked.delete(k);
+    const url = got?.[id];
+    if (typeof url === "string" && url.startsWith("data:image/")) {
+      avatarPhotos.set(k, url);
+      avatarDb.put(k, url);
+    } else avatarMissing.set(k, Date.now());
+  }
+  fillAvatars();
+}
+
+// Avatars are watched as soon as a list puts them on the page (lists are rebuilt with innerHTML).
+const avatarSeen = new IntersectionObserver(
+  (entries) => {
+    for (const e of entries)
+      if (e.isIntersecting) {
+        avatarSeen.unobserve(e.target);
+        avatarWatched.delete(e.target);
+        wantAvatar(e.target);
+      }
+  },
+  { rootMargin: "200px 0px" },
+);
+const avatarWatched = new Set();
+let avatarScan = 0;
+new MutationObserver(() => {
+  if (avatarScan) return;
+  avatarScan = requestAnimationFrame(() => {
+    avatarScan = 0;
+    for (const el of avatarWatched)
+      if (!el.isConnected) {
+        avatarSeen.unobserve(el); // the list was rebuilt
+        avatarWatched.delete(el);
+      }
+    for (const el of document.querySelectorAll(".avatar[data-avatar]:not([data-watched])")) {
+      el.dataset.watched = "";
+      if (el.querySelector(".avatar-img")) continue;
+      avatarWatched.add(el);
+      avatarSeen.observe(el);
+    }
+  });
+}).observe(document.body, { childList: true, subtree: true });
+
+// A picture that cannot be shown (broken data): back to the letter.
+document.addEventListener(
+  "error",
+  (e) => {
+    if (e.target instanceof HTMLImageElement && e.target.classList.contains("avatar-img")) {
+      const el = e.target.closest(".avatar");
+      const k = `${el?.dataset.avatar}:${el?.dataset.photo}`;
+      avatarMissing.set(k, Date.now());
+      avatarPhotos.delete(k);
+      e.target.remove();
+    }
+  },
+  true,
+);
+
+/** Signed out: this browser may be used by someone else next. */
+function forgetAvatars() {
+  avatarPhotos.clear();
+  avatarMissing.clear();
+  avatarPending.clear();
+  avatarDb.clear();
 }
 
 const dialogSub = (d) =>
@@ -1258,7 +1430,7 @@ function renderGlobalResults(localList) {
           r,
           i,
         ]) => `<a class="list-group-item list-group-item-action dialog-item global-item d-flex align-items-center gap-2" data-global="${i}" title="${esc(r.title)}">
-      ${dialogAvatar({ id: String(r.id || r.invite || r.title), title: String(r.title || "") })}
+      ${dialogAvatar({ id: String(r.id || r.invite || r.title), title: String(r.title || ""), photo: r.id ? r.photo : null })}
       <span class="min-w-0 side-text flex-grow-1"><span class="d-flex align-items-center gap-1 min-w-0"><span class="text-truncate">${esc(r.title)}</span>${r.verified ? `<i class="bi bi-patch-check-fill text-primary flex-none" title="${t("Đã xác minh")}"></i>` : ""}</span>
       <small class="d-block text-truncate text-body-secondary">${globalSub(r)}</small></span>${globalJoinButton(r, i)}</a>`,
       )
@@ -1321,7 +1493,6 @@ async function joinGlobalResult(r) {
 
 const SEARCH_CHAT = "search:"; // state.chat of a song search list: "search:<words>" (never a chat id or username)
 const isSearchChat = (chat) => typeof chat === "string" && chat.startsWith(SEARCH_CHAT);
-const SONG_PREVIEW = 5; // songs shown under the chat results; "Xem tất cả" opens the whole list
 const SONG_PAGE = 50; // same as core.js
 
 const ssearch = {
@@ -1332,12 +1503,13 @@ const ssearch = {
   timer: null,
   ctrl: null,
   seq: 0,
+  loadingMore: false, // the next page of results is being read (scrolled near the end of the sidebar)
 };
 
 function resetSongSearch() {
   clearTimeout(ssearch.timer);
   ssearch.ctrl?.abort();
-  Object.assign(ssearch, { q: "", status: "idle", scan: null, error: null, ctrl: null });
+  Object.assign(ssearch, { q: "", status: "idle", scan: null, error: null, ctrl: null, loadingMore: false });
   ssearch.seq++;
 }
 
@@ -1371,7 +1543,7 @@ function scanTitle(scan) {
   return scan?.title || "";
 }
 
-/** The "Bài hát" part of the search results: the first songs, and a row opening all of them. */
+/** The songs part of the search results: every song found, more read as the sidebar scrolls to its end. */
 function renderSongResults() {
   const head = `<div class="dialog-section">${t("Bài hát")}</div>`;
   const q = $("dialogSearch").value.trim();
@@ -1386,20 +1558,97 @@ function renderSongResults() {
   return (
     `<div class="dialog-section">${t("Tìm thấy {n} bài hát", { n: found })}</div>` +
     songs
-      .slice(0, SONG_PREVIEW)
-      .map(
-        (
-          f,
-        ) => `<a class="list-group-item list-group-item-action dialog-item song-item d-flex align-items-center gap-2" data-song="${f.id}" title="${esc(displayName(f))}">
-      <span class="song-play rounded-circle" aria-hidden="true"><i class="bi bi-play-fill"></i></span>
-      <span class="min-w-0 side-text flex-grow-1"><span class="d-block text-truncate">${esc(f.title || f.name)}${f.title && f.performer ? ` <span class="song-artist">– ${esc(f.performer)}</span>` : ""}</span>
-      <small class="d-block text-truncate text-body-secondary"><i class="bi bi-megaphone"></i> ${esc(f.chat || "")}</small></span>
-      ${f.duration ? `<small class="song-dur flex-none">${fmtDur(f.duration)}</small>` : ""}</a>`,
-      )
+      .map((f) => {
+        // like Telegram's "messages found": the chat (avatar, name, date), then the song with the words found
+        const chat = chatOfSong(f);
+        const date = f.date
+          ? new Date(f.date * 1000).toLocaleDateString(tdlI18n.locale, {
+              day: "2-digit",
+              month: "2-digit",
+              year: "2-digit",
+            })
+          : "";
+        const song = `${f.title || f.name}${f.title && f.performer ? ` – ${f.performer}` : ""}`;
+        return `<a class="list-group-item list-group-item-action dialog-item song-item d-flex align-items-center gap-2" data-song="${f.id}" title="${esc(displayName(f))}">
+      ${dialogAvatar({ id: chat?.id || String(f.fav || "").split("|")[0], title: f.chat || "", photo: chat?.photo })}
+      <span class="min-w-0 side-text flex-grow-1">
+        <span class="d-flex align-items-center gap-2 min-w-0"><span class="text-truncate fw-semibold"><i class="bi ${TYPE_ICON[chat?.type] || "bi-megaphone"}"></i> ${esc(f.chat || "")}</span><small class="song-date ms-auto flex-none">${date}</small></span>
+        <small class="d-flex align-items-center gap-1 min-w-0 song-line"><span class="song-play" role="button" data-song-play title="${t("Phát")}"><i class="bi bi-play-circle"></i></span><span class="text-truncate">${markWords(song, $("dialogSearch").value)}</span></small>
+      </span></a>`;
+      })
       .join("") +
-    `<a class="list-group-item list-group-item-action dialog-item song-item song-all d-flex align-items-center gap-2" data-song-all>
-      <i class="bi bi-music-note-list"></i><span class="side-text flex-grow-1 text-truncate">${t("Xem tất cả bài hát ({n})", { n })}</span><i class="bi bi-chevron-right side-text"></i></a>`
+    (ssearch.loadingMore
+      ? `<div class="dialog-note"><span class="spinner-border spinner-border-sm"></span> ${t("Đang tải thêm…")}</div>`
+      : "")
   );
+}
+
+/** The next page of found songs (50), when the sidebar is scrolled near its end; they join the queue too. */
+async function loadMoreSongs() {
+  const scan = ssearch.scan;
+  if (!scan?.more || ssearch.loadingMore || ssearch.status !== "done") return;
+  const seq = ssearch.seq;
+  ssearch.loadingMore = true;
+  renderDialogs();
+  try {
+    const r = await api(`/api/files/more?key=${encodeURIComponent(scan.key)}`);
+    if (seq !== ssearch.seq || ssearch.scan !== scan) return;
+    const have = new Set(scan.files.map((f) => f.id));
+    const added = r.files.filter((f) => !have.has(f.id));
+    scan.files.push(...added);
+    scan.more = r.more;
+    if (state.playScan === scan) {
+      // playing from these results: the new songs come after the others
+      const ids = added.filter(playable).map((f) => f.id);
+      state.playQueue.push(...ids);
+      state.playOrder.push(...ids);
+      updateNavButtons();
+    }
+  } catch {
+    scan.more = false; // not important enough for an error: what is there stays
+  } finally {
+    if (seq === ssearch.seq) {
+      ssearch.loadingMore = false;
+      renderDialogs();
+    }
+  }
+}
+$("dialogs").addEventListener(
+  "scroll",
+  (e) => {
+    const el = e.currentTarget;
+    if (globalSearchActive() && el.scrollTop + el.clientHeight >= el.scrollHeight - 300) loadMoreSongs();
+  },
+  { passive: true },
+);
+
+/** The chat (from the account's list) a song of the search results comes from, or undefined. */
+function chatOfSong(f) {
+  const raw = String(f.fav || "").split("|")[0];
+  return raw ? state.dialogs.find((d) => [raw, `-${raw}`, `-100${raw}`].includes(d.id)) : undefined;
+}
+
+/** `text` escaped, with the searched words (accents and case ignored) marked like Telegram does. */
+function markWords(text, q) {
+  const plain = [...String(text)].map((c) => norm(c) || c); // one entry per character: positions stay the same
+  const flat = plain.join("");
+  const marks = new Array(plain.length).fill(false);
+  for (const word of norm(q)
+    .split(/\s+/)
+    .filter((w) => w.length >= 2)) {
+    // where each character starts in `flat` (a normalized character can be 0 or 2 letters long)
+    let at = 0;
+    const starts = plain.map((c) => ((at += c.length), at - c.length));
+    for (let i = flat.indexOf(word); i >= 0; i = flat.indexOf(word, i + 1))
+      starts.forEach((st, k) => st >= i && st < i + word.length && (marks[k] = true));
+  }
+  let out = "";
+  [...String(text)].forEach((c, k) => {
+    if (marks[k] && !marks[k - 1]) out += '<mark class="song-hit">';
+    out += esc(c);
+    if (marks[k] && !marks[k + 1]) out += "</mark>";
+  });
+  return out;
 }
 
 /** ▶ / ⏸ and the highlight on the song rows of the search results (the player changed). */
@@ -1409,7 +1658,7 @@ function updateSongRows() {
     const on = !!key && state.playingKey === key && state.playingId === Number(row.dataset.song);
     row.classList.toggle("playing", on);
     row.querySelector(".song-play").innerHTML =
-      `<i class="bi ${on && state.isPlaying ? "bi-pause-fill" : "bi-play-fill"}"></i>`;
+      `<i class="bi ${on && state.isPlaying ? "bi-pause-circle-fill" : on ? "bi-play-circle-fill" : "bi-play-circle"}"></i>`;
   }
 }
 
@@ -1595,11 +1844,12 @@ $("dialogs").addEventListener("click", (e) => {
   const song = e.target.closest("[data-song]");
   if (song) {
     e.preventDefault();
-    return playSearchSong(Number(song.dataset.song));
-  }
-  if (e.target.closest("[data-song-all]")) {
-    e.preventDefault();
-    return ssearch.scan && openChat(SEARCH_CHAT + ssearch.scan.query);
+    const id = Number(song.dataset.song);
+    if (e.target.closest("[data-song-play]")) return playSearchSong(id); // ▶: play it here, the results as the queue
+    // like Telegram: the song in its own chat, scrolled to and flashed (as a tap on the playing song's name)
+    const f = ssearch.scan?.files.find((x) => x.id === id);
+    if (f) showSongInItsChat(f);
+    return;
   }
   const join = e.target.closest("[data-join]");
   if (join) {

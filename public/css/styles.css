@@ -114,13 +114,24 @@ body {
   background: linear-gradient(135deg, #7c3aed, #db2777);
 }
 .avatar {
+  position: relative;
   width: 36px;
   height: 36px;
   flex: none;
   display: grid;
   place-items: center;
+  overflow: hidden;
   font-weight: 600;
   color: #fff;
+}
+/* the chat's Telegram picture, over its letter (the letter shows while it loads or when it fails) */
+.avatar-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: inherit;
 }
 .file-table {
   table-layout: fixed;
@@ -748,15 +759,58 @@ body {
   --c: var(--fun-slate);
 }
 
+/* ---------- scrollbars: thin, rounded, in the app's violet; the same in every scrolling area ---------- */
+:root {
+  --sb-thumb: color-mix(in srgb, var(--fun-violet) 35%, transparent);
+  --sb-thumb-hover: color-mix(in srgb, var(--fun-violet) 65%, transparent);
+}
+[data-bs-theme="dark"] {
+  --sb-thumb: color-mix(in srgb, var(--fun-violet) 40%, transparent);
+  --sb-thumb-hover: color-mix(in srgb, var(--fun-violet) 75%, transparent);
+}
+/* Firefox only: in Chrome / Edge these standard properties would switch the ::-webkit-scrollbar look off */
+@supports (-moz-appearance: none) {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--sb-thumb) transparent;
+  }
+}
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--sb-thumb);
+  border-radius: 8px;
+  border: 2px solid transparent; /* a gap around the thumb, so it looks thinner than its track */
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--sb-thumb-hover);
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-button {
+  display: none; /* no arrows at the ends */
+}
+
 /* accents that go with the buttons */
 .form-check-input:checked,
 .form-check-input:indeterminate {
   background-color: var(--bs-primary);
   border-color: var(--bs-primary);
 }
-.form-check-input:focus {
-  border-color: var(--bs-primary-border-subtle);
-  box-shadow: 0 0 0 0.25rem rgba(var(--bs-primary-rgb), 0.25);
+/* input fields: no focus ring / coloured border when typing in them (every field, every theme) */
+.form-control:focus,
+.form-select:focus,
+.form-check-input:focus,
+.otp-box:focus {
+  border-color: var(--bs-border-color);
+  box-shadow: none;
+  outline: none;
 }
 .progress-bar {
   background-image: linear-gradient(90deg, #10b981, #06b6d4);
@@ -882,11 +936,7 @@ body {
     box-shadow 0.15s,
     transform 0.12s;
 }
-.otp-box:focus {
-  border-color: var(--fun-violet);
-  box-shadow: 0 0 0 0.25rem rgba(var(--bs-primary-rgb), 0.2);
-  transform: translateY(-2px);
-}
+
 .otp-box.filled {
   border-color: color-mix(in srgb, var(--fun-pink) 60%, transparent);
   background: color-mix(in srgb, var(--fun-pink) 8%, var(--bs-body-bg));
@@ -1189,8 +1239,31 @@ body {
   background: linear-gradient(135deg, var(--fun-violet), var(--fun-pink));
   transition: transform 0.15s ease;
 }
+/* a found song, like Telegram's "messages found": chat avatar, name and date; the song under it */
+.song-item .song-date {
+  color: var(--bs-secondary-color);
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+}
+.song-item .song-line {
+  color: var(--bs-secondary-color);
+}
+.song-item .song-play {
+  width: auto;
+  height: auto;
+  background: none;
+  color: var(--fun-violet);
+  font-size: 1rem;
+  cursor: pointer;
+}
+.song-hit {
+  padding: 0;
+  background: none;
+  color: var(--fun-violet);
+  font-weight: 600;
+}
 .song-item:hover .song-play {
-  transform: scale(1.06);
+  transform: scale(1.12);
 }
 .song-item.playing:not(.active) {
   background: color-mix(in srgb, var(--fun-pink) 9%, var(--bs-body-bg));
@@ -1204,16 +1277,6 @@ body {
 }
 .song-dur {
   font-variant-numeric: tabular-nums;
-}
-.song-all {
-  color: var(--fun-violet);
-  font-size: 0.85rem;
-  font-weight: 600;
-}
-.song-all .bi-music-note-list {
-  width: 36px;
-  text-align: center;
-  font-size: 1.1rem;
 }
 @media (prefers-reduced-motion: reduce) {
   .song-play {
@@ -2329,4 +2392,7 @@ body:has(.search-view) #filterSheet .type-filter {
     --bs-btn-hover-bg: var(--bs-btn-bg);
     --bs-btn-hover-border-color: var(--bs-btn-border-color);
   }
+}
+.song-item.playing .song-play {
+  box-shadow: none;
 }

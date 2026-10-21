@@ -124,6 +124,7 @@
     Bot: "Bot",
     "Không tìm thấy kết quả": "No results found",
     "Tìm kiếm": "Search",
+    "Tìm kiếm kênh, bài hát, nghệ sĩ,...": "Search channels, songs, artists…",
     "Kết quả tìm kiếm toàn cầu": "Global search results",
     "Tìm thấy {n} bài hát": "{n} {n|song|songs} found",
     "{n} người theo dõi": "{n} {n|subscriber|subscribers}",
@@ -137,7 +138,6 @@
     // song search (songs in every chat)
     "Bài hát": "Songs",
     "Không tìm thấy bài hát": "No songs found",
-    "Xem tất cả bài hát ({n})": "See all songs ({n})",
     "Tìm: “{q}”": "Search: “{q}”",
     "Kênh riêng tư: hãy bấm Tham gia để xem.": "Private chat: press Join to see it.",
     "Đã gửi yêu cầu tham gia {title}, chờ quản trị viên duyệt.":

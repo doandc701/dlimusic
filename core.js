@@ -220,6 +220,7 @@ export function chatResult(entity, extra = {}) {
     members: Number.isFinite(members) && members > 0 ? members : null,
     joined,
     ...(entity.verified && { verified: true }),
+    ...(photoId(entity) && { photo: photoId(entity) }),
     ...extra,
   };
 }
@@ -296,7 +297,7 @@ function telegramError(err) {
 const errCode = (err) => String(err?.errorMessage || err?.message || "");
 
 /** The chats of an invite link (contacts.Search does not find private chats). */
-async function inviteResult(client, hash) {
+async function inviteResult(client, hash, onEntity) {
   let inv;
   try {
     inv = await client.invoke(new Api.messages.CheckChatInvite({ hash }));
@@ -304,6 +305,7 @@ async function inviteResult(client, hash) {
     if (/INVITE_HASH/.test(errCode(err))) return []; // expired / invalid link: nothing found
     throw telegramError(err);
   }
+  if (inv.chat) onEntity?.(inv.chat);
   if (inv instanceof Api.ChatInviteAlready)
     return [chatResult(inv.chat, { joined: true, invite: hash })].filter(Boolean);
   if (inv instanceof Api.ChatInvitePeek) return [chatResult(inv.chat, { joined: false, invite: hash })].filter(Boolean);
@@ -349,10 +351,16 @@ export async function chatInfo(client, chat) {
   return { ...row, members: Number.isFinite(members) && members > 0 ? members : null };
 }
 
-/** GET /api/search: public chats and people matching `q` (Telegram's global search), mine first. */
-export async function searchChats(client, q, { limit = 25 } = {}) {
+/**
+ * GET /api/search: public chats and people matching `q` (Telegram's global search), mine first.
+ * `onEntity` gets each found chat's entity (its picture can then be downloaded: createAvatars().remember).
+ * @param {any} client
+ * @param {string} q
+ * @param {{ limit?: number, onEntity?: (entity: any) => void }} [options]
+ */
+export async function searchChats(client, q, { limit = 25, onEntity } = {}) {
   const hash = inviteHash(q);
-  if (hash) return { chats: await inviteResult(client, hash) };
+  if (hash) return { chats: await inviteResult(client, hash, onEntity) };
   let found;
   try {
     found = await client.invoke(new Api.contacts.Search({ q, limit }));
@@ -372,9 +380,138 @@ export async function searchChats(client, q, { limit = 25 } = {}) {
     if (seen.has(key)) continue;
     seen.add(key);
     const row = chatResult(byKey.get(key));
-    if (row) chats.push(row);
+    if (!row) continue;
+    chats.push(row);
+    onEntity?.(byKey.get(key));
   }
   return { chats };
+}
+
+// ---------- chat profile photos (the small ~160 px picture of Telegram's chat list) ----------
+
+/** Telegram's id of a chat's current profile photo (changes with the picture), or null when it has none. */
+export function photoId(entity) {
+  const p = entity?.photo;
+  if (!(p instanceof Api.UserProfilePhoto || p instanceof Api.ChatPhoto) || p.photoId == null) return null;
+  return String(p.photoId);
+}
+
+/** Chats per GET /api/avatars request. */
+export const AVATARS_MAX = 40;
+
+/** The `ids` of GET /api/avatars: 1–40 chat ids (as the dialogs list writes them), deduplicated; throws 400. */
+export function avatarIdsQuery(value) {
+  const ids = [
+    ...new Set(
+      String(value ?? "")
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean),
+    ),
+  ];
+  if (!ids.length || ids.length > AVATARS_MAX || !ids.every((id) => /^-?\d{1,20}$/.test(id)))
+    throw httpErr(400, `Danh sách ảnh đại diện không hợp lệ (1–${AVATARS_MAX} id)`);
+  return ids;
+}
+
+/**
+ * The small profile photos of chats, as data: URLs, for GET /api/avatars. Entities come from the
+ * dialogs list (kept, refreshed at most once a minute when an id is unknown) and from search answers.
+ * Photos are cached per chat + photo id; at most `concurrency` downloads run at once; a chat without
+ * a photo, or one that fails (FLOOD_WAIT, network…), is null — never an error for the whole batch.
+ */
+export function createAvatars(getClient, { concurrency = 3, cacheMax = 1000, refreshMs = 60_000 } = {}) {
+  const entities = new Map(); // chat id -> entity
+  const cache = new Map(); // "id:photoId" -> data URL | null (no picture), most recent last
+  const inflight = new Map(); // "id:photoId" -> Promise
+  let dialogsAt = 0;
+  let dialogsLoading = null;
+  let pausedUntil = 0; // after FLOOD_WAIT: no downloads until then
+  let running = 0;
+  const waiting = [];
+
+  const remember = (entity) => {
+    if (entity?.id != null) entities.set(markedId(entity), entity);
+  };
+  /** The dialogs list was fetched anyway (GET /api/dialogs): keep its entities. */
+  const rememberDialogs = (dialogs) => {
+    for (const d of dialogs || []) if (d.entity) entities.set(String(d.id), d.entity);
+    dialogsAt = Date.now();
+  };
+  const loadDialogs = () => {
+    if (dialogsLoading || Date.now() - dialogsAt < refreshMs) return dialogsLoading;
+    dialogsLoading = Promise.resolve(getClient())
+      .then((client) => client.getDialogs({}))
+      .then(rememberDialogs)
+      .catch(() => {
+        dialogsAt = Date.now(); // don't retry on every request
+      })
+      .finally(() => (dialogsLoading = null));
+    return dialogsLoading;
+  };
+
+  const limited = async (fn) => {
+    if (running >= concurrency) await new Promise((resolve) => waiting.push(resolve));
+    running++;
+    try {
+      return await fn();
+    } finally {
+      running--;
+      waiting.shift()?.();
+    }
+  };
+
+  const download = async (entity) => {
+    if (Date.now() < pausedUntil) return undefined;
+    try {
+      const client = await getClient(); // the client, or a promise of it (the mobile app)
+      const buf = await client.downloadProfilePhoto(entity, { isBig: false });
+      return buf?.length ? `data:image/jpeg;base64,${buf.toString("base64")}` : null;
+    } catch (err) {
+      if (err?.seconds) pausedUntil = Date.now() + err.seconds * 1000;
+      return undefined; // not cached: tried again on a later request
+    }
+  };
+
+  async function one(id) {
+    const entity = entities.get(id);
+    const pid = photoId(entity);
+    if (!pid) return null;
+    const key = `${id}:${pid}`;
+    if (cache.has(key)) return cache.get(key);
+    if (!inflight.has(key))
+      inflight.set(
+        key,
+        limited(() => download(entity))
+          .then((url) => {
+            if (url !== undefined) {
+              cache.set(key, url);
+              if (cache.size > cacheMax) cache.delete(cache.keys().next().value);
+            }
+            return url ?? null;
+          })
+          .finally(() => inflight.delete(key)),
+      );
+    return inflight.get(key);
+  }
+
+  return {
+    remember,
+    rememberDialogs,
+    /** { "<id>": "data:image/jpeg;base64,…" | null } for the given chat ids. */
+    async get(ids) {
+      if (ids.some((id) => !entities.has(id))) await loadDialogs();
+      const urls = await Promise.all(ids.map((id) => one(id).catch(() => null)));
+      return Object.fromEntries(ids.map((id, i) => [id, urls[i]]));
+    },
+    /** Signed out: forget the account's chats and pictures. */
+    clear() {
+      entities.clear();
+      cache.clear();
+      dialogsAt = 0;
+      pausedUntil = 0;
+    },
+  };
 }
 
 // ---------- searching songs in every chat of the account (Telegram's "messages found") ----------

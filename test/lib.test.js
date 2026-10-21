@@ -23,7 +23,15 @@ import {
   readPage,
   PAGE_SIZE,
 } from "../lib.js";
-import { accountOps, applyAccountOps, mergeAccount, newHistoryId } from "../core.js";
+import {
+  accountOps,
+  applyAccountOps,
+  mergeAccount,
+  newHistoryId,
+  photoId,
+  avatarIdsQuery,
+  createAvatars,
+} from "../core.js";
 import { parseSelection } from "../index.js";
 
 function docMessage(id, { mimeType = "audio/mpeg", size = 1000, attributes = [] } = {}) {
@@ -466,4 +474,85 @@ test("recent plays: a song played again goes back to the top; devices merge to t
     ).map((h) => `${h.id}@${h.at}`),
     ["a|1@9", "c|1@5", "b|1@1"],
   );
+});
+
+describe("chat profile photos (GET /api/avatars)", () => {
+  const channel = (id, photo) =>
+    new Api.Channel({
+      id: BigInt(id),
+      title: `c${id}`,
+      broadcast: true,
+      accessHash: 1n,
+      photo: photo ? new Api.ChatPhoto({ photoId: BigInt(photo), dcId: 2 }) : new Api.ChatPhotoEmpty(),
+    });
+  const user = (id, photo) =>
+    new Api.User({
+      id: BigInt(id),
+      firstName: "u",
+      photo: photo && new Api.UserProfilePhoto({ photoId: BigInt(photo), dcId: 2 }),
+    });
+
+  test("photoId: the current picture's id, null without one", () => {
+    assert.equal(photoId(channel(5, 77)), "77");
+    assert.equal(photoId(user(6, 88)), "88");
+    assert.equal(photoId(channel(5)), null);
+    assert.equal(photoId(user(6)), null);
+    assert.equal(photoId(undefined), null);
+  });
+
+  test("avatarIdsQuery: 1–40 numeric ids, deduplicated", () => {
+    assert.deepEqual(avatarIdsQuery("-1001, 42,-1001"), ["-1001", "42"]);
+    for (const bad of [undefined, "", " , ", "abc", "1,x", Array.from({ length: 41 }, (_, i) => i).join(",")])
+      assert.throws(
+        () => avatarIdsQuery(bad),
+        (e) => e.status === 400,
+        String(bad).slice(0, 20),
+      );
+  });
+
+  test("downloads each photo once, ~3 at a time; no photo / failure = null for that id only", async () => {
+    const dialogs = [
+      { id: "-1001", entity: channel(1, 10) },
+      { id: "-1002", entity: channel(2) },
+      { id: "3", entity: user(3, 30) },
+      { id: "-1004", entity: channel(4, 40) },
+      ...Array.from({ length: 6 }, (_, i) => ({ id: `-100${1000 + i}`, entity: channel(1000 + i, 500 + i) })),
+    ];
+    let active = 0;
+    let peak = 0;
+    let calls = 0;
+    let getDialogs = 0;
+    const client = {
+      getDialogs: async () => (getDialogs++, dialogs),
+      async downloadProfilePhoto(entity) {
+        calls++;
+        active++;
+        peak = Math.max(peak, active);
+        await new Promise((r) => setTimeout(r, 5));
+        active--;
+        if (String(entity.id) === "4") throw Object.assign(new Error("FLOOD_WAIT_0"), { seconds: 0 });
+        return Buffer.from(`img${entity.id}`);
+      },
+    };
+    const avatars = createAvatars(() => client);
+    avatars.rememberDialogs(dialogs);
+    const ids = dialogs.map((d) => d.id);
+    const res = await avatars.get(ids);
+    assert.equal(res[ids[0]], `data:image/jpeg;base64,${Buffer.from("img1").toString("base64")}`);
+    assert.equal(res[ids[1]], null, "no photo: nothing downloaded");
+    assert.match(res[ids[2]], /^data:image\/jpeg;base64,/);
+    assert.equal(res[ids[3]], null, "failed: null, the rest still answered");
+    assert.ok(peak <= 3, `at most 3 at once (was ${peak})`);
+    assert.equal(calls, 9);
+    await avatars.get(ids);
+    assert.equal(calls, 10, "cached; only the failed one is tried again");
+    assert.equal(getDialogs, 0, "known ids: the dialogs are not fetched again");
+    assert.deepEqual(await avatars.get(["-100999"]), { "-100999": null }, "unknown chat: null");
+    assert.equal(getDialogs, 0, "the dialogs list was just fetched: not again within a minute");
+    const fresh = createAvatars(() => client);
+    assert.match((await fresh.get(["3"]))["3"], /^data:/, "nothing known yet: the dialogs are fetched once");
+    assert.equal(getDialogs, 1);
+    avatars.remember(channel(999, 9));
+    assert.match((await avatars.get(["-100999"]))["-100999"], /^data:/, "a search result can be asked for");
+  });
 });

@@ -39,6 +39,9 @@ import {
   joinChat,
   chatInfoQuery,
   chatInfo,
+  photoId,
+  avatarIdsQuery,
+  createAvatars,
   songSearchScan,
   songSearchPage,
   songSearchKey,
@@ -473,6 +476,7 @@ function logout() {
   emit("history", history);
   scans.clear();
   photoCache.clear();
+  avatars.clear();
   cancelQueued();
   pendingInput = null;
   earlyPhone = null;
@@ -941,6 +945,8 @@ function cancelQueued() {
 // ---------- media for the service worker (preview, play, browser downloads) ----------
 
 const photoCache = new Map();
+// The chats' small profile photos (GET /api/avatars), downloaded ~3 at a time and kept in memory.
+const avatars = createAvatars(() => client);
 
 async function photoBytes(item) {
   const key = `${item.msg.chatId}|${item.msg.id}`; // message ids repeat across chats
@@ -1148,11 +1154,13 @@ async function route(method, url, body, signal) {
     case "GET /api/dialogs": {
       requireReady();
       const dialogs = await client.getDialogs({});
+      avatars.rememberDialogs(dialogs);
       return dialogs.map((d) => ({
         id: String(d.id),
         title: d.title || entityTitle(d.entity),
         type: dialogType(d),
         username: d.entity?.username || null,
+        photo: photoId(d.entity),
       }));
     }
 
@@ -1160,7 +1168,7 @@ async function route(method, url, body, signal) {
       // Telegram's global search: public channels / groups / people, or the chat of an invite link
       const q = searchQuery(url.searchParams.get("q"));
       requireReady();
-      return searchChats(client, q);
+      return searchChats(client, q, { onEntity: avatars.remember });
     }
 
     case "GET /api/search/songs": {
@@ -1176,6 +1184,13 @@ async function route(method, url, body, signal) {
       const chat = chatInfoQuery(url.searchParams.get("chat"));
       requireReady();
       return chatInfo(client, chat);
+    }
+
+    case "GET /api/avatars": {
+      // the chats' small profile photos, like Telegram's chat list: { "<id>": "data:image/jpeg;base64,…" | null }
+      const ids = avatarIdsQuery(url.searchParams.get("ids"));
+      requireReady();
+      return avatars.get(ids);
     }
 
     case "POST /api/join": {

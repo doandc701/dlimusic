@@ -52,6 +52,9 @@ import {
   joinChat,
   chatInfoQuery,
   chatInfo,
+  photoId,
+  avatarIdsQuery,
+  createAvatars,
   songSearchScan,
   songSearchPage,
   songSearchKey,
@@ -728,6 +731,7 @@ function logout() {
   removeDataFile(SESSION_FILE);
   scans.clear();
   photoCache.clear();
+  avatars.clear();
   cancelQueued();
   pendingInput = null;
   earlyPhone = null;
@@ -1179,6 +1183,8 @@ function parseRange(header, size) {
 
 // Photos have no single byte size to stream by Range, so they are downloaded into memory (they are small).
 const photoCache = new Map(); // "scanKey|msgId" -> Buffer, most recent last
+// The chats' small profile photos (GET /api/avatars), downloaded ~3 at a time and kept in memory.
+const avatars = createAvatars(() => client);
 const PHOTO_CACHE_MAX = 40;
 
 async function sendPhoto(res, scan, item) {
@@ -1333,6 +1339,7 @@ async function handleApi(req, res, url) {
     case "GET /api/dialogs": {
       requireReady();
       const dialogs = await client.getDialogs({});
+      avatars.rememberDialogs(dialogs);
       return sendJson(
         res,
         200,
@@ -1341,6 +1348,7 @@ async function handleApi(req, res, url) {
           title: d.title || entityTitle(d.entity),
           type: dialogType(d),
           username: d.entity?.username || null,
+          photo: photoId(d.entity),
         })),
       );
     }
@@ -1349,7 +1357,7 @@ async function handleApi(req, res, url) {
       // Telegram's global search: public channels / groups / people, or the chat of an invite link
       const q = searchQuery(url.searchParams.get("q"));
       requireReady();
-      return sendJson(res, 200, await searchChats(client, q));
+      return sendJson(res, 200, await searchChats(client, q, { onEntity: avatars.remember }));
     }
 
     case "GET /api/search/songs": {
@@ -1367,6 +1375,13 @@ async function handleApi(req, res, url) {
       const chat = chatInfoQuery(url.searchParams.get("chat"));
       requireReady();
       return sendJson(res, 200, await chatInfo(client, chat));
+    }
+
+    case "GET /api/avatars": {
+      // the chats' small profile photos, like Telegram's chat list: { "<id>": "data:image/jpeg;base64,…" | null }
+      const ids = avatarIdsQuery(url.searchParams.get("ids"));
+      requireReady();
+      return sendJson(res, 200, await avatars.get(ids));
     }
 
     case "POST /api/join": {

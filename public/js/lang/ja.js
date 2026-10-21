@@ -123,6 +123,7 @@
     Bot: "ボット",
     "Không tìm thấy kết quả": "見つかりませんでした",
     "Tìm kiếm": "検索",
+    "Tìm kiếm kênh, bài hát, nghệ sĩ,...": "チャンネル・曲・アーティストを検索…",
     "Kết quả tìm kiếm toàn cầu": "グローバル検索結果",
     "Tìm thấy {n} bài hát": "{n} 曲が見つかりました",
     "{n} người theo dõi": "登録者 {n} 人",
@@ -136,7 +137,6 @@
     // song search (songs in every chat)
     "Bài hát": "曲",
     "Không tìm thấy bài hát": "曲が見つかりませんでした",
-    "Xem tất cả bài hát ({n})": "すべての曲を見る（{n}）",
     "Tìm: “{q}”": "検索：「{q}」",
     "Kênh riêng tư: hãy bấm Tham gia để xem.": "非公開のチャットです。「参加」を押すと見られます。",
     "Đã gửi yêu cầu tham gia {title}, chờ quản trị viên duyệt.":

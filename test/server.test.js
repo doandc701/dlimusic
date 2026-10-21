@@ -439,6 +439,25 @@ describe("validation", () => {
     }
   });
 
+  test("avatars: 1–40 numeric chat ids, checked before anything goes to Telegram", async () => {
+    const many = Array.from({ length: 41 }, (_, i) => -1000 - i).join(",");
+    for (const q of [
+      "",
+      "?ids=",
+      "?ids=%20,%20",
+      "?ids=abc",
+      "?ids=-1001,@durov",
+      "?ids=1;2",
+      `?ids=${many}`,
+      `?ids=${"9".repeat(21)}`,
+    ]) {
+      const { status, data } = await api(`/api/avatars${q}`);
+      assert.equal(status, 400, q.slice(0, 40));
+      assert.match(data.error, /ảnh đại diện/);
+    }
+    assert.equal((await api("/api/avatars?ids=1", { method: "POST", body: {} })).status, 404, "GET only");
+  });
+
   test("join: only a username, a chat id, a t.me link or an invite hash is accepted", async () => {
     const bad = [
       {},
@@ -470,6 +489,9 @@ describe("validation", () => {
     assert.equal((await api("/api/search?q=music")).status, 401);
     assert.equal((await api("/api/search/songs?q=music")).status, 401);
     assert.equal((await api(`/api/search/songs?q=${"x".repeat(64)}`)).status, 401, "64 characters is fine");
+    const forty = Array.from({ length: 40 }, (_, i) => -1001 - i).join(",");
+    assert.equal((await api(`/api/avatars?ids=${forty},-1001`)).status, 401, "40 ids (a repeat counts once)");
+    assert.equal((await api("/api/avatars?ids=-1001234,777")).status, 401);
     for (const body of [{ chat: "@durov" }, { chat: "https://t.me/durov" }, { invite: "https://t.me/+AbCdEf123" }])
       assert.equal((await api("/api/join", { method: "POST", body })).status, 401, JSON.stringify(body));
   });

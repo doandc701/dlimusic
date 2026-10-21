@@ -121,6 +121,7 @@
     Bot: "机器人",
     "Không tìm thấy kết quả": "未找到结果",
     "Tìm kiếm": "搜索",
+    "Tìm kiếm kênh, bài hát, nghệ sĩ,...": "搜索频道、歌曲、歌手…",
     "Kết quả tìm kiếm toàn cầu": "全局搜索结果",
     "Tìm thấy {n} bài hát": "找到 {n} 首歌曲",
     "{n} người theo dõi": "{n} 位订阅者",
@@ -134,7 +135,6 @@
     // song search (songs in every chat)
     "Bài hát": "歌曲",
     "Không tìm thấy bài hát": "未找到歌曲",
-    "Xem tất cả bài hát ({n})": "查看全部歌曲（{n}）",
     "Tìm: “{q}”": "搜索：“{q}”",
     "Kênh riêng tư: hãy bấm Tham gia để xem.": "私密会话：请点击“加入”后查看。",
     "Đã gửi yêu cầu tham gia {title}, chờ quản trị viên duyệt.": "已申请加入 {title}，等待管理员批准。",

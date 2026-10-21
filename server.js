@@ -46,6 +46,16 @@ import {
   newHistoryId,
   authErrorText,
   readPage,
+  searchQuery,
+  joinRequest,
+  searchChats,
+  joinChat,
+  chatInfoQuery,
+  chatInfo,
+  songSearchScan,
+  songSearchPage,
+  songSearchKey,
+  SONG_SEARCHES_MAX,
 } from "./lib.js";
 import { createMirror } from "./cloud/mirror.js";
 import { openDb, ACCOUNT_DATA } from "./cloud/common.js";
@@ -778,19 +788,32 @@ function scanPage(scan, signal, scanId = null) {
   const run = (scan.paging || Promise.resolve())
     .catch(() => {})
     .then(() =>
-      readPage(
-        scan,
-        (offsetId) => client.iterMessages(scan.entity, { filter: Filter ? new Filter() : undefined, offsetId }),
-        {
-          signal,
-          stopped: scanStopped,
-          // scanId (from the UI) tells this scan's progress apart from an earlier scan of the same chat
-          onProgress: (count) => broadcast("scan", { chat: scan.chat, scanId, count }),
-        },
-      ),
+      scan.search
+        ? songSearchPage(client, scan, { signal, stopped: scanStopped })
+        : readPage(
+            scan,
+            (offsetId) => client.iterMessages(scan.entity, { filter: Filter ? new Filter() : undefined, offsetId }),
+            {
+              signal,
+              stopped: scanStopped,
+              // scanId (from the UI) tells this scan's progress apart from an earlier scan of the same chat
+              onProgress: (count) => broadcast("scan", { chat: scan.chat, scanId, count }),
+            },
+          ),
     );
   scan.paging = run;
   return run;
+}
+
+/** GET /api/search/songs: the songs matching `q` in every chat of the account, as a list (key "search:…"). */
+async function searchSongs(q, signal) {
+  const scan = songSearchScan(q, scans.get(songSearchKey(q)));
+  const page = await scanPage(scan, signal);
+  scans.delete(scan.key); // newest last: the oldest searches are dropped first
+  scans.set(scan.key, scan);
+  const searches = [...scans.keys()].filter((k) => k.startsWith("search:"));
+  for (const k of searches.slice(0, -SONG_SEARCHES_MAX)) scans.delete(k);
+  return { scan, page };
 }
 
 // ---------- "Bài hát yêu thích": every favourite file, from all chats, as one list ----------
@@ -874,8 +897,14 @@ function describeScan(scan, ids = null) {
     key: scan.key,
     title: scan.title,
     more: !!scan.more,
-    outDir: settings.downloadDir ? (scan.fav ? settings.downloadDir : chatDir(settings.downloadDir, scan.title)) : null,
+    // lists from several chats (favourites, a song search): each file goes to its own chat's folder
+    outDir: settings.downloadDir
+      ? scan.fav || scan.search
+        ? settings.downloadDir
+        : chatDir(settings.downloadDir, scan.title)
+      : null,
     ...(scan.fav && { fav: true, missing: scan.missing }),
+    ...(scan.search && { search: true, query: scan.query, total: scan.total || null }),
     ...(scan.recent && { recent: true, missing: scan.missing }),
     files: entries.map(([id, item]) => ({
       id,
@@ -1316,6 +1345,37 @@ async function handleApi(req, res, url) {
       );
     }
 
+    case "GET /api/search": {
+      // Telegram's global search: public channels / groups / people, or the chat of an invite link
+      const q = searchQuery(url.searchParams.get("q"));
+      requireReady();
+      return sendJson(res, 200, await searchChats(client, q));
+    }
+
+    case "GET /api/search/songs": {
+      // songs in every chat of the account (Telegram's "messages found"), as a list to play / download
+      const q = searchQuery(url.searchParams.get("q"));
+      requireReady();
+      const ctrl = new AbortController();
+      res.on("close", () => !res.writableEnded && ctrl.abort());
+      const { scan, page } = await searchSongs(q, ctrl.signal);
+      return sendJson(res, 200, describeScan(scan, page));
+    }
+
+    case "GET /api/chat-info": {
+      // the open chat's subscribers / members, for the line under its title
+      const chat = chatInfoQuery(url.searchParams.get("chat"));
+      requireReady();
+      return sendJson(res, 200, await chatInfo(client, chat));
+    }
+
+    case "POST /api/join": {
+      // { chat: username | id | t.me link } or { invite: hash }; users and bots are opened, not joined
+      const target = joinRequest(await readJson(req));
+      requireReady();
+      return sendJson(res, 200, await joinChat(client, target));
+    }
+
     case "GET /api/visible-chats":
       requireReady();
       return sendJson(res, 200, { ids: visibleChats[auth.me.id] || null });
@@ -1429,7 +1489,7 @@ async function handleApi(req, res, url) {
       if (dir && remember) saveSettings({ downloadDir: base });
       return sendJson(res, 200, {
         added: enqueue(scan, ids, base),
-        outDir: scan.fav ? base : chatDir(base, scan.title),
+        outDir: scan.fav || scan.search ? base : chatDir(base, scan.title),
       });
     }
 
@@ -1489,7 +1549,8 @@ async function handleApi(req, res, url) {
         return sendJson(res, 200, { ok: true });
       }
       if (!settings.downloadDir) throw httpError(409, "Chưa chọn thư mục tải xuống", { code: "NEED_DIR" });
-      openFolder(key && scans.has(key) ? chatDir(settings.downloadDir, scans.get(key).title) : settings.downloadDir);
+      const scan = key && scans.get(key);
+      openFolder(scan && !scan.fav && !scan.search ? chatDir(settings.downloadDir, scan.title) : settings.downloadDir);
       return sendJson(res, 200, { ok: true });
     }
 

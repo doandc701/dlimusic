@@ -328,7 +328,7 @@
         <div class="p-3 border-bottom side-search">
           <div class="input-group">
             <span class="input-group-text"><i class="bi bi-search"></i></span>
-            <input type="search" class="form-control" id="dialogSearch" placeholder="Tìm kênh hoặc dán link t.me/…" />
+            <input type="search" class="form-control" id="dialogSearch" aria-label="Tìm kiếm" />
           </div>
         </div>
         <a
@@ -400,6 +400,8 @@
             </button>
             <div class="flex-grow-1 min-w-0">
               <h5 class="mb-0 text-truncate" id="chatTitle"></h5>
+              <!-- like Telegram: "2.402 người theo dõi"; on phones the file count goes on the line below -->
+              <div class="small text-body-secondary text-truncate" id="chatMembers"></div>
               <div class="small text-body-secondary d-sm-none" id="chatSub"></div>
             </div>
             <button

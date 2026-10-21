@@ -421,15 +421,24 @@ body {
     line-height: 1.3;
     overflow-wrap: anywhere;
   }
-  .file-table .name-file {
+  /* under the title: file name, chat, posting date, size · length — one size, one even gap between them */
+  .file-table .name-file,
+  .file-table .fav-chat,
+  .file-table .m-meta {
     font-size: 0.75rem;
+    line-height: 1.35;
+    margin-top: 0.25rem;
+  }
+  .file-table .name-main + .name-file,
+  .file-table .name-main + .fav-chat,
+  .file-table .name-main + .m-meta {
+    margin-top: 0.3rem; /* a little more under the title */
   }
   .m-meta {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
     gap: 0.25rem 0.5rem;
-    margin-top: 0.2rem;
   }
   .m-meta .badge {
     font-size: 0.7rem;
@@ -1116,6 +1125,104 @@ body {
   --bs-btn-hover-bg: var(--c);
   --bs-btn-border-color: color-mix(in srgb, var(--c) 40%, transparent);
 }
+/* ---------- search box: "your chats" + "global results" (public chats found by Telegram) ---------- */
+.dialog-section {
+  padding: 0.45rem 1rem 0.3rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--bs-secondary-color);
+  background: var(--bs-tertiary-bg);
+  border-bottom: var(--bs-border-width) solid var(--bs-border-color);
+}
+.dialog-note {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 0.5rem;
+  padding: 0.6rem 1rem 0.8rem;
+  font-size: 0.8rem;
+  color: var(--bs-secondary-color);
+  overflow-wrap: anywhere;
+}
+.dialog-join {
+  --c: var(--fun-violet);
+  flex: none;
+  --bs-btn-padding-y: 0.15rem;
+  --bs-btn-padding-x: 0.65rem;
+  --bs-btn-font-size: 0.75rem;
+  --bs-btn-color: var(--c);
+  --bs-btn-hover-color: #fff;
+  --bs-btn-hover-bg: var(--c);
+  --bs-btn-border-color: color-mix(in srgb, var(--c) 45%, transparent);
+  --bs-btn-hover-border-color: var(--c);
+  --bs-btn-disabled-color: var(--c);
+  --bs-btn-disabled-border-color: color-mix(in srgb, var(--c) 45%, transparent);
+  border-radius: 999px;
+  white-space: nowrap;
+}
+[data-bs-theme="dark"] .dialog-join {
+  --bs-btn-hover-color: #111827;
+}
+.dialog-join .spinner-border-sm {
+  --bs-spinner-width: 0.8rem;
+  --bs-spinner-height: 0.8rem;
+  --bs-spinner-border-width: 0.15em;
+}
+.dialog-join.is-pending {
+  font-size: 0.72rem;
+  color: var(--bs-secondary-color);
+}
+@media (hover: none) and (pointer: coarse) {
+  .dialog-join:not(.is-pending) {
+    min-height: 32px;
+  }
+}
+/* "Bài hát": songs found in every chat, played right from the search results */
+.song-play {
+  width: 36px;
+  height: 36px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  font-size: 1.15rem;
+  background: linear-gradient(135deg, var(--fun-violet), var(--fun-pink));
+  transition: transform 0.15s ease;
+}
+.song-item:hover .song-play {
+  transform: scale(1.06);
+}
+.song-item.playing:not(.active) {
+  background: color-mix(in srgb, var(--fun-pink) 9%, var(--bs-body-bg));
+}
+.song-item.playing .song-play {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--fun-pink) 35%, transparent);
+}
+.song-artist,
+.song-dur {
+  color: var(--bs-secondary-color);
+}
+.song-dur {
+  font-variant-numeric: tabular-nums;
+}
+.song-all {
+  color: var(--fun-violet);
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+.song-all .bi-music-note-list {
+  width: 36px;
+  text-align: center;
+  font-size: 1.1rem;
+}
+@media (prefers-reduced-motion: reduce) {
+  .song-play {
+    transition: none;
+  }
+}
 #chatsList .chats-row {
   cursor: pointer;
 }
@@ -1367,7 +1474,9 @@ body {
 }
 /* the favourites list holds every kind of file from every chat: no type filter, chat name under each title */
 .fav-view #typeSeg,
-body:has(.fav-view) #filterSheet .type-filter {
+.search-view #typeSeg,
+body:has(.fav-view) #filterSheet .type-filter,
+body:has(.search-view) #filterSheet .type-filter {
   display: none !important;
 }
 .fav-chat {
@@ -1539,7 +1648,10 @@ body:has(.fav-view) #filterSheet .type-filter {
   /* closed: icons only */
   #mainView:not(.rail-open) .side-search,
   #mainView:not(.rail-open) .chats-bar,
-  #mainView:not(.rail-open) .side-text {
+  #mainView:not(.rail-open) .side-text,
+  #mainView:not(.rail-open) .dialog-join,
+  #mainView:not(.rail-open) .global-item,
+  #mainView:not(.rail-open) .song-item {
     display: none !important;
   }
   #mainView:not(.rail-open) .dialog-item {

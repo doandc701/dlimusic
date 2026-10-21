@@ -349,6 +349,8 @@ function redrawForLang() {
   renderUserSync();
   setScanning(state.scanning);
   setSort(state.sort); // the size / length column header, and the open list
+  renderMembers();
+  if (state.scan) $("chatTitle").textContent = scanTitle(state.scan); // "Tìm: “…”", favourites
   if (!state.scan) updateSelection();
   renderJobs();
   renderRecent();
@@ -974,6 +976,8 @@ function resetWorkspace() {
   stopPlayer();
   state.keyChat.clear();
   $("dialogSearch").value = "";
+  resetGlobalSearch();
+  resetSongSearch();
   show($("chatsBar"), false);
   $("dialogs").innerHTML =
     `<div class="text-center p-4"><span class="spinner-border spinner-border-sm text-primary"></span></div>`;
@@ -983,8 +987,8 @@ function resetWorkspace() {
 
 // ---------- dialogs ----------
 
-const TYPE_ICON = { channel: "bi-megaphone", group: "bi-people", user: "bi-person" };
-const TYPE_LABEL = { channel: "Kênh", group: "Nhóm", user: "Người dùng" };
+const TYPE_ICON = { channel: "bi-megaphone", group: "bi-people", user: "bi-person", bot: "bi-robot" };
+const TYPE_LABEL = { channel: "Kênh", group: "Nhóm", user: "Người dùng", bot: "Bot" };
 
 /** Coloured circle with the first letter of the chat title. */
 function dialogAvatar(d) {
@@ -1116,25 +1120,309 @@ function renderDialogs() {
     <button class="btn btn-sm chats-bar-btn flex-none" data-chats-edit>
       <i class="bi bi-sliders"></i> ${state.visibleChats ? t("Chọn lại") : t("Chọn hiển thị")}</button>`
     : "";
-  if (!shown.length && state.dialogs.length) {
+  if (!shown.length && state.dialogs.length && !q) {
     $("dialogs").innerHTML = `<div class="text-center text-body-secondary small p-4">
       <i class="bi bi-eye-slash fs-3 d-block mb-2"></i>${t("Chưa chọn hội thoại nào để hiển thị.")}
       <div class="mt-2"><button class="btn btn-sm btn-primary" data-chats-edit><i class="bi bi-sliders"></i> ${t("Chọn hội thoại")}</button></div></div>`;
     return;
   }
-  $("dialogs").innerHTML = list.length
-    ? list
-        .map((d) => {
-          const active = state.chat === d.id ? " active" : "";
-          return `<a class="list-group-item list-group-item-action dialog-item d-flex align-items-center gap-2${active}" data-id="${esc(d.id)}" title="${esc(d.title)}">
+  const rows = list
+    .map((d) => {
+      const active = state.chat === d.id ? " active" : "";
+      return `<a class="list-group-item list-group-item-action dialog-item d-flex align-items-center gap-2${active}" data-id="${esc(d.id)}" title="${esc(d.title)}">
       ${dialogAvatar(d)}
       <span class="min-w-0 side-text"><span class="d-block text-truncate">${esc(d.title)}</span>
       <small class="d-block text-truncate ${active ? "" : "text-body-secondary"}">${dialogSub(d)}</small></span></a>`;
-        })
-        .join("")
-    : q
-      ? `<div class="text-body-secondary small p-3">${t("Không tìm thấy. Nhấn Enter để mở “{q}”.", { q: esc($("dialogSearch").value.trim()) })}</div>`
-      : `<div class="text-body-secondary small p-3">${t("Chưa có hội thoại nào. Dán link / username kênh vào ô tìm kiếm rồi nhấn Enter.")}</div>`;
+    })
+    .join("");
+  const typed = $("dialogSearch").value.trim();
+  const none = q
+    ? `<div class="text-body-secondary small p-3 text-center">${isChatLink(typed) ? t("Không tìm thấy. Nhấn Enter để mở “{q}”.", { q: esc(typed) }) : t("Không tìm thấy kết quả")}</div>`
+    : `<div class="text-body-secondary small p-3 text-center">${t("Chưa có hội thoại nào. Dán link / username kênh vào ô tìm kiếm rồi nhấn Enter.")}</div>`;
+  // Typing in the search box (like Telegram): one list of chats — yours first, then the public ones
+  // Telegram found — and the songs under it.
+  const global = globalSearchActive();
+  if (!global) {
+    $("dialogs").innerHTML = rows || none;
+    return;
+  }
+  const found = renderGlobalResults(list);
+  $("dialogs").innerHTML =
+    `<div class="dialog-section">${t("Kết quả tìm kiếm toàn cầu")}</div>` +
+    (rows || found.rows ? rows + found.rows : "") +
+    (found.note ?? (rows || found.rows ? "" : none)) +
+    renderSongResults();
+  updateSongRows();
+}
+
+// ---------- global search: public channels / groups / people, and joining them ----------
+
+const gsearch = {
+  q: "", // what was (or is being) searched
+  status: "idle", // idle | loading | done | error
+  chats: [], // the results of `q`, as /api/search sends them
+  error: null,
+  timer: null,
+  ctrl: null, // AbortController of the request in flight
+  seq: 0,
+  joins: new Map(), // result key -> "joining" | "pending" (join request waiting for an admin)
+};
+const SEARCH_MIN = 2;
+const SEARCH_MAX = 64;
+const joinKey = (r) => (r.invite ? `+${r.invite}` : r.id);
+
+/** Is the search box asking Telegram (2–64 characters)? */
+function globalSearchActive() {
+  const q = $("dialogSearch").value.trim();
+  return state.auth?.step === "ready" && q.length >= SEARCH_MIN && q.length <= SEARCH_MAX;
+}
+
+function resetGlobalSearch() {
+  clearTimeout(gsearch.timer);
+  gsearch.ctrl?.abort();
+  Object.assign(gsearch, { q: "", status: "idle", chats: [], error: null, ctrl: null });
+  gsearch.seq++;
+}
+
+/** Ask Telegram ~350 ms after the last key press; an older request still running is cancelled. */
+function scheduleGlobalSearch() {
+  const q = $("dialogSearch").value.trim();
+  if (!globalSearchActive()) return resetGlobalSearch();
+  if (q === gsearch.q && gsearch.status !== "idle") return; // e.g. only a space was added
+  resetGlobalSearch();
+  Object.assign(gsearch, { q, status: "loading" });
+  const seq = gsearch.seq;
+  gsearch.timer = setTimeout(async () => {
+    const ctrl = (gsearch.ctrl = new AbortController());
+    try {
+      const data = await api(`/api/search?q=${encodeURIComponent(q)}`, undefined, { signal: ctrl.signal });
+      if (seq !== gsearch.seq) return;
+      Object.assign(gsearch, { status: "done", chats: Array.isArray(data.chats) ? data.chats : [] });
+    } catch (err) {
+      if (seq !== gsearch.seq || err.name === "AbortError") return;
+      Object.assign(gsearch, { status: "error", error: err.message });
+    }
+    gsearch.ctrl = null;
+    renderDialogs();
+  }, 350);
+}
+
+/** "12,3K" in the chosen language. */
+function compactNumber(n) {
+  try {
+    return new Intl.NumberFormat(tdlI18n.locale, { notation: "compact", maximumFractionDigits: 1 }).format(n);
+  } catch {
+    return String(n);
+  }
+}
+
+function globalSub(r) {
+  const parts = [];
+  if (r.username) parts.push(`@${esc(r.username)}`);
+  if (r.members != null) {
+    const n = compactNumber(r.members);
+    parts.push(esc(r.type === "channel" ? t("{n} người theo dõi", { n }) : t("{n} thành viên", { n })));
+  } else if (!r.username || r.type === "user" || r.type === "bot") parts.push(t(TYPE_LABEL[r.type] || "Kênh"));
+  return `<i class="bi ${TYPE_ICON[r.type] || "bi-chat-dots"}"></i> ${parts.join(" · ")}`;
+}
+
+function globalJoinButton(r, i) {
+  if (r.joined || r.type === "user" || r.type === "bot") return "";
+  const st = gsearch.joins.get(joinKey(r));
+  if (st === "pending")
+    return `<span class="dialog-join is-pending" title="${t("Chờ quản trị viên duyệt")}">${t("Đã gửi yêu cầu")}</span>`;
+  if (st === "joining")
+    return `<button type="button" class="btn btn-sm dialog-join" disabled aria-label="${t("Đang tham gia…")}"><span class="spinner-border spinner-border-sm"></span></button>`;
+  return `<button type="button" class="btn btn-sm dialog-join" data-join="${i}">${t("Tham gia")}</button>`;
+}
+
+/**
+ * What Telegram's global search adds under the account's own matches: { rows } (chats not already
+ * listed), and a { note } while it is searching or when it failed (null otherwise).
+ */
+function renderGlobalResults(localList) {
+  const q = $("dialogSearch").value.trim();
+  if (gsearch.q !== q || gsearch.status === "loading" || gsearch.status === "idle")
+    return {
+      rows: "",
+      note: `<div class="dialog-note"><span class="spinner-border spinner-border-sm"></span> ${t("Đang tìm…")}</div>`,
+    };
+  if (gsearch.status === "error") return { rows: "", note: `<div class="dialog-note">${esc(gsearch.error)}</div>` };
+  const mine = new Set(localList.map((d) => d.id));
+  const rows = gsearch.chats.map((r, i) => [r, i]).filter(([r]) => !(r.id && mine.has(r.id)));
+  return {
+    note: null,
+    rows: rows
+      .map(
+        ([
+          r,
+          i,
+        ]) => `<a class="list-group-item list-group-item-action dialog-item global-item d-flex align-items-center gap-2" data-global="${i}" title="${esc(r.title)}">
+      ${dialogAvatar({ id: String(r.id || r.invite || r.title), title: String(r.title || "") })}
+      <span class="min-w-0 side-text flex-grow-1"><span class="d-flex align-items-center gap-1 min-w-0"><span class="text-truncate">${esc(r.title)}</span>${r.verified ? `<i class="bi bi-patch-check-fill text-primary flex-none" title="${t("Đã xác minh")}"></i>` : ""}</span>
+      <small class="d-block text-truncate text-body-secondary">${globalSub(r)}</small></span>${globalJoinButton(r, i)}</a>`,
+      )
+      .join(""),
+  };
+}
+
+/** A result was clicked: open it like Enter does (a public channel can be read without joining). */
+function openGlobalResult(r) {
+  if (r.joined && r.id && state.dialogs.some((d) => d.id === r.id)) return openChat(r.id);
+  if (r.username) return openChat(r.username);
+  if (r.joined && r.id) return openChat(r.id);
+  toast(t("Kênh riêng tư: hãy bấm Tham gia để xem."), "info");
+}
+
+/** Join a channel / group found by the search, then show it in the list and open it. */
+async function joinGlobalResult(r) {
+  const key = joinKey(r);
+  if (gsearch.joins.has(key)) return;
+  gsearch.joins.set(key, "joining");
+  renderDialogs();
+  try {
+    const res = await api("/api/join", r.invite ? { invite: r.invite } : { chat: r.username || r.id });
+    if (res.pending) {
+      gsearch.joins.set(key, "pending");
+      renderDialogs();
+      return toast(t("Đã gửi yêu cầu tham gia {title}, chờ quản trị viên duyệt.", { title: r.title }), "info");
+    }
+    gsearch.joins.delete(key);
+    const d = res.dialog?.id
+      ? res.dialog
+      : r.id
+        ? { id: r.id, title: r.title, type: r.type, username: r.username }
+        : null;
+    r.joined = true;
+    await loadDialogs(); // it is the same Telegram account: Telegram's own apps show it too
+    if (d) {
+      if (!state.dialogs.some((x) => x.id === d.id)) state.dialogs.unshift(d); // Telegram may list it a moment later
+      if (state.visibleChats && !state.visibleChats.has(d.id)) {
+        // a chat filter is on: the new chat is added to it, or it would be hidden right away
+        try {
+          const v = await api("/api/visible-chats", { ids: [...state.visibleChats, d.id] });
+          state.visibleChats = v.ids ? new Set(v.ids) : null;
+        } catch {}
+      }
+    }
+    renderDialogs();
+    renderChatsInfo();
+    toast(t("Đã tham gia {title}", { title: d?.title || r.title }));
+    if (d) openChat(d.id);
+    else if (r.username) openChat(r.username);
+  } catch (err) {
+    gsearch.joins.delete(key);
+    renderDialogs();
+    toast(err.message, "error");
+  }
+}
+
+// ---------- song search: songs in every chat of the account (like Telegram's "messages found") ----------
+
+const SEARCH_CHAT = "search:"; // state.chat of a song search list: "search:<words>" (never a chat id or username)
+const isSearchChat = (chat) => typeof chat === "string" && chat.startsWith(SEARCH_CHAT);
+const SONG_PREVIEW = 5; // songs shown under the chat results; "Xem tất cả" opens the whole list
+const SONG_PAGE = 50; // same as core.js
+
+const ssearch = {
+  q: "",
+  status: "idle", // idle | loading | done | error
+  scan: null, // the list /api/search/songs sent (key "search:…"), playable as it is
+  error: null,
+  timer: null,
+  ctrl: null,
+  seq: 0,
+};
+
+function resetSongSearch() {
+  clearTimeout(ssearch.timer);
+  ssearch.ctrl?.abort();
+  Object.assign(ssearch, { q: "", status: "idle", scan: null, error: null, ctrl: null });
+  ssearch.seq++;
+}
+
+/** Its own request, on the same rhythm as the chat search; an older one still running is cancelled. */
+function scheduleSongSearch() {
+  const q = $("dialogSearch").value.trim();
+  if (!globalSearchActive()) return resetSongSearch();
+  if (q === ssearch.q && ssearch.status !== "idle") return;
+  resetSongSearch();
+  Object.assign(ssearch, { q, status: "loading" });
+  const seq = ssearch.seq;
+  ssearch.timer = setTimeout(async () => {
+    const ctrl = (ssearch.ctrl = new AbortController());
+    try {
+      const scan = await api(`/api/search/songs?q=${encodeURIComponent(q)}`, undefined, { signal: ctrl.signal });
+      if (seq !== ssearch.seq) return;
+      Object.assign(ssearch, { status: "done", scan });
+    } catch (err) {
+      if (seq !== ssearch.seq || err.name === "AbortError") return;
+      Object.assign(ssearch, { status: "error", error: err.message });
+    }
+    ssearch.ctrl = null;
+    renderDialogs();
+  }, 350);
+}
+
+/** The title of a list: favourites and song searches are named in the chosen language. */
+function scanTitle(scan) {
+  if (scan?.fav) return t("Bài hát yêu thích");
+  if (scan?.search) return t("Tìm: “{q}”", { q: scan.query });
+  return scan?.title || "";
+}
+
+/** The "Bài hát" part of the search results: the first songs, and a row opening all of them. */
+function renderSongResults() {
+  const head = `<div class="dialog-section">${t("Bài hát")}</div>`;
+  const q = $("dialogSearch").value.trim();
+  if (ssearch.q !== q || ssearch.status === "loading" || ssearch.status === "idle")
+    return `${head}<div class="dialog-note"><span class="spinner-border spinner-border-sm"></span> ${t("Đang tìm…")}</div>`;
+  if (ssearch.status === "error") return `${head}<div class="dialog-note">${esc(ssearch.error)}</div>`;
+  const songs = ssearch.scan.files.filter(playable);
+  if (!songs.length) return `${head}<div class="dialog-note">${t("Không tìm thấy bài hát")}</div>`;
+  const n = `${songs.length}${ssearch.scan.more ? "+" : ""}`;
+  // like Telegram's "72 messages found": how many Telegram counted (else what is loaded, "50+")
+  const found = ssearch.scan.total ? ssearch.scan.total.toLocaleString(tdlI18n.locale) : n;
+  return (
+    `<div class="dialog-section">${t("Tìm thấy {n} bài hát", { n: found })}</div>` +
+    songs
+      .slice(0, SONG_PREVIEW)
+      .map(
+        (
+          f,
+        ) => `<a class="list-group-item list-group-item-action dialog-item song-item d-flex align-items-center gap-2" data-song="${f.id}" title="${esc(displayName(f))}">
+      <span class="song-play rounded-circle" aria-hidden="true"><i class="bi bi-play-fill"></i></span>
+      <span class="min-w-0 side-text flex-grow-1"><span class="d-block text-truncate">${esc(f.title || f.name)}${f.title && f.performer ? ` <span class="song-artist">– ${esc(f.performer)}</span>` : ""}</span>
+      <small class="d-block text-truncate text-body-secondary"><i class="bi bi-megaphone"></i> ${esc(f.chat || "")}</small></span>
+      ${f.duration ? `<small class="song-dur flex-none">${fmtDur(f.duration)}</small>` : ""}</a>`,
+      )
+      .join("") +
+    `<a class="list-group-item list-group-item-action dialog-item song-item song-all d-flex align-items-center gap-2" data-song-all>
+      <i class="bi bi-music-note-list"></i><span class="side-text flex-grow-1 text-truncate">${t("Xem tất cả bài hát ({n})", { n })}</span><i class="bi bi-chevron-right side-text"></i></a>`
+  );
+}
+
+/** ▶ / ⏸ and the highlight on the song rows of the search results (the player changed). */
+function updateSongRows() {
+  const key = ssearch.scan?.key;
+  for (const row of $("dialogs").querySelectorAll("[data-song]")) {
+    const on = !!key && state.playingKey === key && state.playingId === Number(row.dataset.song);
+    row.classList.toggle("playing", on);
+    row.querySelector(".song-play").innerHTML =
+      `<i class="bi ${on && state.isPlaying ? "bi-pause-fill" : "bi-play-fill"}"></i>`;
+  }
+}
+
+/** A song of the results: the whole result list becomes the queue, from that song (the open list stays). */
+function playSearchSong(id) {
+  const scan = ssearch.scan;
+  if (!scan) return;
+  if (state.playingKey === scan.key && state.playingId === id && state.playScan === scan) return togglePlay();
+  state.keyChat.set(scan.key, SEARCH_CHAT + scan.query); // the player's title opens this list
+  state.playQueue = scan.files.filter(playable).map((f) => f.id);
+  state.playOrder = orderFrom(id);
+  playFrom(scan, id);
+  updateSongRows();
 }
 
 // ---------- choosing the chats shown in the list (per Telegram account) ----------
@@ -1288,13 +1576,44 @@ function renderChatsInfo() {
       : t("Hiện tất cả ({n} hội thoại)", { n: state.dialogs.length });
 }
 
-$("dialogSearch").addEventListener("input", renderDialogs);
+$("dialogSearch").addEventListener("input", () => {
+  scheduleGlobalSearch();
+  scheduleSongSearch();
+  renderDialogs();
+});
+/** A t.me / telegram.me link, tg:// link or @username: Enter opens it. Anything else is only searched. */
+const isChatLink = (text) => /^(https?:\/\/)?(t|telegram)\.me\/\S+|^tg:\/\/\S+|^@[a-z]\w{3,31}$/i.test(text);
+
 $("dialogSearch").addEventListener("keydown", (e) => {
-  if (e.key === "Enter" && e.target.value.trim()) openChat(e.target.value.trim());
+  if (e.key !== "Enter") return;
+  e.preventDefault();
+  const text = e.target.value.trim();
+  if (isChatLink(text)) return openChat(text);
+  if (isPhone()) e.target.blur(); // a search stays in the list here; on a phone, put the keyboard away to see it
 });
 $("dialogs").addEventListener("click", (e) => {
+  const song = e.target.closest("[data-song]");
+  if (song) {
+    e.preventDefault();
+    return playSearchSong(Number(song.dataset.song));
+  }
+  if (e.target.closest("[data-song-all]")) {
+    e.preventDefault();
+    return ssearch.scan && openChat(SEARCH_CHAT + ssearch.scan.query);
+  }
+  const join = e.target.closest("[data-join]");
+  if (join) {
+    e.preventDefault();
+    const r = gsearch.chats[Number(join.dataset.join)];
+    return r && joinGlobalResult(r);
+  }
   const el = e.target.closest(".dialog-item");
-  if (el) openChat(el.dataset.id);
+  if (!el || e.target.closest(".dialog-join")) return;
+  if (el.dataset.global !== undefined) {
+    const r = gsearch.chats[Number(el.dataset.global)];
+    return r && openGlobalResult(r);
+  }
+  openChat(el.dataset.id);
 });
 
 // ---------- files ----------
@@ -1337,15 +1656,57 @@ function stopScan() {
   state.scanCtrl = null;
 }
 
-async function loadFiles() {
+// ---------- the line under a chat's title: its subscribers / members, like Telegram ----------
+
+const chatMembers = new Map(); // chat (dialog id / username, as state.chat) -> { members, type, at }
+
+/** "2.402 người theo dõi" / "35 thành viên" for a chat, or "" (not known yet, a person, favourites, a search). */
+function membersText(chat) {
+  const info = chatMembers.get(chat);
+  if (!info?.members) return "";
+  const n = info.members.toLocaleString(tdlI18n.locale);
+  return info.type === "channel" ? t("{n} người theo dõi", { n }) : t("{n} thành viên", { n });
+}
+
+function renderMembers() {
+  $("chatMembers").textContent = membersText(state.chat);
+}
+
+/** Asked once per chat every 10 minutes (Telegram's full info is a heavier call than the list). */
+async function loadMembers(chat) {
+  const known = chatMembers.get(chat);
+  if (known && Date.now() - known.at < 600_000) return;
+  try {
+    const info = await api(`/api/chat-info?chat=${encodeURIComponent(chat)}`);
+    chatMembers.set(chat, { members: info.members, type: info.type, at: Date.now() });
+  } catch {
+    return; // not important enough for an error: the line stays empty
+  }
+  if (state.chat === chat) renderMembers();
+}
+
+/** `fresh`: ask again ("Quét lại"); otherwise a song search already in memory is shown as it is. */
+async function loadFiles({ fresh = false } = {}) {
   const token = ++state.loadToken;
   stopScan(); // the previous chat's scan stops in the server / backend too, not just ignored here
   $("chatView").classList.toggle("fav-view", state.chat === FAV_CHAT); // no type filter there: all kinds, newest heart first
+  const search = isSearchChat(state.chat) ? state.chat.slice(SEARCH_CHAT.length) : null;
+  $("chatView").classList.toggle("search-view", search !== null); // songs only, from every chat
   const ctrl = (state.scanCtrl = new AbortController());
   setScanning(true);
   showChat(true);
   const dialog = state.dialogs.find((d) => d.id === state.chat);
-  $("chatTitle").textContent = state.chat === FAV_CHAT ? t("Bài hát yêu thích") : dialog?.title || state.chat;
+  $("chatTitle").textContent =
+    state.chat === FAV_CHAT
+      ? t("Bài hát yêu thích")
+      : search !== null
+        ? t("Tìm: “{q}”", { q: search })
+        : dialog?.title || state.chat;
+  // the header is the new chat's at once: its members (known, or asked now beside the scan), no old count
+  const plainChat = state.chat !== FAV_CHAT && search === null;
+  renderMembers();
+  if (plainChat) loadMembers(state.chat);
+  $("chatSub").textContent = "";
   document
     .querySelectorAll("#typeSeg button")
     .forEach((b) => b.classList.toggle("active", b.dataset.type === state.type));
@@ -1355,18 +1716,26 @@ async function loadFiles() {
   updateSelection();
   try {
     state.scanId = `${PAGE_ID}-${token}`; // progress events carry it: only this scan's count is shown
-    const scan =
-      state.chat === FAV_CHAT
+    // the results under the search box (or the list playing) are the same list: shown without asking again
+    const known =
+      search !== null && !fresh && [state.playScan, ssearch.scan].find((s) => s?.search && s.query === search);
+    const scan = known
+      ? known
+      : state.chat === FAV_CHAT
         ? await api(`/api/favorites/files?scan=${state.scanId}`, undefined, { signal: ctrl.signal })
-        : await api(
-            `/api/files?chat=${encodeURIComponent(state.chat)}&type=${state.type}&scan=${state.scanId}`,
-            undefined,
-            { signal: ctrl.signal },
-          );
+        : search !== null
+          ? await api(`/api/search/songs?q=${encodeURIComponent(search)}&scan=${state.scanId}`, undefined, {
+              signal: ctrl.signal,
+            })
+          : await api(
+              `/api/files?chat=${encodeURIComponent(state.chat)}&type=${state.type}&scan=${state.scanId}`,
+              undefined,
+              { signal: ctrl.signal },
+            );
     if (token !== state.loadToken) return;
     state.scan = scan;
     state.keyChat.set(scan.key, state.chat);
-    $("chatTitle").textContent = scan.title;
+    $("chatTitle").textContent = scanTitle(scan);
     renderFiles();
     if (scan.missing)
       toast(t("{n} bài yêu thích không còn mở được (đã rời kênh hoặc tin đã bị xoá)", { n: scan.missing }), "warn");
@@ -1671,7 +2040,7 @@ function renderMore() {
       : state.loadingMore
         ? `<span class="spinner-border spinner-border-sm text-primary"></span> ${t("Đang tải thêm…")}`
         : scan.more
-          ? `<button class="btn btn-sm btn-outline-primary" id="loadMoreBtn"><i class="bi bi-arrow-down-circle"></i> ${t("Tải thêm {n} file", { n: PAGE_SIZE })}</button>`
+          ? `<button class="btn btn-sm btn-outline-primary" id="loadMoreBtn"><i class="bi bi-arrow-down-circle"></i> ${t("Tải thêm {n} file", { n: scan.search ? SONG_PAGE : PAGE_SIZE })}</button>`
           : scan.files.length > PAGE_SIZE
             ? t("Đã tải hết {n} file", { n: scan.files.length })
             : "";
@@ -1955,9 +2324,11 @@ function showPlayingList() {
         .forEach((b) => b.classList.toggle("active", b.dataset.type === state.type));
     }
     $("chatView").classList.toggle("fav-view", scan.fav === true);
+    $("chatView").classList.toggle("search-view", scan.search === true);
     state.scan = scan;
     showChat(true);
-    $("chatTitle").textContent = scan.fav ? t("Bài hát yêu thích") : scan.title;
+    $("chatTitle").textContent = scanTitle(scan);
+    $("chatMembers").textContent = membersText(state.keyChat.get(scan.key));
     renderDialogs();
     renderFiles();
   }
@@ -1987,7 +2358,7 @@ function goHome() {
   state.selected.clear();
   state.query = "";
   $("fileSearch").value = "";
-  $("chatView").classList.remove("fav-view");
+  $("chatView").classList.remove("fav-view", "search-view");
   showChat(false);
   renderDialogs();
   updateSelection();
@@ -2006,7 +2377,7 @@ $("npTitle").addEventListener("keydown", (e) => {
   e.preventDefault();
   showPlayingList();
 });
-$("reloadBtn").addEventListener("click", () => state.chat && !state.scanning && loadFiles());
+$("reloadBtn").addEventListener("click", () => state.chat && !state.scanning && loadFiles({ fresh: true }));
 $("folderBtn").addEventListener("click", () =>
   api("/api/open-folder", { key: state.scan?.key }).catch((e) => {
     if (e.code !== "NEED_DIR") return toast(e.message, "error");
@@ -2463,6 +2834,7 @@ for (const evt of ["play", "pause", "ended"]) {
     $("playBtn").innerHTML = `<i class="bi ${state.isPlaying ? "bi-pause-fill" : "bi-play-fill"}"></i>`;
     if (state.playingId !== null && state.scan?.key === state.playingKey) updateRow(state.playingId);
     renderRecent(); // ▶ / sound wave on the song in "Phát gần đây"
+    updateSongRows(); // ▶ / ⏸ on the songs under the search box
     setHomeCat(state.isPlaying);
   });
 }
@@ -2526,6 +2898,8 @@ function savePlayback(force = false) {
         chat,
         key: state.playScan.key,
         id: state.playingId,
+        // a song search numbers its songs itself: found again by "<chat id>|<message id>" after a reload
+        fav: state.playScan.files.find((f) => f.id === state.playingId)?.fav || null,
         time: Math.max(lastTime, player.currentTime || 0),
         playing: !player.paused,
         at: Date.now(),
@@ -2555,23 +2929,28 @@ async function restorePlayback() {
   try {
     const fav = saved.chat === FAV_CHAT;
     const recent = saved.chat === "recent";
-    const type = fav || recent ? null : String(saved.key).split("|")[1] || "all";
+    const search = isSearchChat(saved.chat) ? saved.chat.slice(SEARCH_CHAT.length) : null;
+    if (search !== null && !saved.fav) return;
+    const type = fav || recent || search !== null ? null : String(saved.key).split("|")[1] || "all";
     let scan = fav
       ? await api("/api/favorites/files")
       : recent
         ? await api("/api/recent/files")
-        : await api(`/api/files?chat=${encodeURIComponent(saved.chat)}&type=${encodeURIComponent(type)}`);
-    // the song may be on a later page of a long list (500 files each)
-    for (let pages = 0; !scan.files.some((f) => f.id === saved.id) && scan.more && pages < 20; pages++) {
+        : search !== null
+          ? await api(`/api/search/songs?q=${encodeURIComponent(search)}`)
+          : await api(`/api/files?chat=${encodeURIComponent(saved.chat)}&type=${encodeURIComponent(type)}`);
+    const isSaved = (f) => (search !== null ? f.fav === saved.fav : f.id === saved.id);
+    // the song may be on a later page of a long list (500 files each; 50 for a song search)
+    for (let pages = 0; !scan.files.some(isSaved) && scan.more && pages < (search !== null ? 4 : 20); pages++) {
       const r = await api(`/api/files/more?key=${encodeURIComponent(scan.key)}`);
       scan.files.push(...r.files.filter((f) => !scan.files.some((x) => x.id === f.id)));
       scan.more = r.more;
     }
-    const f = scan.files.find((x) => x.id === saved.id);
+    const f = scan.files.find(isSaved);
     if (!f || state.playingId !== null) return; // gone from the chat, or the user already started another song
     if (!recent) state.keyChat.set(scan.key, saved.chat);
     state.playQueue = scan.files.filter(playable).map((x) => x.id);
-    state.playOrder = orderFrom(saved.id);
+    state.playOrder = orderFrom(f.id);
     player.addEventListener(
       "loadedmetadata",
       () => {
@@ -2591,7 +2970,7 @@ async function restorePlayback() {
       },
       { once: true },
     );
-    playFrom(scan, saved.id);
+    playFrom(scan, f.id);
     if (!saved.playing) player.pause();
   } catch {
     // the list could not be read (offline, chat left…): nothing to restore

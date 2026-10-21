@@ -33,6 +33,16 @@ import {
   newHistoryId,
   authErrorText,
   readPage,
+  searchQuery,
+  joinRequest,
+  searchChats,
+  joinChat,
+  chatInfoQuery,
+  chatInfo,
+  songSearchScan,
+  songSearchPage,
+  songSearchKey,
+  SONG_SEARCHES_MAX,
 } from "../core.js";
 import { createCloudSync } from "./cloud-sync.js";
 
@@ -514,19 +524,32 @@ function scanPage(scan, signal, scanId = null) {
   const run = (scan.paging || Promise.resolve())
     .catch(() => {})
     .then(() =>
-      readPage(
-        scan,
-        (offsetId) => client.iterMessages(scan.entity, { filter: Filter ? new Filter() : undefined, offsetId }),
-        {
-          signal,
-          stopped: scanStopped,
-          // scanId (from the UI) tells this scan's progress apart from an earlier scan of the same chat
-          onProgress: (count) => emit("scan", { chat: scan.chat, scanId, count }),
-        },
-      ),
+      scan.search
+        ? songSearchPage(client, scan, { signal, stopped: scanStopped })
+        : readPage(
+            scan,
+            (offsetId) => client.iterMessages(scan.entity, { filter: Filter ? new Filter() : undefined, offsetId }),
+            {
+              signal,
+              stopped: scanStopped,
+              // scanId (from the UI) tells this scan's progress apart from an earlier scan of the same chat
+              onProgress: (count) => emit("scan", { chat: scan.chat, scanId, count }),
+            },
+          ),
     );
   scan.paging = run;
   return run;
+}
+
+/** GET /api/search/songs: the songs matching `q` in every chat of the account, as a list (key "search:…"). */
+async function searchSongs(q, signal) {
+  const scan = songSearchScan(q, scans.get(songSearchKey(q)));
+  const page = await scanPage(scan, signal);
+  scans.delete(scan.key); // newest last: the oldest searches are dropped first
+  scans.set(scan.key, scan);
+  const searches = [...scans.keys()].filter((k) => k.startsWith("search:"));
+  for (const k of searches.slice(0, -SONG_SEARCHES_MAX)) scans.delete(k);
+  return { scan, page };
 }
 
 function getScan(key) {
@@ -628,13 +651,15 @@ async function describeScan(scan, ids = null) {
         inBrowserDownloads.has(item.msg.id) || !!(await localFile(await indexFor(item.chatTitle ?? scan.title), item)),
     });
   }
-  const outDir = dirHandle ? (scan.fav ? dirHandle.name : folderLabel(dirHandle, scan.title)) : null;
+  // lists from several chats (favourites, a song search): each file goes to its own chat's folder
+  const outDir = dirHandle ? (scan.fav || scan.search ? dirHandle.name : folderLabel(dirHandle, scan.title)) : null;
   return {
     key: scan.key,
     title: scan.title,
     outDir,
     more: !!scan.more,
     ...(scan.fav && { fav: true, missing: scan.missing }),
+    ...(scan.search && { search: true, query: scan.query, total: scan.total || null }),
     ...(scan.recent && { recent: true, missing: scan.missing }),
     files,
   };
@@ -971,7 +996,7 @@ async function serveStream(req, port) {
 
     let size = item.info.size;
     let source;
-    const local = req.download ? null : await localFile(await diskIndex(scan), item);
+    const local = req.download ? null : await localFile(await diskIndex(item.chatTitle ?? scan.title), item);
     if (local) {
       size = local.size;
       source = (s, e) => fileRange(local, s, e);
@@ -1131,6 +1156,35 @@ async function route(method, url, body, signal) {
       }));
     }
 
+    case "GET /api/search": {
+      // Telegram's global search: public channels / groups / people, or the chat of an invite link
+      const q = searchQuery(url.searchParams.get("q"));
+      requireReady();
+      return searchChats(client, q);
+    }
+
+    case "GET /api/search/songs": {
+      // songs in every chat of the account (Telegram's "messages found"), as a list to play / download
+      const q = searchQuery(url.searchParams.get("q"));
+      requireReady();
+      const { scan, page } = await searchSongs(q, signal);
+      return describeScan(scan, page);
+    }
+
+    case "GET /api/chat-info": {
+      // the open chat's subscribers / members, for the line under its title
+      const chat = chatInfoQuery(url.searchParams.get("chat"));
+      requireReady();
+      return chatInfo(client, chat);
+    }
+
+    case "POST /api/join": {
+      // { chat: username | id | t.me link } or { invite: hash }; users and bots are opened, not joined
+      const target = joinRequest(body);
+      requireReady();
+      return joinChat(client, target);
+    }
+
     case "GET /api/visible-chats": {
       requireReady();
       return { ids: load(STORE.visibleChats, {})[auth.me.id] || null };
@@ -1248,7 +1302,7 @@ async function route(method, url, body, signal) {
       if (dir && remember) await setDefaultDir(base);
       return {
         added: enqueue(scan, ids, { mode: "fs", base }),
-        outDir: scan.fav ? base.name : folderLabel(base, scan.title),
+        outDir: scan.fav || scan.search ? base.name : folderLabel(base, scan.title),
       };
     }
 

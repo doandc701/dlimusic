@@ -407,6 +407,73 @@ describe("validation", () => {
     assert.ok(data.error);
   });
 
+  test("global search: q must be 1–64 characters, checked before anything goes to Telegram", async () => {
+    for (const q of ["", "%20%20", "x".repeat(65)]) {
+      const { status, data } = await api(`/api/search?q=${q}`);
+      assert.equal(status, 400, `q="${q}"`);
+      assert.match(data.error, /1 đến 64/);
+    }
+    assert.equal((await api("/api/search")).status, 400, "no q at all");
+  });
+
+  test("song search: q must be 1–64 characters, checked before anything goes to Telegram", async () => {
+    for (const q of ["", "%20%20", "x".repeat(65), "%20".repeat(3) + "x".repeat(65)]) {
+      const { status, data } = await api(`/api/search/songs?q=${q}`);
+      assert.equal(status, 400, `q="${q}"`);
+      assert.match(data.error, /1 đến 64/);
+    }
+    assert.equal((await api("/api/search/songs")).status, 400, "no q at all");
+    assert.equal((await api("/api/search/songs?q=", { method: "POST", body: {} })).status, 404, "GET only");
+  });
+
+  test("song search: an unknown search list is not found (no scan to page / play)", async () => {
+    for (const p of ["/api/scan?key=search%3Anope", "/api/media?key=search%3Anope&id=1"])
+      assert.equal((await api(p)).status, 404, p);
+  });
+
+  test("chat info: the chat must be given (at most 200 characters)", async () => {
+    for (const q of ["", "?chat=", "?chat=%20", `?chat=${"x".repeat(201)}`]) {
+      const { status, data } = await api(`/api/chat-info${q}`);
+      assert.equal(status, 400, q);
+      assert.match(data.error, /Thiếu kênh/);
+    }
+  });
+
+  test("join: only a username, a chat id, a t.me link or an invite hash is accepted", async () => {
+    const bad = [
+      {},
+      { chat: "" },
+      { chat: "   " },
+      { chat: 123 },
+      { chat: "ab" }, // usernames have at least 4 characters
+      { chat: "1bad_start" },
+      { chat: "bad name" },
+      { chat: "<script>" },
+      { chat: "x".repeat(201) },
+      { chat: "https://example.com/+abcdef" },
+      { invite: "" },
+      { invite: 5 },
+      { invite: "has spaces" },
+      { invite: "a".repeat(65) },
+      { chat: null },
+    ];
+    for (const body of bad) {
+      const { status, data } = await api("/api/join", { method: "POST", body });
+      assert.equal(status, 400, JSON.stringify(body).slice(0, 40));
+      assert.ok(data.error);
+    }
+    assert.equal((await api("/api/join", { method: "POST", body: "nope" })).status, 400, "not an object");
+  });
+
+  test("search / join with valid input need a signed-in account", async (t) => {
+    if (ready) return t.skip("signed in: valid input would reach Telegram");
+    assert.equal((await api("/api/search?q=music")).status, 401);
+    assert.equal((await api("/api/search/songs?q=music")).status, 401);
+    assert.equal((await api(`/api/search/songs?q=${"x".repeat(64)}`)).status, 401, "64 characters is fine");
+    for (const body of [{ chat: "@durov" }, { chat: "https://t.me/durov" }, { invite: "https://t.me/+AbCdEf123" }])
+      assert.equal((await api("/api/join", { method: "POST", body })).status, 401, JSON.stringify(body));
+  });
+
   test("cancel with nothing queued cancels 0", async () => {
     assert.deepEqual((await api("/api/cancel", { method: "POST", body: {} })).data, { cancelled: 0 });
   });
@@ -479,6 +546,50 @@ describe("telegram (real account)", () => {
     for (const d of data) {
       assert.equal(typeof d.id, "string");
       assert.ok(["channel", "group", "user"].includes(d.type));
+    }
+  });
+
+  test("global search: public chats with type / members / joined, mine first (read-only)", async (t) => {
+    if (!ready) return t.skip("no logged-in session.txt");
+    const { status, data } = await api("/api/search?q=telegram");
+    assert.equal(status, 200, JSON.stringify(data));
+    assert.ok(Array.isArray(data.chats) && data.chats.length > 0);
+    const ids = data.chats.map((c) => c.id);
+    assert.equal(new Set(ids).size, ids.length, "no duplicates");
+    for (const c of data.chats) {
+      assert.match(c.id, /^-?\d+$/);
+      assert.equal(typeof c.title, "string");
+      assert.ok(["channel", "group", "user", "bot"].includes(c.type), c.type);
+      assert.ok(c.members === null || Number.isInteger(c.members));
+      assert.equal(typeof c.joined, "boolean");
+    }
+    // an invite link that does not exist: nothing found, not an error
+    const inv = await api("/api/search?q=" + encodeURIComponent("https://t.me/+zzzzNoSuchInvite000"));
+    assert.equal(inv.status, 200, JSON.stringify(inv.data));
+    assert.deepEqual(inv.data, { chats: [] });
+  });
+
+  test("song search: songs from every chat as a list of its own, with a next page (read-only)", async (t) => {
+    if (!ready) return t.skip("no logged-in session.txt");
+    const { status, data } = await api("/api/search/songs?q=love");
+    assert.equal(status, 200, JSON.stringify(data));
+    assert.equal(data.key, "search:love");
+    assert.equal(data.search, true);
+    assert.equal(data.query, "love");
+    const ids = data.files.map((f) => f.id);
+    assert.equal(new Set(ids).size, ids.length, "list ids are unique (message ids repeat across chats)");
+    for (const f of data.files) {
+      assert.equal(f.kind, "audio");
+      assert.match(f.fav, /^\d+\|\d+$/);
+      assert.equal(typeof f.chat, "string");
+    }
+    if (data.more) {
+      const more = await api(`/api/files/more?key=${encodeURIComponent(data.key)}`);
+      assert.equal(more.status, 200, JSON.stringify(more.data));
+      assert.ok(
+        more.data.files.every((f) => !ids.includes(f.id)),
+        "the next page has only new songs",
+      );
     }
   });
 
@@ -902,6 +1013,11 @@ describe("API choice on the login screen", () => {
     assert.match((await s.call("/api/visible-chats")).error, /Not logged in/);
     assert.match((await s.call("/api/visible-chats", { ids: null })).error, /Not logged in/);
     assert.match((await s.call("/api/favorites")).error, /Not logged in/);
+    // global search / joining chats: valid input, but nobody is signed in
+    assert.match((await s.call("/api/search?q=music")).error, /Not logged in/);
+    assert.match((await s.call("/api/join", { chat: "durov" })).error, /Not logged in/);
+    assert.match((await s.call("/api/join", { invite: "AbCdEf123" })).error, /Not logged in/);
+    assert.match((await s.call("/api/search?q=")).error, /1 đến 64/, "bad input is refused first");
   });
 
   test("API in .env and not signed in: offers the choice; own API can go back to it", async () => {

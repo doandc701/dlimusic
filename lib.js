@@ -30,6 +30,16 @@ export {
   readPage,
   PAGE_SIZE,
   newHistoryId,
+  searchQuery,
+  joinRequest,
+  searchChats,
+  joinChat,
+  chatInfoQuery,
+  chatInfo,
+  songSearchScan,
+  songSearchPage,
+  songSearchKey,
+  SONG_SEARCHES_MAX,
 } from "./core.js";
 
 // ---------- private data folder ----------

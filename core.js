@@ -1,8 +1,9 @@
 // Pure helpers shared by the Node version (lib.js, server.js, index.js) and the browser build (web/).
 // No Node built-ins here: this file is bundled for the browser too.
 
-import { Api } from "telegram";
+import { Api, utils } from "telegram";
 import qrcode from "qrcode-generator";
+import bigInt from "big-integer";
 
 export const FILTERS = {
   all: null,
@@ -181,6 +182,367 @@ export function entityTitle(entity) {
     entity.username ||
     String(entity.id)
   );
+}
+
+// ---------- global search and joining chats (like Telegram's search box) ----------
+
+/** Peer id as the dialogs list writes it ("-100…" channels, "-…" basic groups, users as is). */
+function markedId(entity) {
+  const id = String(entity.id);
+  if (entity instanceof Api.Channel) return `-100${id}`;
+  if (entity instanceof Api.Chat) return `-${id}`;
+  return id;
+}
+
+/** A user / chat / channel from a Telegram answer as a search result row; null for what cannot be shown. */
+export function chatResult(entity, extra = {}) {
+  if (!entity) return null;
+  let type;
+  let joined;
+  if (entity instanceof Api.User) {
+    if (entity.deleted) return null;
+    type = entity.bot ? "bot" : "user";
+    joined = false;
+  } else if (entity instanceof Api.Channel) {
+    type = entity.broadcast && !entity.megagroup ? "channel" : "group";
+    joined = !entity.left;
+  } else if (entity instanceof Api.Chat) {
+    if (entity.deactivated) return null; // upgraded to a supergroup: that one is shown instead
+    type = "group";
+    joined = !entity.left;
+  } else return null; // ChatForbidden / ChannelForbidden / ChatEmpty / UserEmpty: banned or gone
+  const members = Number(entity.participantsCount);
+  return {
+    id: markedId(entity),
+    title: entityTitle(entity),
+    username: entity.username || entity.usernames?.find((u) => u.active)?.username || null,
+    type,
+    members: Number.isFinite(members) && members > 0 ? members : null,
+    joined,
+    ...(entity.verified && { verified: true }),
+    ...extra,
+  };
+}
+
+/** The hash of an invite link (t.me/+HASH, t.me/joinchat/HASH, tg://join?invite=HASH), or null. */
+export function inviteHash(text) {
+  const s = String(text ?? "").trim();
+  const m =
+    /^(?:https?:\/\/)?(?:www\.)?(?:t\.me|telegram\.me|telegram\.dog)\/(?:\+|joinchat\/)([\w-]{4,64})\/?(?:[?#].*)?$/i.exec(
+      s,
+    ) || /^tg:\/\/join\?invite=([\w-]{4,64})(?:&.*)?$/i.exec(s);
+  return m ? m[1] : null;
+}
+
+const httpErr = (status, message) => Object.assign(new Error(message), { status });
+
+/** The search box text, trimmed; throws a 400 error when it is empty or longer than 64 characters. */
+export function searchQuery(value) {
+  const q = typeof value === "string" ? value.trim() : "";
+  if (!q || q.length > 64) throw httpErr(400, "Từ khoá tìm kiếm phải có từ 1 đến 64 ký tự");
+  return q;
+}
+
+/**
+ * What POST /api/join was asked to join: { invite: HASH } or { chat: username | numeric id }.
+ * Throws a 400 error when the body is not one of these.
+ */
+export function joinRequest(body) {
+  const bad = () => httpErr(400, "Kênh hoặc link mời không hợp lệ");
+  if (body?.invite !== undefined) {
+    if (typeof body.invite !== "string") throw bad();
+    const hash = inviteHash(body.invite) || (/^[\w-]{4,64}$/.test(body.invite) ? body.invite : null);
+    if (!hash) throw bad();
+    return { invite: hash };
+  }
+  if (typeof body?.chat !== "string") throw bad();
+  const chat = body.chat.trim();
+  if (!chat || chat.length > 200) throw bad();
+  const hash = inviteHash(chat);
+  if (hash) return { invite: hash };
+  if (/^-?\d{1,20}$/.test(chat)) return { chat };
+  const name = chat
+    .replace(/^(?:https?:\/\/)?(?:www\.)?(?:t\.me|telegram\.me|telegram\.dog)\//i, "")
+    .replace(/^@/, "")
+    .split(/[/?#]/)[0];
+  if (!/^[A-Za-z][\w]{3,31}$/.test(name)) throw bad();
+  return { chat: name };
+}
+
+const JOIN_ERRORS = {
+  CHANNELS_TOO_MUCH: "Tài khoản đã tham gia quá nhiều kênh và nhóm (giới hạn của Telegram). Hãy rời bớt rồi thử lại.",
+  INVITE_HASH_EXPIRED: "Link mời đã hết hạn hoặc đã bị thu hồi.",
+  INVITE_HASH_INVALID: "Link mời không hợp lệ.",
+  INVITE_HASH_EMPTY: "Link mời không hợp lệ.",
+  CHANNEL_PRIVATE: "Kênh hoặc nhóm này là riêng tư, hoặc bạn đã bị chặn khỏi đó.",
+  CHANNEL_INVALID: "Không tìm thấy kênh hoặc nhóm này.",
+  USERNAME_NOT_OCCUPIED: "Không tìm thấy kênh hoặc nhóm này.",
+  USERNAME_INVALID: "Không tìm thấy kênh hoặc nhóm này.",
+  USERS_TOO_MUCH: "Nhóm đã đủ số thành viên tối đa.",
+  INVITE_REQUEST_SENT: "Đã gửi yêu cầu tham gia, chờ quản trị viên duyệt.",
+};
+
+/** A Telegram error while searching / joining as an HTTP error with a readable Vietnamese message. */
+function telegramError(err) {
+  if (err?.status) return err;
+  const raw = String(err?.errorMessage || err?.message || err || "");
+  const code = err?.errorMessage || /\b([A-Z][A-Z0-9_]{3,})\b/.exec(raw)?.[1] || "";
+  if (err?.seconds || /FLOOD/.test(code)) return httpErr(429, authErrorText(err));
+  if (JOIN_ERRORS[code]) return httpErr(400, JOIN_ERRORS[code]);
+  if (/No user has|Cannot find any entity|Could not find the input entity|not found in your dialogs/i.test(raw))
+    return httpErr(404, JOIN_ERRORS.USERNAME_NOT_OCCUPIED);
+  return httpErr(502, raw || "Telegram không trả lời. Vui lòng thử lại.");
+}
+const errCode = (err) => String(err?.errorMessage || err?.message || "");
+
+/** The chats of an invite link (contacts.Search does not find private chats). */
+async function inviteResult(client, hash) {
+  let inv;
+  try {
+    inv = await client.invoke(new Api.messages.CheckChatInvite({ hash }));
+  } catch (err) {
+    if (/INVITE_HASH/.test(errCode(err))) return []; // expired / invalid link: nothing found
+    throw telegramError(err);
+  }
+  if (inv instanceof Api.ChatInviteAlready)
+    return [chatResult(inv.chat, { joined: true, invite: hash })].filter(Boolean);
+  if (inv instanceof Api.ChatInvitePeek) return [chatResult(inv.chat, { joined: false, invite: hash })].filter(Boolean);
+  const members = Number(inv.participantsCount);
+  return [
+    {
+      id: null, // not known until joined
+      title: inv.title || hash,
+      username: null,
+      type: inv.broadcast && !inv.megagroup ? "channel" : "group",
+      members: members > 0 ? members : null,
+      joined: false,
+      ...(inv.verified && { verified: true }),
+      ...(inv.requestNeeded && { request: true }),
+      invite: hash,
+    },
+  ];
+}
+
+/** The `chat` of GET /api/chat-info (a dialog id, username or t.me link, as for /api/files); throws 400. */
+export function chatInfoQuery(value) {
+  const chat = String(value ?? "").trim();
+  if (!chat || chat.length > 200) throw httpErr(400, "Thiếu kênh");
+  return chat;
+}
+
+/**
+ * A chat's header line, like Telegram's: how many subscribers (channel) / members (group). The exact
+ * number needs the chat's full info (the one in search answers is often missing or rounded).
+ */
+export async function chatInfo(client, chat) {
+  const entity = await resolveChat(client, chat);
+  const row = chatResult(entity);
+  if (!row) return { members: null };
+  let members = row.members;
+  if (entity instanceof Api.Channel) {
+    const full = await client.invoke(new Api.channels.GetFullChannel({ channel: entity }));
+    members = full.fullChat.participantsCount ?? members;
+  } else if (entity instanceof Api.Chat) {
+    const full = await client.invoke(new Api.messages.GetFullChat({ chatId: entity.id }));
+    members = full.fullChat.participants?.participants?.length ?? members;
+  }
+  return { ...row, members: Number.isFinite(members) && members > 0 ? members : null };
+}
+
+/** GET /api/search: public chats and people matching `q` (Telegram's global search), mine first. */
+export async function searchChats(client, q, { limit = 25 } = {}) {
+  const hash = inviteHash(q);
+  if (hash) return { chats: await inviteResult(client, hash) };
+  let found;
+  try {
+    found = await client.invoke(new Api.contacts.Search({ q, limit }));
+  } catch (err) {
+    if (/SEARCH_QUERY_EMPTY|QUERY_TOO_SHORT/.test(errCode(err))) return { chats: [] };
+    throw telegramError(err);
+  }
+  const byKey = new Map();
+  for (const u of found.users || []) byKey.set(`u${u.id}`, u);
+  for (const c of found.chats || []) byKey.set(`c${c.id}`, c);
+  const peerKey = (p) =>
+    p instanceof Api.PeerUser ? `u${p.userId}` : p instanceof Api.PeerChannel ? `c${p.channelId}` : `c${p.chatId}`;
+  const seen = new Set();
+  const chats = [];
+  for (const peer of [...(found.myResults || []), ...(found.results || [])]) {
+    const key = peerKey(peer);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const row = chatResult(byKey.get(key));
+    if (row) chats.push(row);
+  }
+  return { chats };
+}
+
+// ---------- searching songs in every chat of the account (Telegram's "messages found") ----------
+
+/** Songs per request to Telegram (its own maximum for a global search is 100). */
+export const SONG_PAGE = 50;
+/** Search lists kept in memory at once (each holds its songs' messages); the oldest is dropped first. */
+export const SONG_SEARCHES_MAX = 20;
+
+/** Scan key of a song search: never "<chat id>|<type>", "fav" or "recent". Case and spaces don't matter. */
+export const songSearchKey = (q) => `search:${q.trim().toLowerCase().replace(/\s+/g, " ")}`;
+
+/**
+ * A new song search as a scan (see readPage), filled by songSearchPage. Searching the same words again
+ * keeps the ids its songs had (`prev`), so a song playing from the earlier list still finds its file.
+ * Message ids repeat across chats: the list numbers its songs itself (1, 2, …), like the favourites.
+ */
+export function songSearchScan(q, prev = null) {
+  const key = songSearchKey(q);
+  return {
+    key,
+    chat: key,
+    type: "music",
+    title: `Tìm: “${q}”`,
+    query: q,
+    search: true,
+    items: new Map(),
+    more: true,
+    ids: prev?.key === key ? prev.ids : new Map(), // "<chat id>|<message id>" -> list id
+    nextId: prev?.key === key ? prev.nextId : 1,
+    offset: { rate: 0, peer: null, id: 0 }, // where Telegram's next page starts
+  };
+}
+
+/**
+ * The next page of a song search: messages.SearchGlobal with the music filter, newest first, in every
+ * chat the account is in. Moves the scan's offset, clears scan.more at the end. Returns the new list ids.
+ */
+export async function songSearchPage(
+  client,
+  scan,
+  { signal, stopped = () => new Error("stopped"), limit = SONG_PAGE } = {},
+) {
+  const page = [];
+  // a page can hold only non-songs (voice notes are filtered out): read on a little, so the list grows
+  for (let tries = 0; scan.more && !page.length && tries < 4; tries++) {
+    if (signal?.aborted) throw stopped();
+    let res;
+    try {
+      res = await client.invoke(
+        new Api.messages.SearchGlobal({
+          q: scan.query,
+          filter: new Api.InputMessagesFilterMusic(),
+          minDate: 0,
+          maxDate: 0,
+          offsetRate: scan.offset.rate,
+          offsetPeer: scan.offset.peer || new Api.InputPeerEmpty(),
+          offsetId: scan.offset.id,
+          limit,
+        }),
+      );
+    } catch (err) {
+      if (/SEARCH_QUERY_EMPTY|QUERY_TOO_SHORT/.test(errCode(err))) {
+        scan.more = false;
+        break;
+      }
+      throw telegramError(err); // FLOOD_WAIT -> 429 "… đợi N phút …"
+    }
+    if (signal?.aborted) throw stopped();
+    const messages = (res.messages || []).filter((m) => m instanceof Api.Message);
+    const chats = new Map();
+    for (const u of res.users || []) chats.set(`u${u.id}`, u);
+    for (const c of res.chats || []) chats.set(`c${c.id}`, c);
+    const peerOf = (p) =>
+      p instanceof Api.PeerUser
+        ? [`u${p.userId}`, String(p.userId)]
+        : p instanceof Api.PeerChannel
+          ? [`c${p.channelId}`, String(p.channelId)]
+          : [`c${p?.chatId}`, String(p?.chatId)];
+    const entities = new Map(); // what GramJS's own search hands to its messages (sender, chat…)
+    for (const e of chats.values()) {
+      try {
+        entities.set(utils.getPeerId(e), e);
+      } catch {}
+    }
+    for (const msg of messages) {
+      const [peerKey, chatId] = peerOf(msg.peerId);
+      const entity = chats.get(peerKey);
+      try {
+        msg._finishInit?.(client, entities, undefined);
+      } catch {}
+      if (mediaKind(msg) !== "audio") continue; // voice notes and other files are not songs
+      const info = fileInfo(msg);
+      if (!info) continue;
+      const fav = `${chatId}|${msg.id}`;
+      let id = scan.ids.get(fav);
+      if (id === undefined) scan.ids.set(fav, (id = scan.nextId++));
+      if (scan.items.has(id)) continue;
+      scan.items.set(id, { msg, info, chatTitle: entity ? entityTitle(entity) : chatId, fav });
+      page.push(id);
+    }
+    // where the next page starts: Telegram's next_rate, or the last message (with its chat) of this one
+    const last = res.messages?.[res.messages.length - 1];
+    const lastEntity = last && chats.get(peerOf(last.peerId)[0]);
+    let peer = null;
+    try {
+      peer = lastEntity ? utils.getInputPeer(lastEntity) : null;
+    } catch {}
+    const slice = res instanceof Api.messages.MessagesSlice || res instanceof Api.messages.ChannelMessages;
+    const seen = (scan.seen = (scan.seen || 0) + (res.messages?.length || 0));
+    if (res.count && !scan.total) scan.total = res.count; // Telegram's "72 messages found"
+    scan.more = !!(
+      slice &&
+      last &&
+      peer &&
+      (res.messages.length >= limit || res.nextRate) &&
+      (!res.count || seen < res.count) &&
+      !(last.id === scan.offset.id && (res.nextRate || last.date) === scan.offset.rate) // no progress: stop
+    );
+    scan.offset = { rate: res.nextRate || last?.date || 0, peer, id: last?.id || 0 };
+  }
+  return page;
+}
+
+/** POST /api/join: join a public chat (username / id) or an invite link. Users and bots cannot be joined. */
+export async function joinChat(client, { chat, invite }) {
+  const dialogOf = (r) =>
+    r && { id: r.id, title: r.title, type: r.type === "bot" ? "user" : r.type, username: r.username };
+  const fromUpdates = (updates) => dialogOf((updates?.chats || []).map((c) => chatResult(c)).find(Boolean));
+  if (invite) {
+    try {
+      return {
+        ok: true,
+        dialog: fromUpdates(await client.invoke(new Api.messages.ImportChatInvite({ hash: invite }))),
+      };
+    } catch (err) {
+      const code = errCode(err);
+      if (/INVITE_REQUEST_SENT/.test(code)) return { ok: true, pending: true };
+      if (!/USER_ALREADY_PARTICIPANT/.test(code)) throw telegramError(err);
+      const [row] = await inviteResult(client, invite);
+      return { ok: true, already: true, dialog: dialogOf(row) };
+    }
+  }
+  let entity;
+  try {
+    if (/^-?\d+$/.test(chat)) {
+      // a search result without a username: Telegram's answer to the search is in GramJS's entity cache
+      entity = await client.getEntity(bigInt(chat)).catch(() => resolveChat(client, chat));
+    } else entity = await resolveChat(client, chat);
+  } catch (err) {
+    throw telegramError(err);
+  }
+  if (entity instanceof Api.User) throw httpErr(400, "Không thể tham gia người dùng hoặc bot, hãy mở để nhắn tin.");
+  if (!(entity instanceof Api.Channel)) {
+    // basic groups have no public link: being in it is the only way to see it
+    if (entity instanceof Api.Chat && !entity.left)
+      return { ok: true, already: true, dialog: dialogOf(chatResult(entity)) };
+    throw httpErr(400, JOIN_ERRORS.CHANNEL_INVALID);
+  }
+  try {
+    const updates = await client.invoke(new Api.channels.JoinChannel({ channel: entity }));
+    return { ok: true, dialog: fromUpdates(updates) || dialogOf(chatResult(entity, { joined: true })) };
+  } catch (err) {
+    const code = errCode(err);
+    if (/INVITE_REQUEST_SENT/.test(code)) return { ok: true, pending: true };
+    if (/USER_ALREADY_PARTICIPANT/.test(code)) return { ok: true, already: true, dialog: dialogOf(chatResult(entity)) };
+    throw telegramError(err);
+  }
 }
 
 /**

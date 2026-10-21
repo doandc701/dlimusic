@@ -5,6 +5,7 @@ import type { Api } from "telegram";
 import { authErrorText } from "../../../core.js";
 import { currentUser, signOut as tgSignOut } from "./client";
 import { stopCloud } from "../store/cloud";
+import { forgetAvatars } from "./avatars";
 import { resetChats } from "./useChats";
 
 type Auth = {
@@ -53,6 +54,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await stopCloud(); // the last changes go to the web version's copy first
     await tgSignOut();
     resetChats();
+    forgetAvatars();
     setMe(null);
     setState("out");
   }, []);

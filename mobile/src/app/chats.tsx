@@ -22,7 +22,7 @@ import { ChatsModal } from "@/components/ChatsModal";
 import { Icon, type IconName } from "@/components/Icon";
 import { norm } from "@/components/RecentPanel";
 import { useToast } from "@/components/Toast";
-import { Avatar, Pill, T, fmtDur, haptic } from "@/components/ui";
+import { Avatar, Pill, T, haptic } from "@/components/ui";
 import { useT } from "@/i18n";
 import { usePlayer } from "@/player/PlayerProvider";
 import { prefetchHead } from "@/player/prefetch";
@@ -42,7 +42,7 @@ import {
   type SongSearch,
 } from "@/telegram/search";
 import { addChat, reloadChats, useChats } from "@/telegram/useChats";
-import { FONT, GRADIENT, tint, useTheme } from "@/theme";
+import { FONT, tint, useTheme } from "@/theme";
 
 // labels in Vietnamese, translated where shown
 const SORTS: Record<ChatSort, { label: string; icon: IconName }> = {
@@ -53,7 +53,6 @@ const SORTS: Record<ChatSort, { label: string; icon: IconName }> = {
 };
 const TYPE_ORDER = { channel: 0, group: 1, user: 2 };
 const collator = new Intl.Collator("vi", { sensitivity: "base", numeric: true });
-const SONG_PREVIEW = 5; // songs under the chat results; "Xem tất cả bài hát" opens all of them
 const SEARCH_DELAY = 350; // ms after the last key press
 
 /** "12,3 N" / "12.3K" in the picked language (Intl's compact notation, else a K / M of our own). */
@@ -76,19 +75,56 @@ type Row =
   | { t: "chat"; key: string; chat: Chat }
   | { t: "found"; key: string; r: FoundChat }
   | { t: "note"; key: string; text: string; spin?: boolean; error?: boolean }
-  | { t: "song"; key: string; song: Song }
-  | { t: "all"; key: string; n: string };
+  | { t: "song"; key: string; song: Song };
 const joinKey = (r: FoundChat) => (r.invite ? `+${r.invite}` : (r.id ?? r.title));
+
+/** `text` in parts, the searched words (accents and case ignored) marked like Telegram does. */
+function markWords(text: string, q: string): { text: string; hit: boolean }[] {
+  const chars = [...text];
+  const plain = chars.map((c) => norm(c) || c); // one entry per character: positions stay the same
+  const flat = plain.join("");
+  const marks = chars.map(() => false);
+  for (const word of norm(q)
+    .split(/\s+/)
+    .filter((w) => w.length >= 2)) {
+    let at = 0;
+    const starts = plain.map((c) => ((at += c.length), at - c.length));
+    for (let i = flat.indexOf(word); i >= 0; i = flat.indexOf(word, i + 1))
+      starts.forEach((st, n) => {
+        if (st >= i && st < i + word.length) marks[n] = true;
+      });
+  }
+  const parts: { text: string; hit: boolean }[] = [];
+  chars.forEach((c, n) => {
+    const last = parts[parts.length - 1];
+    if (last && last.hit === marks[n]) last.text += c;
+    else parts.push({ text: c, hit: marks[n] });
+  });
+  return parts;
+}
 
 export default function Chats() {
   const t = useTheme();
   const tr = useT();
   const toast = useToast();
   const { chats, error, loading } = useChats();
+  // a found song's chat (its avatar colour, channel or group icon), by the song's chat id
+  const chatOf = useMemo(() => new Map((chats ?? []).map((c) => [c.id, c])), [chats]);
   const { favorites, visibleChats, setVisibleChats, chatSort, setChatSort } = useLibrary();
   const { now, playing, play, toggle } = usePlayer();
   const [found, setFound] = useState<Found | null>(null);
   const [songs, setSongs] = useState<Songs | null>(null);
+  const [moreSongs, setMoreSongs] = useState(false); // the next page of found songs is being read
+  // the end of the results was reached: read the next 50 songs (the player's queue is this list, so they join it)
+  const loadMoreSongs = () => {
+    const l = songs?.status === "done" && songs.q === query.trim() ? songs.list : undefined;
+    if (!l?.more || moreSongs) return;
+    setMoreSongs(true);
+    l.next()
+      .then(() => setSongs((s) => (s && s.list === l ? { ...s, songs: [...l.songs] } : s)))
+      .catch(() => {}) // not important enough for an error: what is there stays
+      .finally(() => setMoreSongs(false));
+  };
   const [joins, setJoins] = useState<Map<string, "joining" | "pending">>(new Map());
   const [query, setQuery] = useState("");
   const [sortOpen, setSortOpen] = useState(false);
@@ -233,10 +269,10 @@ export default function Chats() {
     // like Telegram's "72 messages found": how many Telegram counted (else what is loaded, "50+")
     const total = s.list?.total ? s.list.total.toLocaleString(tr.locale) : n;
     out.push({ t: "section", key: "s-songs", text: tr("Tìm thấy {n} bài hát", { n: total }), translated: true });
-    for (const song of s.songs.slice(0, SONG_PREVIEW)) out.push({ t: "song", key: `m${song.key}`, song });
-    out.push({ t: "all", key: "all", n });
+    for (const song of s.songs) out.push({ t: "song", key: `m${song.key}`, song });
+    if (moreSongs) out.push({ t: "note", key: "n-more", text: "Đang tải thêm…", spin: true });
     return out;
-  }, [searching, shown, found, songs, typed, tr]);
+  }, [searching, shown, found, songs, typed, tr, moreSongs]);
 
   function renderRow(row: Row) {
     switch (row.t) {
@@ -276,10 +312,12 @@ export default function Chats() {
           <Pressable
             onPressIn={() => !current && list && prefetchHead(song.key, list.message(song.id)?.media, song.size)}
             onPress={() => {
-              if (!list) return;
+              // like Telegram: the song in its own chat, scrolled to and flashed (as a tap on the playing song's name)
               haptic();
-              if (current) toggle();
-              else play(list, song);
+              router.push({
+                pathname: "/chat/[id]",
+                params: { id: song.chatId, title: song.chat ?? "", song: song.key },
+              });
             }}
             style={({ pressed }) => [
               styles.songRow,
@@ -288,57 +326,70 @@ export default function Chats() {
             accessibilityRole="button"
             accessibilityLabel={song.title || song.name}
           >
-            {current ? (
-              <LinearGradient colors={GRADIENT} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.songPlay}>
-                <Icon name={playing ? "pause-fill" : "play-fill"} size={16} color="#fff" />
-              </LinearGradient>
-            ) : (
-              <View style={[styles.songPlay, { borderWidth: 1, borderColor: tint(t.pink, 0.4) }]}>
-                <Icon name="play-fill" size={16} color={t.pink} style={{ marginLeft: 2 }} />
-              </View>
-            )}
+            {/* like Telegram's "messages found": the chat's avatar, its name and the date, then the song */}
+            <Avatar
+              name={song.chat ?? ""}
+              id={chatOf.get(song.chatId)?.id ?? song.chatId}
+              photo={chatOf.get(song.chatId)?.photo}
+            />
             <View style={{ flex: 1, minWidth: 0 }}>
-              <T numberOfLines={1} color={current ? (t.dark ? "#c4b5fd" : t.primary) : undefined}>
-                {song.title || song.name}
-                {song.title && song.performer ? <T muted>{` – ${song.performer}`}</T> : null}
-              </T>
               <View style={styles.sub}>
-                <Icon name="megaphone" size={12} color={t.textMuted} />
-                <T size={13} muted numberOfLines={1} style={{ flexShrink: 1 }}>
+                <Icon
+                  name={chatOf.get(song.chatId)?.type === "group" ? "people" : "megaphone"}
+                  size={12}
+                  color={t.text}
+                />
+                <T weight="semibold" numberOfLines={1} style={{ flexShrink: 1 }}>
                   {song.chat ?? ""}
+                </T>
+                <T size={12} muted style={{ marginLeft: "auto", paddingLeft: 8 }}>
+                  {song.date
+                    ? new Date(song.date * 1000).toLocaleDateString(tr.locale, {
+                        day: "2-digit",
+                        month: "2-digit",
+                        year: "2-digit",
+                      })
+                    : ""}
+                </T>
+              </View>
+              <View style={[styles.sub, { marginTop: 3 }]}>
+                {/* ▶: play it here, the results as the queue */}
+                <Pressable
+                  onPress={() => {
+                    if (!list) return;
+                    haptic();
+                    if (current) toggle();
+                    else play(list, song);
+                  }}
+                  hitSlop={10}
+                  accessibilityRole="button"
+                  accessibilityLabel={tr("Phát")}
+                >
+                  <Icon
+                    name={current && playing ? "pause-circle-fill" : current ? "play-circle-fill" : "play-circle"}
+                    size={15}
+                    color={t.violet}
+                  />
+                </Pressable>
+                <T size={13} muted numberOfLines={1} style={{ flexShrink: 1 }}>
+                  {markWords(
+                    `${song.title || song.name}${song.title && song.performer ? ` – ${song.performer}` : ""}`,
+                    query,
+                  ).map((part, k) =>
+                    part.hit ? (
+                      <T key={k} size={13} weight="semibold" color={t.violet}>
+                        {part.text}
+                      </T>
+                    ) : (
+                      part.text
+                    ),
+                  )}
                 </T>
               </View>
             </View>
-            {song.duration ? (
-              <T size={12.5} muted>
-                {fmtDur(song.duration)}
-              </T>
-            ) : null}
           </Pressable>
         );
       }
-      case "all":
-        return (
-          <Pressable
-            onPress={() => {
-              haptic();
-              if (songs?.list) router.push({ pathname: "/chat/[id]", params: { id: "search", q: songs.list.query } });
-            }}
-            style={({ pressed }) => [
-              styles.songRow,
-              { borderBottomColor: t.border, backgroundColor: pressed ? t.surfaceAlt : t.surface },
-            ]}
-            accessibilityRole="button"
-          >
-            <View style={styles.songPlay}>
-              <Icon name="music-note-list" size={17} color={t.violet} />
-            </View>
-            <T numberOfLines={1} color={t.violet} style={{ flex: 1 }}>
-              {tr("Xem tất cả bài hát ({n})", { n: row.n })}
-            </T>
-            <Icon name="chevron-right" size={13} color={t.textMuted} />
-          </Pressable>
-        );
     }
   }
 
@@ -354,6 +405,8 @@ export default function Chats() {
             value={query}
             onChangeText={setQuery}
             onSubmitEditing={submit}
+            placeholder={tr("Tìm kiếm kênh, bài hát, nghệ sĩ,...")}
+            placeholderTextColor={t.textMuted}
             accessibilityLabel={tr("Tìm kiếm")}
             style={[styles.searchInput, { color: t.text }]}
             returnKeyType="search"
@@ -431,6 +484,8 @@ export default function Chats() {
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="on-drag"
           extraData={[joins, now?.song.key, now?.list, playing, tr.locale]}
+          onEndReached={loadMoreSongs}
+          onEndReachedThreshold={0.6}
           renderItem={({ item }) => renderRow(item)}
         />
       ) : (
@@ -524,7 +579,7 @@ function FoundRow({
       accessibilityRole="button"
       accessibilityLabel={r.title}
     >
-      <Avatar name={r.title} id={String(r.id ?? r.invite ?? r.title)} />
+      <Avatar name={r.title} id={String(r.id ?? r.invite ?? r.title)} photo={r.id ? r.photo : null} />
       <View style={{ flex: 1, minWidth: 0 }}>
         <View style={styles.sub}>
           <T numberOfLines={1} style={{ flexShrink: 1 }}>

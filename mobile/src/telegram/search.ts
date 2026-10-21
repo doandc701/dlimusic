@@ -16,6 +16,7 @@ import {
   songSearchScan,
 } from "../../../core.js";
 import { MOCK, MOCK_SONGS } from "../mock";
+import { rememberEntity } from "./avatars";
 import { getClient } from "./client";
 import { songKey } from "./ids";
 import { entityOf, rememberChat, type Chat, type ChatType, type FileList, type Song } from "./library";
@@ -31,6 +32,7 @@ export type FoundChat = {
   verified?: boolean;
   invite?: string; // the invite link's hash
   request?: boolean; // an admin must approve
+  photo?: string; // id of its Telegram picture (core.js photoId)
 };
 
 /** What the search box asks Telegram: 2–64 characters (core.js searchQuery allows 1–64). */
@@ -47,7 +49,7 @@ export { inviteHash };
 export async function searchGlobal(q: string): Promise<FoundChat[]> {
   if (MOCK) return [];
   const client = await getClient();
-  const { chats } = (await searchChats(client, q)) as { chats: FoundChat[] };
+  const { chats } = (await searchChats(client, q, { onEntity: rememberEntity })) as { chats: FoundChat[] };
   return chats;
 }
 

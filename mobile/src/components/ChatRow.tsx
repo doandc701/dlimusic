@@ -32,7 +32,7 @@ export function ChatRow({ chat, onPress, left }: { chat: Chat; onPress: () => vo
       accessibilityLabel={chat.title}
     >
       {left}
-      <Avatar name={chat.title} id={chat.id} />
+      <Avatar name={chat.title} id={chat.id} photo={chat.photo} />
       <View style={{ flex: 1, minWidth: 0 }}>
         <T numberOfLines={1}>{chat.title}</T>
         <View style={styles.sub}>

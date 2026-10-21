@@ -7,6 +7,7 @@ export default {
   label: "日本語", // in the language list, always in its own language
   locale: "ja-JP", // dates and times
   dict: {
+    "Tìm kiếm kênh, bài hát, nghệ sĩ,...": "チャンネル・曲・アーティストを検索…",
     // chat screen
     "Ngày đăng lên kênh": "チャンネルへの投稿日時",
     "Đăng nhập DLiMusic": "DLiMusic にログイン",
@@ -244,7 +245,6 @@ export default {
     "Bài hát": "曲",
     "Không tìm thấy bài hát": "曲が見つかりませんでした",
     "Tìm thấy {n} bài hát": "{n} 曲が見つかりました",
-    "Xem tất cả bài hát ({n})": "すべての曲を見る（{n}）",
     "Tìm kiếm": "検索",
     "Kênh riêng tư: hãy bấm Tham gia để xem.": "非公開のチャットです。「参加」を押すと見られます。",
     "Đã gửi yêu cầu tham gia {title}, chờ quản trị viên duyệt.":

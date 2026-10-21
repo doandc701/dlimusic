@@ -7,6 +7,7 @@ export default {
   label: "English", // in the language list, always in its own language
   locale: "en-US", // dates and times
   dict: {
+    "Tìm kiếm kênh, bài hát, nghệ sĩ,...": "Search channels, songs, artists…",
     // chat screen
     "Ngày đăng lên kênh": "Posted in the channel",
     "Đăng nhập DLiMusic": "Sign in to DLiMusic",
@@ -243,7 +244,6 @@ export default {
     "Bài hát": "Songs",
     "Không tìm thấy bài hát": "No songs found",
     "Tìm thấy {n} bài hát": "{n} {n|song|songs} found",
-    "Xem tất cả bài hát ({n})": "See all songs ({n})",
     "Tìm kiếm": "Search",
     "Kênh riêng tư: hãy bấm Tham gia để xem.": "Private chat: press Join to see it.",
     "Đã gửi yêu cầu tham gia {title}, chờ quản trị viên duyệt.":

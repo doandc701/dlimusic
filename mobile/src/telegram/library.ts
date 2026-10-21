@@ -2,13 +2,21 @@
 // readPage — pages of 500 files, newest first), and the favourites gathered from every chat.
 import { Api } from "telegram";
 
-import { FILTERS, PAGE_SIZE, dialogType, entityTitle, fileInfo, mediaKind, readPage } from "../../../core.js";
+import { FILTERS, PAGE_SIZE, dialogType, entityTitle, fileInfo, mediaKind, photoId, readPage } from "../../../core.js";
+import { rememberDialogs } from "./avatars";
 import { songKey } from "./ids";
 import { MOCK, MOCK_CHATS, MOCK_SONGS } from "../mock";
 import { getClient } from "./client";
 
 export type ChatType = "channel" | "group" | "user";
-export type Chat = { id: string; rawId: string; title: string; type: ChatType; username: string | null };
+export type Chat = {
+  id: string;
+  rawId: string;
+  title: string;
+  type: ChatType;
+  username: string | null;
+  photo?: string | null; // id of the chat's Telegram picture (core.js photoId), null without one
+};
 export type FileKind = "photo" | "image" | "video" | "audio" | "voice" | "document";
 export type FileType = keyof typeof FILTERS; // all | music | video | photo | document | voice
 export type Song = {
@@ -45,6 +53,7 @@ export async function listChats(): Promise<Chat[]> {
   if (MOCK) return (chatsCache = MOCK_CHATS);
   const client = await getClient();
   const dialogs = await client.getDialogs({});
+  rememberDialogs(dialogs);
   chatsCache = dialogs.map((d) => {
     const id = String(d.id);
     if (d.entity) entities.set(id, d.entity);
@@ -54,6 +63,7 @@ export async function listChats(): Promise<Chat[]> {
       title: d.title || entityTitle(d.entity),
       type: dialogType(d),
       username: (d.entity as { username?: string } | undefined)?.username ?? null,
+      photo: photoId(d.entity),
     };
   });
   return chatsCache;

@@ -5,6 +5,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import type { ReactNode } from "react";
 import {
   ActivityIndicator,
+  Image,
   Pressable,
   StyleSheet,
   Text,
@@ -14,6 +15,7 @@ import {
   type ViewStyle,
 } from "react-native";
 
+import { avatarFailed, useAvatar } from "../telegram/avatars";
 import { FONT, GRADIENT, RADIUS, tint, useTheme } from "../theme";
 import { Icon, type IconName } from "./Icon";
 
@@ -265,17 +267,21 @@ export const colorFor = (id: string) =>
   COLORS[Math.abs([...id].reduce((a, c) => a * 31 + c.charCodeAt(0), 7)) % COLORS.length];
 export const initialOf = (name: string) => [...name.replace(/[^\p{L}\p{N}]/gu, "")][0]?.toUpperCase() || "?";
 
+/** The coloured letter circle; with the chat's Telegram picture over it once known (`photo` = its id). */
 export function Avatar({
   name,
   id,
   size = 36,
+  photo,
   children,
 }: {
   name: string;
   id: string;
   size?: number;
+  photo?: string | null;
   children?: ReactNode;
 }) {
+  const uri = useAvatar(id, children ? null : photo);
   return (
     <View
       style={{
@@ -291,6 +297,16 @@ export function Avatar({
         <Text allowFontScaling={false} style={{ color: "#fff", fontFamily: FONT.semibold, fontSize: size * 0.42 }}>
           {initialOf(name)}
         </Text>
+      )}
+      {uri && (
+        <Image
+          source={{ uri }}
+          style={[StyleSheet.absoluteFill, { borderRadius: size / 2 }]}
+          resizeMode="cover"
+          fadeDuration={0}
+          accessibilityIgnoresInvertColors
+          onError={() => photo && avatarFailed(id, photo)}
+        />
       )}
     </View>
   );

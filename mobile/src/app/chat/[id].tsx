@@ -201,12 +201,36 @@ function ChatFiles() {
     return out;
   }, [songs, fav, isSearch, scope, type, query, sort, isFavorite]);
 
-  // opened from the player (tap on the song's name): bring the playing song into view
+  // opened on a song (a tap on the playing song's name, or on a song found by the search): read on until it is
+  // there (a few pages at most), bring it into view and flash it
+  const [flash, setFlash] = useState<string | null>(null);
+  const sought = useRef({ key: "", pages: 0, done: false });
   useEffect(() => {
-    if (!params.song || !shown.length) return;
+    if (!params.song) return;
+    if (sought.current.key !== params.song) sought.current = { key: params.song, pages: 0, done: false };
+    if (sought.current.done) return;
     const i = shown.findIndex((s) => s.key === params.song);
-    if (i >= 0) setTimeout(() => listRef.current?.scrollToIndex({ index: i, viewPosition: 0.5, animated: false }), 50);
-  }, [params.song, shown]);
+    if (i >= 0) {
+      sought.current.done = true;
+      const key = params.song;
+      setTimeout(() => {
+        listRef.current?.scrollToIndex({ index: i, viewPosition: 0.5, animated: false });
+        setFlash(key);
+      }, 50);
+      return;
+    }
+    if (!fav && hasMore && !loading && songs.length && sought.current.pages < 20) {
+      sought.current.pages++;
+      read(list);
+    }
+    // read() is this screen's own loader, the same on every render
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params.song, shown, hasMore, loading]);
+  useEffect(() => {
+    if (!flash) return;
+    const timer = setTimeout(() => setFlash(null), 1600);
+    return () => clearTimeout(timer);
+  }, [flash]);
 
   const filters = (type !== "all" ? 1 : 0) + (sort !== "default" ? 1 : 0);
   const sub =
@@ -385,7 +409,7 @@ function ChatFiles() {
         ref={listRef}
         data={shown}
         keyExtractor={(s) => s.key}
-        extraData={[selected, now?.song.key, playing, favorites, tr.locale]}
+        extraData={[selected, now?.song.key, playing, favorites, tr.locale, flash]}
         onEndReached={() => {
           if (fav || !hasMore || loading || endFor.current === songs.length) return;
           endFor.current = songs.length;
@@ -478,7 +502,8 @@ function ChatFiles() {
                 styles.row,
                 {
                   borderBottomColor: t.border,
-                  backgroundColor: sel ? t.selected : pressed ? t.bg : t.surface,
+                  backgroundColor:
+                    flash === item.key ? tint(t.primary, 0.18) : sel ? t.selected : pressed ? t.bg : t.surface,
                 },
               ]}
             >

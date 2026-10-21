@@ -17,8 +17,15 @@ export const MOCK_ME = {
 };
 
 export const MOCK_CHATS: Chat[] = [
-  { id: "-1001", rawId: "1001", title: "mixtape house lak 420", type: "channel", username: "nhacvuive" },
-  { id: "-1002", rawId: "1002", title: "Nhạc Remix | Vinahouse | DJ", type: "channel", username: "VNMusicRemix" },
+  { id: "-1001", rawId: "1001", title: "mixtape house lak 420", type: "channel", username: "nhacvuive", photo: "11" },
+  {
+    id: "-1002",
+    rawId: "1002",
+    title: "Nhạc Remix | Vinahouse | DJ",
+    type: "channel",
+    username: "VNMusicRemix",
+    photo: "22",
+  },
   {
     id: "-1003",
     rawId: "1003",
@@ -29,8 +36,18 @@ export const MOCK_CHATS: Chat[] = [
   { id: "-1004", rawId: "1004", title: "Nhạc Việt Nam Lossless 🎶", type: "channel", username: "nhacvietnamlossless" },
   { id: "-1005", rawId: "1005", title: "KÊNH NHẠC HAY PHIÊU :))", type: "channel", username: "NHACCUATUI23T" },
   { id: "-1006", rawId: "1006", title: "Nhóm bạn thân", type: "group", username: null },
-  { id: "777", rawId: "777", title: "Tuấn Nguyễn", type: "user", username: "tuannt" },
+  { id: "777", rawId: "777", title: "Tuấn Nguyễn", type: "user", username: "tuannt", photo: "77" }, // no picture loads
 ];
+
+/** Chat pictures of the sample chats (gradient circles), as Telegram's would come. */
+const mockPhoto = (a: string, b: string) =>
+  `data:image/svg+xml;base64,${btoa(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="160" height="160"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${a}"/><stop offset="1" stop-color="${b}"/></linearGradient></defs><rect width="160" height="160" fill="url(#g)"/><circle cx="80" cy="64" r="30" fill="#fff" opacity=".85"/><rect x="34" y="104" width="92" height="40" rx="20" fill="#fff" opacity=".85"/></svg>`,
+  )}`;
+export const MOCK_PHOTOS: Record<string, string> = {
+  "-1001": mockPhoto("#0ea5e9", "#22c55e"),
+  "-1002": mockPhoto("#f43f5e", "#a855f7"),
+};
 
 const song = (id: number, name: string, duration: number, size: number, extra: Partial<Song> = {}): Song => ({
   id,

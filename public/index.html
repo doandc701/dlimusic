@@ -33,6 +33,16 @@
     <meta name="twitter:title" content="DLiMusic · Chạm là nghe, nhấn là tải" />
     <meta name="twitter:description" content="Nghe thử và tải nhạc từ các kênh của bạn ngay trên trình duyệt." />
     <meta name="twitter:image" content="https://dlimusic.vercel.app/img/og-image.png" />
+    <!-- WebSite: the name Google shows above the result (instead of the domain's "Vercel") -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "WebSite",
+        "name": "DLiMusic",
+        "alternateName": ["DLi Music", "DLiMusic · Chạm là nghe, nhấn là tải"],
+        "url": "https://dlimusic.vercel.app/"
+      }
+    </script>
     <script type="application/ld+json">
       {
         "@context": "https://schema.org",
@@ -48,7 +58,9 @@
         "offers": { "@type": "Offer", "price": "0", "priceCurrency": "VND" }
       }
     </script>
-    <link rel="icon" type="image/png" sizes="64x64" href="img/logo-64.png" />
+    <!-- icons: Google's results need a square multiple of 48px (48 / 96 / 192), /favicon.ico for the rest -->
+    <link rel="icon" href="/favicon.ico" sizes="48x48" />
+    <link rel="icon" type="image/png" sizes="96x96" href="img/favicon-96.png" />
     <link rel="icon" type="image/png" sizes="192x192" href="img/logo-192.png" />
     <link rel="apple-touch-icon" href="img/apple-touch-icon.png" />
     <script src="js/theme.js"></script>

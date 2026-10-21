@@ -114,7 +114,7 @@ for (const dir of ["css", "js", "img"])
     filter: (src) => !src.endsWith(".md"), // notes for whoever edits the files (js/lang/README.md)
   });
 // for search engines: what to crawl, and the page's address
-for (const file of ["robots.txt", "sitemap.xml"])
+for (const file of ["robots.txt", "sitemap.xml", "favicon.ico"])
   fs.copyFileSync(path.join(ROOT, "public", file), path.join(OUT, file));
 
 const size = (f) => (fs.statSync(path.join(OUT, f)).size / 1024).toFixed(0) + " KB";

@@ -66,6 +66,8 @@ const PUBLIC_ASSETS = {
   "/js/ui.js": "text/javascript; charset=utf-8",
   "/img/logo-64.png": "image/png",
   "/img/logo-192.png": "image/png",
+  "/img/favicon-96.png": "image/png",
+  "/favicon.ico": "image/x-icon",
   "/img/apple-touch-icon.png": "image/png",
   "/img/cat-headphones.webp": "image/webp",
   "/img/cat-dance-frames.webp": "image/webp",

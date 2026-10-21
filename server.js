@@ -223,7 +223,13 @@ function consumeOnceCode(code) {
 function readCookie(req, name) {
   for (const part of (req.headers.cookie || "").split(";")) {
     const i = part.indexOf("=");
-    if (i > 0 && part.slice(0, i).trim() === name) return decodeURIComponent(part.slice(i + 1).trim());
+    if (i > 0 && part.slice(0, i).trim() === name) {
+      try {
+        return decodeURIComponent(part.slice(i + 1).trim());
+      } catch {
+        return null; // broken %-escape (any site on 127.0.0.1 can set cookies here): not our token
+      }
+    }
   }
   return null;
 }
@@ -239,11 +245,14 @@ const BASE_HEADERS = {
   "X-Robots-Tag": "noindex, nofollow", // a private copy on this computer: never in search results
 };
 
+/** The one script loaded from the CDN (pinned, with SRI in index.html); no other CDN file may run. */
+const CDN_SCRIPT = "https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js";
+
 /** CSP for the page: only our own script files (public/js) and the pinned CDN files may run. */
 function pageCsp() {
   return [
     "default-src 'none'",
-    "script-src 'self' https://cdn.jsdelivr.net",
+    `script-src 'self' ${CDN_SCRIPT}`,
     "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net",
     "font-src https://cdn.jsdelivr.net",
     "img-src 'self' data: blob: https://cdn.jsdelivr.net",

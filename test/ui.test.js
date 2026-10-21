@@ -128,3 +128,57 @@ test("i18n: every sentence ui.js passes to t() has a translation", () => {
     [],
   );
 });
+
+test("service worker: a file is only pulled from the page that asked (no link from another site)", async () => {
+  const handlers = {};
+  const opened = [];
+  const port = {
+    postMessage(m, [reply]) {
+      opened.push(m);
+      reply.postMessage({ type: "error", status: 404, message: "test" });
+      setTimeout(() => reply.close(), 0);
+    },
+  };
+  const page = { id: "page-1", postMessage() {} };
+  const self = {
+    location: { origin: "https://dli.example" },
+    addEventListener: (type, fn) => (handlers[type] = fn),
+    clients: { matchAll: async () => [page], claim: async () => {} },
+    skipWaiting() {},
+  };
+  const code = fs.readFileSync(path.join(ROOT, "web/sw.js"), "utf8");
+  vm.runInNewContext(code, { self, URL, Response, ReadableStream, MessageChannel, setTimeout, clearTimeout });
+  handlers.message({ data: { type: "provider" }, ports: [port], source: page });
+
+  const fetchFor = (url, clientId) => {
+    let answer;
+    handlers.fetch({
+      request: { url, headers: { get: () => null } },
+      clientId,
+      respondWith: (p) => (answer = p),
+    });
+    return answer;
+  };
+  // another site opens a download / media link: no client id, no (or a wrong) page id
+  for (const url of [
+    "https://dli.example/__dl?key=k&id=1&job=j",
+    "https://dli.example/__dl?key=k&id=1&job=j&c=other",
+    "https://dli.example/api/media?key=k&id=1",
+  ]) {
+    const res = await fetchFor(url, "");
+    assert.equal(res.status, 503, url);
+  }
+  assert.equal(opened.length, 0, "the page was never asked for a file");
+  // the page's own hidden frame (its id in c) and its own <audio> (its client id) are served
+  assert.equal((await fetchFor("https://dli.example/__dl?key=k&id=1&job=j&c=page-1", "")).status, 404);
+  assert.equal((await fetchFor("https://dli.example/api/media?key=k&id=1", "page-1")).status, 404);
+  assert.deepEqual(
+    opened.map((m) => [m.type, m.download]),
+    [
+      ["open", true],
+      ["open", false],
+    ],
+  );
+  // other origins are never answered by the worker
+  assert.equal(fetchFor("https://evil.example/api/media?key=k&id=1", "page-1"), undefined);
+});

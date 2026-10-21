@@ -170,14 +170,22 @@ export function createCloudApi({ env, verify }) {
 
 /** JSON body: Vercel parses it into req.body; plain Node streams it. */
 async function readBody(req) {
-  if (req.body !== undefined) {
-    if (typeof req.body === "object" && req.body !== null && !Buffer.isBuffer(req.body)) return req.body;
-    if (String(req.body).length > MAX_BODY) throw fail(413, "Dữ liệu quá lớn");
+  let parsed;
+  try {
+    parsed = req.body; // Vercel parses it on first access and throws on broken JSON
+  } catch {
+    throw fail(400, "JSON không hợp lệ");
+  }
+  if (parsed !== undefined) {
+    if (typeof parsed === "object" && parsed !== null && !Buffer.isBuffer(parsed)) return parsed;
+    if (parsed === null) return {};
+    if (String(parsed).length > MAX_BODY) throw fail(413, "Dữ liệu quá lớn");
     try {
-      return JSON.parse(String(req.body) || "{}");
+      parsed = JSON.parse(String(parsed) || "{}");
     } catch {
       throw fail(400, "JSON không hợp lệ");
     }
+    return parsed && typeof parsed === "object" ? parsed : {};
   }
   let size = 0;
   const chunks = [];
@@ -187,8 +195,8 @@ async function readBody(req) {
     chunks.push(chunk);
   }
   try {
-    const parsed = JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
-    return parsed && typeof parsed === "object" ? parsed : {};
+    const json = JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
+    return json && typeof json === "object" ? json : {};
   } catch {
     throw fail(400, "JSON không hợp lệ");
   }
@@ -204,12 +212,22 @@ const DC_IPV4 = {
   5: "91.108.56.130",
 };
 
-/** The session with a TCP address for its data centre (same auth key), usable from Node. */
+// Telegram's own IPv4 ranges (149.154.160.0/20, 91.108.4.0/22 … 91.108.20.0/22, 91.108.56.0/22).
+const TELEGRAM_IPV4 = /^(149\.154\.(16\d|17[0-5])|91\.108\.([4-9]|1\d|2[0-3]|5[6-9]))\.\d{1,3}$/;
+
+/**
+ * The session with a TCP address for its data centre (same auth key), usable from Node. The address in a
+ * session is chosen by whoever sent it: only Telegram's own addresses and ports are ever dialled, so the
+ * server cannot be pointed at another host (SSRF).
+ */
 export async function tcpSession(session) {
   const { StringSession } = await import("telegram/sessions/index.js");
   const stored = new StringSession(session);
   await stored.load();
-  if (!/^[\d.:]+$/.test(stored.serverAddress || "") && DC_IPV4[stored.dcId]) {
+  if (!DC_IPV4[stored.dcId]) throw new Error("unknown Telegram data centre");
+  if (TELEGRAM_IPV4.test(stored.serverAddress || "")) {
+    if (stored.port !== 443 && stored.port !== 80) stored.setDC(stored.dcId, stored.serverAddress, 443);
+  } else {
     stored.setDC(stored.dcId, DC_IPV4[stored.dcId], 443);
   }
   return stored;

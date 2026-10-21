@@ -88,6 +88,35 @@ describe("MongoDB storage", () => {
       assert.equal((await tcpSession(node.save())).serverAddress, "91.108.56.102", "an IP is left alone");
     });
 
+    test("a session never points the server at another host (SSRF): only Telegram's addresses are dialled", async () => {
+      const { StringSession } = await import("telegram/sessions/index.js");
+      const { AuthKey } = await import("telegram/crypto/AuthKey.js");
+      const key = new AuthKey();
+      await key.setKey(Buffer.alloc(256, 7));
+      const made = (dc, host, port) => {
+        const s = new StringSession("");
+        s.setDC(dc, host, port);
+        s.setAuthKey(key);
+        return s.save();
+      };
+      for (const [host, port] of [
+        ["127.0.0.1", 27017],
+        ["169.254.169.254", 80],
+        ["10.0.0.1", 443],
+        ["192.168.1.1", 22],
+        ["internal.example.com", 443],
+        ["149.154.176.1", 443], // just outside 149.154.160.0/20
+      ]) {
+        const tcp = await tcpSession(made(2, host, port));
+        assert.deepEqual([tcp.serverAddress, tcp.port], ["149.154.167.51", 443], `${host}:${port} replaced`);
+      }
+      const odd = await tcpSession(made(4, "149.154.167.92", 6379));
+      assert.deepEqual([odd.serverAddress, odd.port], ["149.154.167.92", 443], "only ports 80 / 443");
+      assert.equal((await tcpSession(made(2, "149.154.167.40", 80))).port, 80);
+      await assert.rejects(tcpSession(made(99, "attacker.example", 443)), /unknown Telegram data centre/);
+      await assert.rejects(tcpSession(made(0, "127.0.0.1", 80)), /unknown Telegram data centre/);
+    });
+
     test("account data is validated (null = remove, undefined = rejected)", () => {
       assert.deepEqual(ACCOUNT_DATA.settings({ subfolderPerChat: 0, downloadDir: "Nhạc", extra: 1 }), {
         subfolderPerChat: false,
@@ -424,6 +453,28 @@ describe("MongoDB storage", () => {
         (await call(h, "POST", "login", { raw: JSON.stringify({ session: "x".repeat(3 * 1024 * 1024) }) })).status,
         413,
       );
+      assert.equal((await call(h, "POST", "login", { raw: "null" })).status, 400, "a JSON null body is not a crash");
+      assert.equal((await call(h, "POST", "login", { raw: "[1]" })).status, 400);
+      // Vercel parses the body itself: req.body is a getter that throws on broken JSON, or null for "null"
+      const vercel = async (getBody) => {
+        const req = { method: "POST", headers: { "content-type": "application/json" } };
+        Object.defineProperty(req, "body", { get: getBody });
+        const res = {
+          setHeader() {},
+          end(b) {
+            this.body = b;
+          },
+        };
+        await h(req, res, "login");
+        return res.statusCode;
+      };
+      assert.equal(
+        await vercel(() => {
+          throw Object.assign(new Error("Invalid JSON"), { statusCode: 400 });
+        }),
+        400,
+      );
+      assert.equal(await vercel(() => null), 400);
       assert.equal((await call(h, "GET", "nope")).status, 404);
       assert.equal((await call(h, "DELETE", "data")).status, 404);
       const down = createCloudApi({

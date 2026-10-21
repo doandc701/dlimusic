@@ -260,6 +260,12 @@ describe("security hardening (R1-R7)", () => {
       );
       assert.equal((await plain(`/?token=${encodeURIComponent(bad)}`, { redirect: "manual" })).status, 401, bad);
     }
+    // a broken %-escape in the cookie is answered (401), not left hanging
+    const broken = await plain("/api/status", {
+      headers: { Cookie: "tdl_token=%E0%A4%A" },
+      signal: AbortSignal.timeout(5000),
+    });
+    assert.equal(broken.status, 401);
   });
 
   test("R3: the link with the right token sets an HttpOnly SameSite=Strict cookie and drops the token from the URL", async () => {
@@ -300,7 +306,11 @@ describe("security hardening (R1-R7)", () => {
     const csp = res.headers.get("content-security-policy");
     assert.match(csp, /default-src 'none'/);
     assert.match(csp, /frame-ancestors 'none'/);
-    assert.match(csp, /script-src 'self' https:\/\/cdn\.jsdelivr\.net(;|$)/);
+    assert.match(
+      csp,
+      /script-src 'self' https:\/\/cdn\.jsdelivr\.net\/npm\/bootstrap@[\d.]+\/dist\/js\/bootstrap\.bundle\.min\.js(;|$)/,
+      "only the pinned CDN script, not every file on jsdelivr",
+    );
     assert.ok(!/script-src[^;]*'unsafe-inline'/.test(csp), "no unsafe-inline for scripts");
     assert.equal(res.headers.get("x-frame-options"), "DENY");
     assert.equal(res.headers.get("x-content-type-options"), "nosniff");
@@ -309,6 +319,18 @@ describe("security hardening (R1-R7)", () => {
     assert.equal(res.headers.get("x-robots-tag"), "noindex, nofollow", "the local copy stays out of search results");
     const html = await res.text();
     assert.ok(!/<script>/.test(html), "no inline <script> on the page");
+    // every CDN script of the page is allowed by name, here and on Vercel (a version bump must update both)
+    const vercelCsp = JSON.parse(fs.readFileSync(path.join(ROOT, "vercel.json"), "utf8"))
+      .headers.flatMap((h) => h.headers)
+      .find((h) => h.key === "Content-Security-Policy").value;
+    const scriptSrc = (c) => /script-src ([^;]*)/.exec(c)[1].split(" ");
+    const cdn = [...html.matchAll(/<script[^>]*\ssrc="(https:[^"]+)"/g)].map((m) => m[1]);
+    assert.ok(cdn.length > 0);
+    for (const src of cdn) {
+      assert.ok(scriptSrc(csp).includes(src), `server.js CSP allows ${src}`);
+      assert.ok(scriptSrc(vercelCsp).includes(src), `vercel.json CSP allows ${src}`);
+    }
+    assert.deepEqual(scriptSrc(vercelCsp), scriptSrc(csp), "same scripts allowed on Vercel and locally");
   });
 
   test("the page's css/js files are served (with a token), nothing else from public/", async () => {

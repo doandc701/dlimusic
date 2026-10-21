@@ -26,10 +26,13 @@ self.addEventListener("message", (event) => {
 });
 
 async function providerFor(clientId) {
+  if (!clientId) return null;
   const pages = await self.clients.matchAll({ type: "window" });
   const live = new Set(pages.map((c) => c.id));
   for (const id of providers.keys()) if (!live.has(id)) providers.delete(id);
-  const pick = () => (clientId && providers.get(clientId)) || [...providers.values()].pop() || null;
+  // Only the page that asked: a link opened from another site (a navigation, no client id) must not get a
+  // file from the account of whichever DLiMusic tab is open. The hidden download frame passes its page's id.
+  const pick = () => (clientId && providers.get(clientId)) || null;
   if (pick()) return pick();
   // The worker was restarted and forgot the pages: ask them to register again.
   for (const page of pages) page.postMessage({ type: "need-provider" });

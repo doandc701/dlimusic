@@ -191,7 +191,6 @@
     // start screen, list header and toolbar
     "Mèo đeo tai nghe đang thưởng thức nhạc": "戴着耳机享受音乐的猫",
     "Hai chú mèo con đang nhảy theo nhạc": "两只随音乐起舞的小猫",
-    "Chọn một kênh bên trái để xem danh sách file": "在左侧选择一个频道查看文件列表",
     "Chạm vào mèo để chọn kênh": "点一下猫咪选择频道",
     "Danh sách kênh": "频道列表",
     "Bộ lọc & sắp xếp": "筛选和排序",

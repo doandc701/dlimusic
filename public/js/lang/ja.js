@@ -196,7 +196,6 @@
     // start screen, list header and toolbar
     "Mèo đeo tai nghe đang thưởng thức nhạc": "ヘッドホンで音楽を楽しむ猫",
     "Hai chú mèo con đang nhảy theo nhạc": "音楽に合わせて踊る 2 匹の子猫",
-    "Chọn một kênh bên trái để xem danh sách file": "左のチャンネルを選ぶとファイル一覧が表示されます",
     "Chạm vào mèo để chọn kênh": "猫をタップしてチャンネルを選ぶ",
     "Danh sách kênh": "チャンネル一覧",
     "Bộ lọc & sắp xếp": "絞り込みと並べ替え",

@@ -377,9 +377,6 @@ body {
     cursor: pointer;
     -webkit-tap-highlight-color: transparent;
   }
-  .hint-desk {
-    display: none;
-  }
   .hint-phone {
     display: inline;
   }

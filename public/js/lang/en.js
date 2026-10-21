@@ -196,7 +196,6 @@
     // start screen, list header and toolbar
     "Mèo đeo tai nghe đang thưởng thức nhạc": "A cat in headphones enjoying music",
     "Hai chú mèo con đang nhảy theo nhạc": "Two kittens dancing to the music",
-    "Chọn một kênh bên trái để xem danh sách file": "Choose a channel on the left to see its files",
     "Chạm vào mèo để chọn kênh": "Tap the cat to choose a channel",
     "Danh sách kênh": "Channel list",
     "Bộ lọc & sắp xếp": "Filter & sort",

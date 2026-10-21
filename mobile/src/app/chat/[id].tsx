@@ -1,5 +1,6 @@
-// A chat's files (or "Bài hát yêu thích" for id "fav"), like the web's list on a phone: ‹ title "N file", Lọc,
-// reload; search; (favourites: which chat); "Tên bài" header with select-all; rows with a checkbox, ▶, name, file
+// A chat's files (or "Bài hát yêu thích" for id "fav", or the songs of a search "Tìm: “…”" for id "search" with
+// `q`), like the web's list on a phone: ‹ title, "2.402 người theo dõi", "N file", Lọc, reload; search;
+// (favourites: which chat); "Tên bài" header with select-all; rows with a checkbox, ▶, name, file
 // name, size · duration, ♡; "Tải thêm 500 file". Tap a song to play it. "Lọc" opens type / sort.
 import { FlashList, type FlashListRef } from "@shopify/flash-list";
 import { LinearGradient } from "expo-linear-gradient";
@@ -7,7 +8,7 @@ import { router, useLocalSearchParams } from "expo-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, FlatList, Pressable, StyleSheet, TextInput, View } from "react-native";
 
-import { PAGE_SIZE, displayName } from "../../../../core.js";
+import { PAGE_SIZE, SONG_PAGE, displayName } from "../../../../core.js";
 import { DownloadBar } from "@/components/DownloadBar";
 import { Icon } from "@/components/Icon";
 import { norm } from "@/components/RecentPanel";
@@ -19,7 +20,9 @@ import { useT } from "@/i18n";
 import { playable, usePlayer } from "@/player/PlayerProvider";
 import { prefetchHead, warmUp } from "@/player/prefetch";
 import { useLibrary } from "@/store/LibraryProvider";
+import { MOCK } from "@/mock";
 import { FavoritesScan, SongScan, chatById, type FileList, type FileType, type Song } from "@/telegram/library";
+import { chatMembers, knownMembers, songSearch } from "@/telegram/search";
 import { FONT, GRADIENT, tint, useTheme } from "@/theme";
 
 // labels in Vietnamese, translated where shown
@@ -71,12 +74,24 @@ const KIND_OF: Record<FileType, (s: Song) => boolean> = {
   voice: (s) => s.kind === "voice",
 };
 
-export default function ChatFiles() {
+type Members = { chatId: string; members: number | null; type: string };
+
+/** One screen per list: another chat (or search) opened in its place starts afresh, nothing of the last one shown. */
+export default function ChatScreen() {
+  const { id, q } = useLocalSearchParams<{ id: string; q?: string }>();
+  return <ChatFiles key={`${id}|${q ?? ""}`} />;
+}
+
+function ChatFiles() {
   const t = useTheme();
   const tr = useT();
   const toast = useToast();
-  const params = useLocalSearchParams<{ id: string; title?: string; song?: string }>();
+  const params = useLocalSearchParams<{ id: string; title?: string; song?: string; q?: string }>();
   const fav = params.id === "fav";
+  const search = params.id === "search" ? (params.q ?? "") : null; // the words of a song search
+  const isSearch = search !== null;
+  // a chat of the account (or one found by the search): its subscribers / members under the title
+  const plainChat = !fav && !isSearch;
   const { favorites, isFavorite, toggleFavorite } = useLibrary();
   const { now, playing, play, toggle } = usePlayer();
 
@@ -89,9 +104,13 @@ export default function ChatFiles() {
   const [scopeOpen, setScopeOpen] = useState(false);
   const [pick, setPick] = useState<"type" | "sort" | null>(null);
 
-  const [list, setList] = useState<FileList>(() =>
-    fav ? new FavoritesScan(favorites) : new SongScan(params.id, "all", params.title),
-  );
+  const newList = (nextType: FileType = "all", fresh = false): FileList =>
+    fav
+      ? new FavoritesScan(favorites)
+      : isSearch
+        ? songSearch(search, { fresh })
+        : new SongScan(params.id, nextType, params.title);
+  const [list, setList] = useState<FileList>(() => newList());
   const [songs, setSongs] = useState<Song[]>([]);
   const [hasMore, setHasMore] = useState(true);
   const [count, setCount] = useState(0);
@@ -102,7 +121,36 @@ export default function ChatFiles() {
   // length, or a short page that says there is more would read again and again
   const endFor = useRef(-1);
 
-  const title = fav ? tr("Bài hát yêu thích") : (params.title ?? chatById(params.id)?.title ?? tr("Kênh"));
+  const title = fav
+    ? tr("Bài hát yêu thích")
+    : isSearch
+      ? tr("Tìm: “{q}”", { q: search })
+      : (params.title ?? chatById(params.id)?.title ?? tr("Kênh"));
+
+  // "2.402 người theo dõi" / "35 thành viên": known (asked < 10 min ago) at once, else asked beside the songs;
+  // an answer for another chat is never shown, an error leaves the line empty
+  const chatType = plainChat ? chatById(params.id)?.type : undefined;
+  const [members, setMembers] = useState<Members | null>(() => {
+    const m = plainChat ? knownMembers(params.id) : undefined;
+    return m ? { chatId: params.id, ...m } : null;
+  });
+  useEffect(() => {
+    if (!plainChat || chatType === "user" || MOCK) return;
+    let live = true;
+    const chatId = params.id;
+    chatMembers(chatId)
+      .then((m) => live && setMembers({ chatId, ...m }))
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [plainChat, chatType, params.id]);
+  const membersText =
+    members?.chatId === params.id && members.members && members.type !== "user" && members.type !== "bot"
+      ? tr(members.type === "channel" ? "{n} người theo dõi" : "{n} thành viên", {
+          n: members.members.toLocaleString(tr.locale),
+        })
+      : "";
 
   function read(l: FileList) {
     setLoading(true);
@@ -116,9 +164,9 @@ export default function ChatFiles() {
       .finally(() => setLoading(false));
   }
   useEffect(() => {
-    // the first page; more with "Tải thêm 500 file" or when the list nears its end
-    list
-      .next((n) => setCount(n))
+    // the first page; more with "Tải thêm 500 file" or when the list nears its end. A song search opened from
+    // the chat list already has its first page: shown as it is, not asked again
+    (isSearch && list.songs.length ? Promise.resolve() : list.next((n) => setCount(n)))
       .then(() => {
         setSongs([...list.songs]);
         setHasMore(list.more);
@@ -127,6 +175,8 @@ export default function ChatFiles() {
       })
       .catch((err) => setError(String((err as Error)?.message ?? err)))
       .finally(() => setLoading(false));
+    // (isSearch never changes on this screen: it is drawn again with a new key for another list)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [list]);
 
   // a new type, or the reload button: read the chat again
@@ -135,7 +185,7 @@ export default function ChatFiles() {
     setCount(0);
     setSongs([]);
     setLoading(true);
-    setList(fav ? new FavoritesScan(favorites) : new SongScan(params.id, nextType, params.title));
+    setList(newList(nextType, true));
   };
 
   // the files shown: favourites still hearted, chat, type, search, sort
@@ -144,12 +194,12 @@ export default function ChatFiles() {
     if (fav) {
       out = out.filter((s) => isFavorite(s.key) && KIND_OF[type](s));
       if (scope !== "all") out = out.filter((s) => s.key.split("|")[0] === scope);
-    }
+    } else if (isSearch && type !== "all") out = out.filter(KIND_OF[type]); // read once, for every type
     const q = norm(query.trim());
     if (q) out = out.filter((s) => norm(`${s.title ?? ""} ${s.performer ?? ""} ${s.name} ${s.chat ?? ""}`).includes(q));
     if (sort !== "default") out = [...out].sort(SORT_FN[sort]);
     return out;
-  }, [songs, fav, scope, type, query, sort, isFavorite]);
+  }, [songs, fav, isSearch, scope, type, query, sort, isFavorite]);
 
   // opened from the player (tap on the song's name): bring the playing song into view
   useEffect(() => {
@@ -205,8 +255,13 @@ export default function ChatFiles() {
           <T weight="semibold" size={20} numberOfLines={1} style={{ letterSpacing: -0.2 }}>
             {title}
           </T>
-          <T size={13} muted>
-            {sub}
+          {plainChat && chatType !== "user" && (
+            <T size={13} muted numberOfLines={1} style={styles.headLine}>
+              {membersText}
+            </T>
+          )}
+          <T size={13} muted numberOfLines={1} style={styles.headLine}>
+            {loading && !songs.length ? "" : sub}
           </T>
         </View>
         <Pill
@@ -354,6 +409,13 @@ export default function ChatFiles() {
                 </>
               ) : songs.length ? (
                 <T muted>{tr("Không có file khớp bộ lọc")}</T>
+              ) : isSearch ? (
+                <>
+                  <Icon name="search" size={40} color={t.textMuted} />
+                  <T muted style={{ marginTop: 8 }}>
+                    {tr("Không tìm thấy bài hát")}
+                  </T>
+                </>
               ) : (
                 <>
                   <Icon name="inbox" size={44} color={t.textMuted} />
@@ -372,15 +434,17 @@ export default function ChatFiles() {
               <T size={13.6} muted>
                 {songs.length
                   ? tr("Đang tải thêm…")
-                  : count
-                    ? tr("Đang quét kênh… {n} file", { n: count })
-                    : tr("Đang quét kênh…")}
+                  : isSearch
+                    ? tr("Đang tìm…")
+                    : count
+                      ? tr("Đang quét kênh… {n} file", { n: count })
+                      : tr("Đang quét kênh…")}
               </T>
             </View>
           ) : !fav && hasMore && songs.length ? (
             <View style={styles.more}>
               <Pill
-                title={tr("Tải thêm {n} file", { n: PAGE_SIZE })}
+                title={tr("Tải thêm {n} file", { n: isSearch ? SONG_PAGE : PAGE_SIZE })}
                 icon="arrow-down-circle"
                 color={t.violet}
                 onPress={() => read(list)}
@@ -454,34 +518,37 @@ export default function ChatFiles() {
                 >
                   {label}
                 </T>
-                {label !== item.name && (
-                  <View style={styles.line}>
-                    <Icon name="file-earmark-music" size={11} color={t.textMuted} />
-                    <T size={12} muted numberOfLines={1} style={{ flexShrink: 1 }}>
-                      {item.name}
-                    </T>
-                  </View>
-                )}
-                {/* when it was posted in the chat */}
-                {item.date > 0 && (
-                  <View style={styles.line} accessibilityLabel={tr("Ngày đăng lên kênh")}>
-                    <Icon name="clock" size={11} color={t.textMuted} />
-                    <T size={12} muted numberOfLines={1} style={{ flexShrink: 1 }}>
-                      {postedAt(item.date, tr.locale)}
-                    </T>
-                  </View>
-                )}
-                {fav && item.chat ? (
-                  <View style={styles.line}>
-                    <Icon name="megaphone" size={11} color={t.pink} />
-                    <T size={12.5} numberOfLines={1} color={t.pink} style={{ flexShrink: 1 }}>
-                      {item.chat}
-                    </T>
-                  </View>
-                ) : null}
-                <T size={13} weight="semibold" muted style={{ marginTop: 3 }}>
-                  {[fmtSize(item.size), fmtDur(item.duration)].filter(Boolean).join(" · ")}
-                </T>
+                {/* the lines under the name: one small size and line height, evenly spaced */}
+                <View style={styles.meta}>
+                  {label !== item.name && (
+                    <View style={styles.line}>
+                      <Icon name="file-earmark-music" size={11} color={t.textMuted} />
+                      <T size={12} muted numberOfLines={1} style={styles.lineText}>
+                        {item.name}
+                      </T>
+                    </View>
+                  )}
+                  {/* when it was posted in the chat */}
+                  {item.date > 0 && (
+                    <View style={styles.line} accessibilityLabel={tr("Ngày đăng lên kênh")}>
+                      <Icon name="clock" size={11} color={t.textMuted} />
+                      <T size={12} muted numberOfLines={1} style={styles.lineText}>
+                        {postedAt(item.date, tr.locale)}
+                      </T>
+                    </View>
+                  )}
+                  {(fav || isSearch) && item.chat ? (
+                    <View style={styles.line}>
+                      <Icon name="megaphone" size={11} color={t.pink} />
+                      <T size={12} numberOfLines={1} color={t.pink} style={styles.lineText}>
+                        {item.chat}
+                      </T>
+                    </View>
+                  ) : null}
+                  <T size={12} weight="semibold" muted numberOfLines={1} style={styles.lineText}>
+                    {[fmtSize(item.size), fmtDur(item.duration)].filter(Boolean).join(" · ")}
+                  </T>
+                </View>
               </View>
               <Pressable
                 onPress={() => {
@@ -547,7 +614,7 @@ export default function ChatFiles() {
                   setPick(null);
                   if (pick === "type") {
                     setType(k as FileType);
-                    if (!fav) rescan(k as FileType);
+                    if (!fav && !isSearch) rescan(k as FileType);
                   } else setSort(k as Sort);
                 }}
                 style={[styles.option, active && { backgroundColor: t.primary }]}
@@ -657,7 +724,10 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
   playBtn: { width: 30, height: 30, borderRadius: 15, alignItems: "center", justifyContent: "center" },
-  line: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 1 },
+  meta: { marginTop: 4, gap: 2 },
+  line: { flexDirection: "row", alignItems: "center", gap: 4 },
+  lineText: { flexShrink: 1, lineHeight: 16 },
+  headLine: { lineHeight: 17, minHeight: 17 },
   heart: { width: 34, height: 34, alignItems: "center", justifyContent: "center" },
   empty: { alignItems: "center", padding: 32 },
   more: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, padding: 14 },

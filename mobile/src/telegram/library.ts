@@ -27,7 +27,19 @@ export type Song = {
 
 const entities = new Map<string, Api.TypeEntityLike>();
 let chatsCache: Chat[] = [];
-export const chatById = (id: string) => chatsCache.find((c) => c.id === id || c.rawId === id);
+// chats found by the global search (not joined, or joined a moment ago): their title, and their username to
+// find them again once GramJS forgot them
+const found = new Map<string, Chat>();
+const rawOf = (id: string) => id.replace(/^-(100)?/, "");
+export const chatById = (id: string) =>
+  chatsCache.find((c) => c.id === id || c.rawId === id) ??
+  found.get(id) ??
+  [...found.values()].find((c) => c.rawId === id);
+
+/** Remember a chat the search found (opened before / without joining it). */
+export function rememberChat(c: { id: string; title: string; type: ChatType; username: string | null }) {
+  found.set(c.id, { ...c, rawId: rawOf(c.id) });
+}
 
 export async function listChats(): Promise<Chat[]> {
   if (MOCK) return (chatsCache = MOCK_CHATS);
@@ -47,12 +59,21 @@ export async function listChats(): Promise<Chat[]> {
   return chatsCache;
 }
 
-async function entityOf(chatId: string) {
+export async function entityOf(chatId: string) {
   const client = await getClient();
-  return entities.get(chatId) ?? (await client.getEntity(chatId));
+  const known = entities.get(chatId);
+  if (known) return known;
+  try {
+    return await client.getEntity(chatId);
+  } catch (err) {
+    // a public chat from the search: GramJS knows its id only while its answer is in memory, the username always
+    const username = chatById(chatId)?.username;
+    if (!username) throw err;
+    return client.getEntity(username);
+  }
 }
 
-function toSong(msg: Api.Message, chatId: string, chat?: string): Song | null {
+export function toSong(msg: Api.Message, chatId: string, chat?: string): Song | null {
   const info = fileInfo(msg) as Omit<Song, "id" | "key" | "chatId" | "date" | "kind"> | null;
   if (!info) return null;
   return {
@@ -67,7 +88,7 @@ function toSong(msg: Api.Message, chatId: string, chat?: string): Song | null {
 }
 
 export interface FileList {
-  kind: "chat" | "fav" | "recent"; // a chat's files, "Bài hát yêu thích", "Phát gần đây"
+  kind: "chat" | "fav" | "recent" | "search"; // a chat's files, "Bài hát yêu thích", "Phát gần đây", "Tìm: “…”"
   songs: Song[];
   more: boolean;
   message(id: number): Api.Message | undefined;

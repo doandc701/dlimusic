@@ -20,6 +20,11 @@ export function reloadChats() {
     .catch((err) => set({ error: authErrorText(err), loading: false }));
 }
 
+/** Show a chat just joined at the top of the list (Telegram may list it a moment later). */
+export function addChat(chat: Chat) {
+  if (state.chats && !state.chats.some((c) => c.id === chat.id)) set({ chats: [chat, ...state.chats] });
+}
+
 /** Forget the chats (signed out). */
 export const resetChats = () => set({ chats: null, error: undefined, loading: false });
 

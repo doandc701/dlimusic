@@ -10,6 +10,7 @@ import { useT } from "../i18n";
 import { usePlayer, usePlayerClock, type SleepMode } from "../player/PlayerProvider";
 import { useLibrary } from "../store/LibraryProvider";
 import { chatById } from "../telegram/library";
+import type { SongSearch } from "../telegram/search";
 import { FONT, GRADIENT, mix, tint, useTheme } from "../theme";
 import { Icon } from "./Icon";
 import { Sheet } from "./Sheet";
@@ -59,10 +60,14 @@ export function MiniPlayer() {
             numberOfLines={1}
             style={{ alignSelf: "flex-start", maxWidth: "100%" }}
             onPress={() =>
-              // its list: the favourites if it plays from there, else its own chat (also for "Phát gần đây")
+              // its list: the favourites / the song search if it plays from there, else its own chat (also for
+              // "Phát gần đây")
               router.navigate({
                 pathname: "/chat/[id]",
-                params: { id: now.list.kind === "fav" ? "fav" : now.song.chatId, song: now.song.key },
+                params:
+                  now.list.kind === "search"
+                    ? { id: "search", q: (now.list as SongSearch).query, song: now.song.key }
+                    : { id: now.list.kind === "fav" ? "fav" : now.song.chatId, song: now.song.key },
               })
             }
             accessibilityRole="button"

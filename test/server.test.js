@@ -453,6 +453,20 @@ describe("validation", () => {
       assert.equal((await api(p)).status, 404, p);
   });
 
+  test("prefetch: a scan key and 1–3 positive song ids", async () => {
+    for (const body of [
+      {},
+      { key: "k" },
+      { key: 1, ids: [1] },
+      { key: "k", ids: [0] },
+      { key: "k", ids: ["1"] },
+      { key: "k", ids: [1.5] },
+    ]) {
+      const { status } = await api("/api/prefetch", { method: "POST", body });
+      assert.equal(status, 400, JSON.stringify(body));
+    }
+  });
+
   test("chat info: the chat must be given (at most 200 characters)", async () => {
     for (const q of ["", "?chat=", "?chat=%20", `?chat=${"x".repeat(201)}`]) {
       const { status, data } = await api(`/api/chat-info${q}`);

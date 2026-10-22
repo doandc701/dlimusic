@@ -53,7 +53,47 @@ const SAFE_MEDIA = /^(audio\/[\w.+-]+|video\/[\w.+-]+|image\/(jpeg|png|gif|webp|
 const safeType = (mime) =>
   SAFE_MEDIA.test(String(mime || "").trim()) ? String(mime).trim().toLowerCase() : "application/octet-stream";
 
+// The next songs, fetched ahead by the page (web/backend.js -> prefetch): served from here, no page needed.
+const NEXT_CACHE = "tdl-next-songs";
+
+async function fromCache(url, range) {
+  let res;
+  try {
+    res = await (await caches.open(NEXT_CACHE)).match(url.pathname + url.search);
+  } catch {
+    return null;
+  }
+  if (!res) return null;
+  const blob = await res.blob();
+  const type = safeType(res.headers.get("Content-Type"));
+  const size = blob.size;
+  const m = /^bytes=(\d*)-(\d*)$/.exec(range || "");
+  if (!m)
+    return new Response(blob, {
+      status: 200,
+      headers: { ...SAFE_HEADERS, "Content-Type": type, "Accept-Ranges": "bytes", "Content-Length": String(size) },
+    });
+  const start = m[1] === "" ? size - Number(m[2]) : Number(m[1]);
+  const end = m[1] === "" || m[2] === "" ? size - 1 : Math.min(Number(m[2]), size - 1);
+  if (!(start >= 0) || start > end || start >= size)
+    return new Response("", { status: 416, headers: { ...SAFE_HEADERS, "Content-Range": `bytes */${size}` } });
+  return new Response(blob.slice(start, end + 1, type), {
+    status: 206,
+    headers: {
+      ...SAFE_HEADERS,
+      "Content-Type": type,
+      "Accept-Ranges": "bytes",
+      "Content-Length": String(end - start + 1),
+      "Content-Range": `bytes ${start}-${end}/${size}`,
+    },
+  });
+}
+
 async function serve(event, url, download) {
+  if (!download) {
+    const cached = await fromCache(url, event.request.headers.get("range"));
+    if (cached) return cached;
+  }
   const port = await providerFor(event.clientId || url.searchParams.get("c"));
   if (!port)
     return new Response("Trang DLiMusic không còn mở, hãy tải lại trang.", { status: 503, headers: SAFE_HEADERS });

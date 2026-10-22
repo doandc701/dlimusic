@@ -3017,6 +3017,10 @@ function syncTime() {
 }
 
 /** The seek bar like YouTube's: played part in colour, the part already loaded lighter, the rest dark. */
+// Browser build: how far each song is fetched from Telegram (web/backend.js keeps fetching while it plays or is
+// paused), media URL -> fraction. The grey bar shows that, not only what the player itself has buffered.
+const fetched = new Map();
+
 function paintSeek() {
   const p = $("player");
   const bar = $("seekRange");
@@ -3024,8 +3028,13 @@ function paintSeek() {
   let loaded = 0; // end of the loaded stretch that holds the current time
   for (let i = 0; dur && i < p.buffered.length; i++)
     if (p.buffered.start(i) <= p.currentTime + 1 && p.buffered.end(i) > loaded) loaded = p.buffered.end(i);
+  let pct = dur ? (loaded / dur) * 100 : 0;
+  try {
+    const u = new URL(p.src);
+    pct = Math.max(pct, (fetched.get(u.pathname + u.search) || 0) * 100);
+  } catch {} // no song yet
   bar.style.setProperty("--played", `${bar.value / 10}%`);
-  bar.style.setProperty("--loaded", `${dur ? Math.min(100, (loaded / dur) * 100) : 0}%`);
+  bar.style.setProperty("--loaded", `${Math.min(100, pct)}%`);
 }
 
 $("playBtn").addEventListener("click", togglePlay);
@@ -3088,6 +3097,29 @@ for (const evt of ["play", "pause", "ended"]) {
     setHomeCat(state.isPlaying);
   });
 }
+// Browser build: this song, then the next two, are fetched whole while this one plays (web/backend.js -> prefetch), so a
+// locked phone, which may stall the page's Telegram connection, still goes on to them.
+let prefetchFor = null;
+player.addEventListener("playing", async () => {
+  if (!state.playScan || state.repeat === "one") return;
+  const scan = state.playScan;
+  const at = `${scan.key}|${state.playingId}`;
+  if (prefetchFor === at) return; // once per song (playing also fires after every buffering pause)
+  prefetchFor = at;
+  const order = state.playOrder;
+  const i = order.indexOf(state.playingId);
+  const ahead = [order[i + 1], order[i + 2] ?? (state.repeat === "all" ? order[0] : undefined)].filter(
+    (id) => id !== undefined && id !== state.playingId,
+  );
+  // the local server fetches them into its cache, one after the other (the playing song first)
+  if (!BACKEND) return void api("/api/prefetch", { key: scan.key, ids: [state.playingId, ...ahead] }).catch(() => {});
+  await BACKEND.prefetch(scan.key, state.playingId); // this song first (already on its way), then the next ones
+  for (const id of ahead) {
+    if (prefetchFor !== at) return;
+    await BACKEND.prefetch(scan.key, id);
+  }
+});
+
 player.addEventListener("ended", () => {
   // The stream was cut (network) long before the song's real end: continue it instead of moving on.
   const f = state.playScan?.files.find((x) => x.id === state.playingId);
@@ -3978,6 +4010,11 @@ const EVENTS = {
     if (d.connected && !wasConnected && state.auth?.step === "ready") loadDialogs();
   },
   auth: (d) => renderAuth(d),
+  fetch: ({ url, got, size }) => {
+    fetched.set(url, size ? got / size : 0);
+    if (fetched.size > 50) fetched.delete(fetched.keys().next().value);
+    paintSeek();
+  },
   job: (d) => applyJob(d),
   jobs: (d) => {
     state.jobs = new Map(d.map((j) => [j.id, j]));

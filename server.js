@@ -741,6 +741,9 @@ function logout() {
   scans.clear();
   photoCache.clear();
   avatars.clear();
+  for (const f of fetches.values()) f.stop = true;
+  fetches.clear();
+  fs.rm(PLAY_CACHE, { recursive: true, force: true }, () => fs.mkdirSync(PLAY_CACHE, { recursive: true, mode: 0o700 }));
   cancelQueued();
   pendingInput = null;
   earlyPhone = null;
@@ -1265,6 +1268,131 @@ async function streamFromTelegram(req, res, item) {
   }
 }
 
+// ---------- playing like the app (mobile/src/player): a song is fetched whole into a cache file ----------
+// The browser's player only asks for a little ahead, and nothing while paused. Instead a song being played is
+// fetched start to end into DATA_DIR/play-cache, whether it plays or is paused; the player reads that file as
+// it grows (a jump far past what is there is streamed from Telegram meanwhile). The next songs are fetched the
+// same way after it (POST /api/prefetch). The UI's grey bar shows how far (event "fetch").
+
+const PLAY_CACHE = path.join(DATA_DIR, "play-cache");
+const PLAY_CACHE_MAX = 3 * 1024 ** 3; // the oldest songs go past this
+const FAR_JUMP = 4 * 1024 * 1024; // a position this far past what is fetched is streamed meanwhile
+const fetches = new Map(); // "<chat id>_<message id>" -> fetch
+fs.rmSync(PLAY_CACHE, { recursive: true, force: true }); // a song half fetched last time is not resumed
+fs.mkdirSync(PLAY_CACHE, { recursive: true, mode: 0o700 });
+
+const songCacheId = (item) => `${item.msg.chatId}_${item.msg.id}`.replace(/[^\w-]/g, "");
+
+/** The fetch of a song into the cache (started if needed). urls: the player URLs it answers (for "fetch"). */
+function songFetch(item, url) {
+  const id = songCacheId(item);
+  let f = fetches.get(id);
+  if (!f) {
+    const size = item.info.size;
+    f = { id, file: path.join(PLAY_CACHE, id), size, got: 0, done: false, failed: null, stop: false, waiters: [] };
+    f.urls = new Set();
+    fetches.set(id, f);
+    f.job = runSongFetch(f, item);
+  }
+  if (url) f.urls.add(url);
+  f.used = Date.now();
+  return f;
+}
+
+function fetchNews(f) {
+  for (const url of f.urls) broadcast("fetch", { url, got: f.got, size: f.size });
+  for (const wake of f.waiters.splice(0)) wake();
+}
+
+async function runSongFetch(f, item) {
+  let fd;
+  let sent = 0;
+  try {
+    fd = await fs.promises.open(f.file, "w");
+    for await (const chunk of client.iterDownload({
+      file: item.msg.media,
+      offset: bigInt(0),
+      requestSize: PREVIEW_REQUEST,
+      fileSize: bigInt(f.size),
+    })) {
+      if (f.stop) throw Object.assign(new Error("stopped"), { stopped: true });
+      const buf = chunk.subarray(0, f.size - f.got);
+      await fd.write(buf, 0, buf.length, f.got);
+      f.got += buf.length;
+      if (Date.now() - sent > 300) {
+        sent = Date.now();
+        fetchNews(f);
+      } else for (const wake of f.waiters.splice(0)) wake();
+      if (f.got >= f.size) break;
+    }
+    f.done = true;
+    trimPlayCache();
+  } catch (err) {
+    f.failed = err;
+    fetches.delete(f.id); // asked again next time
+    fs.rm(f.file, { force: true }, () => {});
+  } finally {
+    await fd?.close().catch(() => {});
+    fetchNews(f);
+  }
+}
+
+/** The oldest finished songs go when the cache is past PLAY_CACHE_MAX. */
+function trimPlayCache() {
+  const done = [...fetches.values()].filter((f) => f.done).sort((a, b) => a.used - b.used);
+  let total = done.reduce((s, f) => s + f.size, 0);
+  for (const f of done) {
+    if (total <= PLAY_CACHE_MAX) break;
+    total -= f.size;
+    fetches.delete(f.id);
+    fs.rm(f.file, { force: true }, () => {});
+  }
+}
+
+/** Only these songs keep being fetched (the playing one and the next ones); the others stop. */
+function keepFetching(ids) {
+  for (const f of fetches.values()) if (!f.done && !ids.has(f.id)) f.stop = true;
+}
+
+/** Bytes of a song's cache file as they arrive, with Range (the player does not wait for the end). */
+async function streamFromFetch(req, res, f, mime) {
+  const range = parseRange(req.headers.range, f.size);
+  if (!range) {
+    res.writeHead(416, { "Content-Range": `bytes */${f.size}` });
+    return res.end();
+  }
+  res.writeHead(range.partial ? 206 : 200, {
+    "Content-Type": safeMediaType(mime),
+    "Content-Security-Policy": "sandbox; default-src 'none'",
+    "Accept-Ranges": "bytes",
+    "Content-Length": range.end - range.start + 1,
+    ...(range.partial && { "Content-Range": `bytes ${range.start}-${range.end}/${f.size}` }),
+  });
+  let closed = false;
+  res.on("close", () => (closed = true));
+  let fd;
+  try {
+    fd = await fs.promises.open(f.file, "r");
+    let pos = range.start;
+    while (pos <= range.end && !closed) {
+      if (f.got > pos) {
+        const len = Math.min(f.got - pos, range.end + 1 - pos, PREVIEW_REQUEST);
+        const { buffer, bytesRead } = await fd.read(Buffer.alloc(len), 0, len, pos);
+        if (!bytesRead) throw new Error("cache file shorter than expected");
+        pos += bytesRead;
+        if (!res.write(buffer.subarray(0, bytesRead)))
+          await new Promise((r) => (res.once("drain", r), res.once("close", r)));
+      } else if (f.failed) throw f.failed;
+      else await new Promise((r) => f.waiters.push(r));
+    }
+    res.end();
+  } catch {
+    res.destroy();
+  } finally {
+    await fd?.close().catch(() => {});
+  }
+}
+
 function openFolder(dir) {
   fs.mkdirSync(dir, { recursive: true });
   const cmd = process.platform === "darwin" ? "open" : process.platform === "win32" ? "explorer" : "xdg-open";
@@ -1587,7 +1715,33 @@ async function handleApi(req, res, url) {
       if (local) return streamFile(req, res, local);
       requireReady();
       if (item.msg.media instanceof Api.MessageMediaPhoto) return sendPhoto(res, scan, item);
-      return streamFromTelegram(req, res, item);
+      if (!item.info.size || !["audio", "voice"].includes(mediaKind(item.msg)))
+        return streamFromTelegram(req, res, item);
+      // fetched whole into the cache as it plays (and while paused); a far jump streams meanwhile
+      const f = songFetch(item, `/api/media?key=${encodeURIComponent(scan.key)}&id=${url.searchParams.get("id")}`);
+      const start = Number(/bytes=(\d+)-/.exec(req.headers.range || "")?.[1] || 0);
+      if (!f.done && start > f.got + FAR_JUMP) return streamFromTelegram(req, res, item);
+      fetchNews(f);
+      return streamFromFetch(req, res, f, item.msg.media?.document?.mimeType);
+    }
+
+    case "POST /api/prefetch": {
+      // { key, ids: [playing, next, next…] }: these are fetched whole, in this order; the others stop
+      const body = await readJson(req);
+      const ids = Array.isArray(body.ids) ? body.ids.slice(0, 3) : null;
+      if (typeof body.key !== "string" || !ids?.every((id) => Number.isSafeInteger(id) && id > 0))
+        return sendJson(res, 400, { error: "Danh sách bài không hợp lệ" });
+      requireReady();
+      const scan = getScan(body.key);
+      const items = ids.map((id) => [id, scan.items.get(id)]).filter(([, it]) => it?.info.size && !localCopy(scan, it));
+      keepFetching(new Set(items.map(([, it]) => songCacheId(it))));
+      sendJson(res, 200, { ok: true });
+      // one after the other: the playing song first
+      for (const [id, it] of items) {
+        const f = songFetch(it, `/api/media?key=${encodeURIComponent(scan.key)}&id=${id}`);
+        await f.job;
+      }
+      return;
     }
   }
 

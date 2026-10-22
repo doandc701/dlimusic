@@ -477,6 +477,8 @@ function logout() {
   scans.clear();
   photoCache.clear();
   avatars.clear();
+  wholes.clear();
+  if ("caches" in self) caches.delete(NEXT_CACHE).catch(() => {}); // another account may sign in here
   cancelQueued();
   pendingInput = null;
   earlyPhone = null;
@@ -1028,7 +1030,16 @@ async function serveStream(req, port) {
       name: item.info.name,
     });
 
-    const it = source(range.start, range.end);
+    // playing, like the app: a song is fetched whole (and goes on while paused), the player reading it as it
+    // comes; a long mix is read on ahead of the player. A download is read as it is written.
+    const whole = !req.download && !local ? fetchWhole(req.key, req.id) : null;
+    const it = req.download
+      ? source(range.start, range.end)
+      : whole
+        ? wholeRange(whole, range.start, range.end)
+        : readAhead(source(range.start, range.end), undefined, (got) =>
+            fetchProgress(mediaUrl(req.key, req.id), range.start + got, size),
+          );
     let received = 0;
     port.onmessage = async (m) => {
       if (m.data?.type === "cancel") {
@@ -1413,4 +1424,175 @@ async function start() {
   runAuth();
 }
 
-window.TDL_BACKEND = { caps, request, on, start, pickDirectory };
+// ---------- playing like the app (mobile/src/player): read a song on to its end, keep its data centre connected ----------
+
+const AHEAD_MAX = 64 * 1024 * 1024; // what may wait for the player (a long mix is read on as it plays)
+
+/**
+ * `it`, read ahead of whoever pulls from it (up to AHEAD_MAX bytes waiting): the song keeps coming while the page
+ * can use the network — a locked phone may stall it later, and the player then still has the song.
+ */
+function readAhead(it, max = AHEAD_MAX, onBytes = null) {
+  const queue = [];
+  let queued = 0;
+  let finished = false;
+  let failure = null;
+  let stopped = false;
+  let wake = null; // the reader waits for a piece
+  let room = null; // the fetch waits for the reader to take some
+  let fetched = 0; // bytes read from `it` so far
+  (async () => {
+    try {
+      while (!stopped) {
+        if (queued >= max) {
+          await new Promise((r) => (room = r));
+          continue;
+        }
+        const { value, done } = await it.next();
+        if (done) break;
+        queue.push(value);
+        queued += value.length;
+        onBytes?.((fetched += value.length));
+        wake?.();
+      }
+    } catch (err) {
+      failure = err;
+    }
+    finished = true;
+    wake?.();
+  })();
+  return {
+    async next() {
+      while (!queue.length && !finished) await new Promise((r) => (wake = r));
+      if (queue.length) {
+        const value = queue.shift();
+        queued -= value.length;
+        room?.();
+        return { value, done: false };
+      }
+      if (failure) throw failure;
+      return { value: undefined, done: true };
+    },
+    async return() {
+      stopped = true;
+      room?.();
+      await it.return?.();
+      return { value: undefined, done: true };
+    },
+  };
+}
+
+// GramJS lets go of an idle data centre after ~30 s; the next song from it would wait for a new connection
+// and its authorisation (and may not get one with the screen locked). Borrowed again every 20 s, as the app does.
+const warmDcs = new Map(); // dc id -> last time a song came from it
+let keepAliveTimer = null;
+function keepDc(dcId) {
+  if (!dcId || !client) return;
+  warmDcs.set(dcId, Date.now());
+  keepAliveTimer ??= setInterval(() => {
+    for (const [dc, at] of warmDcs) {
+      if (Date.now() - at > 30 * 60_000)
+        warmDcs.delete(dc); // nothing played from it for a while
+      else client?.getSender(dc).catch(() => warmDcs.delete(dc));
+    }
+    if (!warmDcs.size) {
+      clearInterval(keepAliveTimer);
+      keepAliveTimer = null;
+    }
+  }, 20_000);
+}
+
+// ---------- the next songs, fetched ahead into the worker's cache (web/sw.js serves them from there) ----------
+// With the screen locked, a phone may stall this page's Telegram connection; the song that comes next then
+// never loads. Fetched while the current one plays, it starts (and plays to its end) without the network.
+const NEXT_CACHE = "tdl-next-songs";
+const NEXT_KEEP = 4; // songs kept in that cache (the playing one, the next two…)
+const NEXT_MAX = 40 * 1024 * 1024; // a song up to this size is fetched whole, once; longer mixes stream
+const wholes = new Map(); // media URL -> { buf, got, size, done, failed, waiters, job }
+const mediaUrl = (key, id) => `/api/media?key=${encodeURIComponent(key)}&id=${id}`;
+
+/** How far a song is fetched (the player's grey bar), at most every 300 ms per song. */
+const fetchSent = new Map();
+function fetchProgress(url, got, size) {
+  const now = Date.now();
+  if (got < size && now - (fetchSent.get(url) || 0) < 300) return;
+  fetchSent.set(url, now);
+  emit("fetch", { url, got, size });
+}
+
+/**
+ * A song (up to NEXT_MAX) fetched whole, start to end, whether it plays, is paused or comes next — like the app.
+ * The player reads it as it comes (wholeRange), and once whole it goes to the worker's cache: played again,
+ * sought, or reached with the screen locked, it needs no network. null when it is not fetched this way.
+ */
+function fetchWhole(key, id) {
+  const url = mediaUrl(key, id);
+  if (wholes.has(url)) return wholes.get(url);
+  const item = scans.get(key)?.items.get(Number(id));
+  const size = item?.info.size;
+  if (!item || !size) return null;
+  keepDc(item.msg.media?.document?.dcId);
+  if (size > NEXT_MAX || !("caches" in self)) return null;
+  const w = { buf: new Uint8Array(size), got: 0, size, done: false, failed: null, waiters: new Set() };
+  const wake = () => {
+    for (const fn of w.waiters) fn();
+    w.waiters.clear();
+  };
+  w.job = (async () => {
+    const cache = await caches.open(NEXT_CACHE);
+    const cached = await cache.match(url);
+    if (cached) {
+      w.buf = new Uint8Array(await cached.arrayBuffer());
+      w.got = w.size = w.buf.length;
+    } else {
+      for await (const chunk of telegramRange(item, 0, size - 1)) {
+        w.buf.set(chunk.subarray(0, size - w.got), w.got);
+        w.got = Math.min(size, w.got + chunk.length);
+        fetchProgress(url, w.got, size);
+        wake();
+      }
+      const mime = safeMediaType(item.msg.media?.document?.mimeType);
+      await cache.put(url, new Response(new Blob([w.buf], { type: mime }), { headers: { "Content-Type": mime } }));
+      const keys = await cache.keys();
+      for (const old of keys.slice(0, Math.max(0, keys.length - NEXT_KEEP))) await cache.delete(old);
+    }
+    w.done = true;
+    fetchProgress(url, w.size, w.size);
+    wake();
+  })()
+    .catch((err) => {
+      w.failed = err;
+      wake();
+      wholes.delete(url); // asked again next time
+    })
+    .finally(() => {
+      // the worker serves it from its cache now; keep the bytes only while a player still reads them
+      setTimeout(() => wholes.get(url) === w && w.done && wholes.delete(url), 60_000);
+    });
+  wholes.set(url, w);
+  return w;
+}
+
+/** Bytes start..end of a song being fetched whole, as they arrive (the player does not wait for the end). */
+async function* wholeRange(w, start, end) {
+  let pos = start;
+  while (pos <= end) {
+    if (w.got > pos) {
+      const to = Math.min(w.got, end + 1, pos + 512 * 1024);
+      yield w.buf.slice(pos, to);
+      pos = to;
+    } else if (w.failed) throw w.failed;
+    else if (w.done) return;
+    else await new Promise((r) => w.waiters.add(r));
+  }
+}
+
+/** The next songs, fetched ahead (see fetchWhole); resolves when there (false: streamed when it plays). */
+async function prefetch(key, id) {
+  const w = fetchWhole(key, id);
+  if (!w) return false;
+  await w.job;
+  return !w.failed;
+}
+
+window.TDL_BACKEND = { caps, request, on, start, pickDirectory, prefetch };

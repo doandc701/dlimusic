@@ -2397,3 +2397,261 @@ body:has(.search-view) #filterSheet .type-filter {
 .song-item.playing .song-play {
   box-shadow: none;
 }
+
+/* ---------- playlists (like Zing MP3's): the sidebar entry, the grid of covers, a playlist's list ---------- */
+.pl-avatar {
+  background: linear-gradient(135deg, #f97316, #ec4899);
+  color: #fff;
+}
+.pl-entry:not(.active) .pl-avatar {
+  box-shadow: 0 4px 12px -4px rgba(249, 115, 22, 0.6);
+}
+.pl-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 1.25rem 1rem;
+}
+@media (max-width: 575.98px) {
+  .pl-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1rem 0.75rem;
+  }
+}
+.pl-card {
+  position: relative;
+  min-width: 0;
+  cursor: pointer;
+}
+.pl-cover {
+  position: relative;
+  aspect-ratio: 1;
+  border-radius: 0.6rem;
+  overflow: hidden;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+  background: linear-gradient(135deg, #7c3aed, #db2777);
+  box-shadow: 0 6px 18px -10px rgba(0, 0, 0, 0.5);
+}
+.pl-cover.one {
+  grid-template-columns: 1fr;
+  grid-template-rows: 1fr;
+}
+/* a chat's picture filling its quarter (the same avatar the chat list shows, square here) */
+.pl-cover .avatar {
+  width: 100%;
+  height: 100%;
+  border-radius: 0 !important;
+  font-size: 1.6rem;
+}
+.pl-cover.one .avatar {
+  font-size: 3rem;
+}
+.pl-cover .avatar-img {
+  border-radius: 0;
+}
+.pl-cover-empty {
+  grid-column: 1 / -1;
+  grid-row: 1 / -1;
+  display: grid;
+  place-items: center;
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 2.6rem;
+}
+/* hovering a cover: darker, ▶ in the middle, ⋯ in the corner (always shown on touch screens) */
+.pl-cover::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.35);
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.pl-cover-play {
+  position: absolute;
+  z-index: 1;
+  left: 50%;
+  top: 50%;
+  width: 46px;
+  height: 46px;
+  margin: -23px 0 0 -23px;
+  border-radius: 50%;
+  border: 1.5px solid #fff;
+  background: transparent;
+  color: #fff;
+  font-size: 1.5rem;
+  display: grid;
+  place-items: center;
+  opacity: 0;
+  transition:
+    opacity 0.15s,
+    transform 0.15s;
+}
+.pl-cover-play:hover {
+  transform: scale(1.08);
+}
+.pl-card .pl-menu {
+  position: absolute;
+  z-index: 2;
+  top: 0.4rem;
+  right: 0.4rem;
+}
+.pl-menu > .btn {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border-radius: 50%;
+  border: 0;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.45);
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+@media (hover: hover) {
+  .pl-card:hover .pl-cover::after,
+  .pl-card:hover .pl-cover-play,
+  .pl-card:hover .pl-menu > .btn,
+  .pl-menu > .btn[aria-expanded="true"] {
+    opacity: 1;
+  }
+}
+@media (hover: none) {
+  .pl-menu > .btn {
+    opacity: 1;
+  }
+}
+.pl-name {
+  margin-top: 0.5rem;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pl-sub {
+  font-size: 0.8rem;
+  color: var(--bs-secondary-color);
+}
+/* "Tạo playlist mới": a dashed square with ⊕ */
+.pl-new .pl-cover {
+  background: transparent;
+  box-shadow: none;
+  border: 1.5px dashed var(--bs-border-color);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  color: var(--bs-body-color);
+}
+.pl-new .pl-cover::after {
+  display: none;
+}
+.pl-new .pl-cover i {
+  font-size: 2.6rem;
+  line-height: 1;
+}
+.pl-new:hover .pl-cover {
+  border-color: #db2777;
+  color: #db2777;
+}
+
+/* a playlist's list: like the favourites (no type filter), its tools in the header, rows dragged to re-order */
+.pl-tools {
+  display: none;
+}
+.pl-view .pl-tools {
+  display: flex;
+}
+.pl-view #typeSeg,
+body:has(.pl-view) #filterSheet .type-filter {
+  display: none !important;
+}
+.pl-grip {
+  display: none;
+  cursor: grab;
+  touch-action: none;
+  color: var(--bs-secondary-color);
+  padding: 0.25rem 0.15rem;
+  margin-right: 0.15rem;
+}
+.pl-view.pl-sortable .pl-grip {
+  display: inline-block;
+}
+.pl-grip-m {
+  display: none !important; /* the phones' grip (the "#" column's one is hidden there) */
+}
+@media (max-width: 575.98px) {
+  .pl-view.pl-sortable .pl-grip-m {
+    display: block !important;
+    text-align: center;
+    font-size: 1.1rem;
+    padding: 0.1rem 0;
+  }
+}
+.file-table tr.pl-dragging {
+  opacity: 0.55;
+  background: color-mix(in srgb, #db2777 10%, var(--bs-body-bg));
+}
+body.pl-drag-on,
+body.pl-drag-on * {
+  cursor: grabbing !important;
+  user-select: none;
+}
+/* the last column holds + (add to a playlist) beside ♡, and ✕ too in a playlist: wide enough for them */
+.file-table .col-fav {
+  width: 76px;
+}
+.pl-view .file-table .col-fav {
+  width: 106px;
+}
+.file-table td.fav {
+  white-space: nowrap;
+}
+.add-pl-btn,
+.pl-remove-btn {
+  --bs-btn-padding-x: 0.35rem;
+  --bs-btn-padding-y: 0.2rem;
+  color: var(--bs-secondary-color);
+  border: 0;
+}
+/* phones: the column stays narrow, its buttons one above the other */
+@media (max-width: 575.98px) {
+  .file-table .col-fav,
+  .pl-view .file-table .col-fav {
+    width: 40px;
+  }
+  .file-table td.fav {
+    white-space: normal;
+  }
+  .file-table td.fav .btn {
+    display: block;
+    margin: 0 auto;
+  }
+}
+.add-pl-btn:hover {
+  color: #db2777;
+}
+.pl-remove-btn:hover {
+  color: var(--bs-danger);
+}
+.pl-pick-dialog {
+  max-width: 420px;
+}
+.pl-pick-item .pl-cover {
+  width: 44px;
+  height: 44px;
+  flex: none;
+  border-radius: 0.4rem;
+  box-shadow: none;
+}
+.pl-pick-item .pl-cover .avatar {
+  font-size: 0.8rem;
+}
+.pl-pick-item .pl-cover-empty {
+  font-size: 1.2rem;
+}
+
+/* a message line that takes no room while it is empty (the playlist picker's name error) */
+.empty-hide:empty {
+  display: none;
+}

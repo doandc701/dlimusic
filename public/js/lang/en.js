@@ -457,5 +457,42 @@
     "Telegram từ chối đăng nhập ({code}). Vui lòng thử lại.":
       "Telegram refused the sign-in ({code}). Please try again.",
     "Đăng nhập không thành công. Vui lòng thử lại.": "Sign-in failed. Please try again.",
+    // playlists
+    Playlist: "Playlists",
+    "{n} playlist": "{n} {n|playlist|playlists}",
+    "{n} bài trong playlist không còn mở được (đã rời kênh hoặc tin đã bị xoá)":
+      "{n} {n|song|songs} in the playlist can no longer be opened (channel left or message deleted)",
+    "Tạo playlist mới": "New playlist",
+    "Tuỳ chọn": "Options",
+    "Đổi tên": "Rename",
+    "Xoá playlist": "Delete playlist",
+    "{n} bài": "{n} {n|song|songs}",
+    "Tên playlist": "Playlist name",
+    "Đã tạo playlist “{name}” với {n} bài": "Created playlist “{name}” with {n} {n|song|songs}",
+    "Đã tạo playlist “{name}”": "Created playlist “{name}”",
+    "Đổi tên playlist": "Rename playlist",
+    "Đã đổi tên playlist": "Playlist renamed",
+    "Xoá playlist “{name}”? Các bài hát vẫn còn trong kênh của chúng.":
+      "Delete playlist “{name}”? The songs stay in their channels.",
+    "Đã xoá playlist “{name}”": "Deleted playlist “{name}”",
+    "Playlist chưa có bài nào": "This playlist has no songs yet",
+    "Thêm vào playlist": "Add to playlist",
+    "Thêm {n} bài vào playlist": "Add {n} {n|song|songs} to a playlist",
+    "Chưa có playlist nào. Đặt tên ở trên để tạo playlist đầu tiên.":
+      "No playlists yet. Type a name above to make the first one.",
+    "Đã thêm {n} bài vào “{name}” ({m} bài đã có sẵn)": "Added {n} {n|song|songs} to “{name}” ({m} already there)",
+    "Đã thêm {n} bài vào “{name}”": "Added {n} {n|song|songs} to “{name}”",
+    "Bỏ khỏi playlist": "Remove from playlist",
+    "Kéo để đổi thứ tự": "Drag to reorder",
+    "Đã bỏ “{song}” khỏi “{name}”": "Removed “{song}” from “{name}”",
+    'Mở một kênh và bấm <i class="bi bi-plus-lg"></i> ở mỗi bài để thêm vào đây.':
+      'Open a channel and press <i class="bi bi-plus-lg"></i> on a song to add it here.',
+    "Phát tất cả": "Play all",
+    "Phát ngẫu nhiên": "Shuffle",
+    "Tên playlist mới…": "New playlist name…",
+    "Tạo & thêm": "Create & add",
+    "Hãy đặt tên cho playlist": "Give the playlist a name",
+    "Tên playlist tối đa {n} ký tự": "A playlist name is at most {n} characters",
+    "Đã có playlist trùng tên": "A playlist with this name already exists",
   },
 };

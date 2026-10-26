@@ -67,7 +67,15 @@ export function MiniPlayer() {
                 params:
                   now.list.kind === "search"
                     ? { id: "search", q: (now.list as SongSearch).query, song: now.song.key }
-                    : { id: now.list.kind === "fav" ? "fav" : now.song.chatId, song: now.song.key },
+                    : {
+                        id:
+                          now.list.kind === "fav"
+                            ? "fav"
+                            : now.list.kind === "playlist"
+                              ? `pl:${now.list.playlistId}` // the playlist it plays from
+                              : now.song.chatId,
+                        song: now.song.key,
+                      },
               })
             }
             accessibilityRole="button"

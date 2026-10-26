@@ -98,7 +98,8 @@ export function toSong(msg: Api.Message, chatId: string, chat?: string): Song | 
 }
 
 export interface FileList {
-  kind: "chat" | "fav" | "recent" | "search"; // a chat's files, "Bài hát yêu thích", "Phát gần đây", "Tìm: “…”"
+  kind: "chat" | "fav" | "recent" | "search" | "playlist"; // a chat's files, "Bài hát yêu thích", "Phát gần đây", "Tìm: “…”", a playlist
+  playlistId?: string; // a playlist: its id (what plays follows it as it is now)
   songs: Song[];
   more: boolean;
   message(id: number): Api.Message | undefined;
@@ -149,7 +150,10 @@ export class SongScan implements FileList {
   }
 }
 
-/** Files of any chats by their keys, in that order: "Bài hát yêu thích" (newest heart first) and "Phát gần đây". */
+/**
+ * Files of any chats by their keys, in that order: "Bài hát yêu thích" (newest heart first), "Phát gần đây", and a
+ * playlist (in its own order).
+ */
 export class FavoritesScan implements FileList {
   songs: Song[] = [];
   more = true;
@@ -157,7 +161,8 @@ export class FavoritesScan implements FileList {
 
   constructor(
     readonly keys: string[],
-    readonly kind: "fav" | "recent" = "fav",
+    readonly kind: "fav" | "recent" | "playlist" = "fav",
+    readonly playlistId?: string,
   ) {}
 
   message(id: number) {

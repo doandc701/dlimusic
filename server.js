@@ -62,7 +62,7 @@ import {
 } from "./lib.js";
 import { createMirror } from "./cloud/mirror.js";
 import { openDb, ACCOUNT_DATA } from "./cloud/common.js";
-import { RECENT_MAX } from "./core.js";
+import { RECENT_MAX, editPlaylists, sortPlaylists } from "./core.js";
 import { readAccount, joinAccount, checkOps, applyOps } from "./cloud/account.js";
 import { createAccountSync } from "./web/cloud-sync.js";
 
@@ -106,6 +106,8 @@ const VISIBLE_FILE = path.resolve(process.env.VISIBLE_CHATS_FILE || dataFile("vi
 const FAVORITES_FILE = path.resolve(process.env.FAVORITES_FILE || dataFile("favorites.json"));
 // Songs played lately, per Telegram account: { "<account id>": [{ id: "<chat id>|<message id>", at, … }] }.
 const RECENT_FILE = path.resolve(process.env.RECENT_FILE || dataFile("recent.json"));
+// Playlists made by each Telegram account: { "<account id>": [{ id, name, songs, at, up }] } (core.js).
+const PLAYLISTS_FILE = path.resolve(process.env.PLAYLISTS_FILE || dataFile("playlists.json"));
 // Which Telegram app (API ID / hash) to use: the built-in one from .env, or the user's own (see chosenCreds).
 const API_FILE = path.resolve(process.env.API_FILE || dataFile("api.json"));
 const HISTORY_LIMIT = 2000;
@@ -130,6 +132,7 @@ function writeJsonFile(file, data) {
     [VISIBLE_FILE]: "visibleChats",
     [FAVORITES_FILE]: "favorites",
     [RECENT_FILE]: "recent",
+    [PLAYLISTS_FILE]: "playlists",
     [SETTINGS_FILE]: "settings",
   }[file];
   if (shared) accountSync?.changed(shared);
@@ -166,7 +169,15 @@ const mirror = createMirror({
 await mirror.start(); // before the files are read below
 
 /** Settings, history, session and token are private to the account running the server. */
-for (const file of [SETTINGS_FILE, HISTORY_FILE, VISIBLE_FILE, FAVORITES_FILE, RECENT_FILE, SESSION_FILE]) {
+for (const file of [
+  SETTINGS_FILE,
+  HISTORY_FILE,
+  VISIBLE_FILE,
+  FAVORITES_FILE,
+  RECENT_FILE,
+  PLAYLISTS_FILE,
+  SESSION_FILE,
+]) {
   try {
     fs.chmodSync(file, 0o600);
   } catch {
@@ -357,6 +368,13 @@ const recentPlays = (() => {
   return data && typeof data === "object" && !Array.isArray(data) ? data : {};
 })();
 
+// ---------- playlists, per Telegram account ----------
+
+const playlistsOf = (() => {
+  const data = readJsonFile(PLAYLISTS_FILE, {});
+  return data && typeof data === "object" && !Array.isArray(data) ? data : {};
+})();
+
 // ---------- data shared by every device of the signed-in account (MongoDB "acct:<id>:…") ----------
 // Same documents as the browser version (cloud/account.js), so this computer, the web app and any other
 // device show the same history, favourites, visible chats and settings. Off without MONGODB_URI.
@@ -371,6 +389,7 @@ accountSync = createAccountSync({
     if (name === "history") return history;
     if (name === "visibleChats") return visibleChats[acc] ?? null;
     if (name === "recent") return recentPlays[acc] || [];
+    if (name === "playlists") return playlistsOf[acc] || [];
     return favorites[acc] || [];
   },
   apply(name, value) {
@@ -385,10 +404,11 @@ accountSync = createAccountSync({
       writeJsonFile(HISTORY_FILE, history);
       return broadcast("history", history);
     }
-    const [store, file] = { visibleChats: [visibleChats, VISIBLE_FILE], recent: [recentPlays, RECENT_FILE] }[name] || [
-      favorites,
-      FAVORITES_FILE,
-    ];
+    const [store, file] = {
+      visibleChats: [visibleChats, VISIBLE_FILE],
+      recent: [recentPlays, RECENT_FILE],
+      playlists: [playlistsOf, PLAYLISTS_FILE],
+    }[name] || [favorites, FAVORITES_FILE];
     if (value === null || (name !== "visibleChats" && !value.length)) delete store[acc];
     else store[acc] = value;
     writeJsonFile(file, store);
@@ -866,13 +886,14 @@ async function favoritesScan(ids, signal, { key = "fav", title = "Bài hát yêu
   // Message ids repeat across chats, so the list uses its own ids (1, 2, …) in favourite order (newest first).
   const items = new Map();
   for (const id of ids) if (found.has(id)) items.set(items.size + 1, found.get(id));
-  // "fav": the favourites list (shown as a list); "recent": the songs played lately (played from the side panel)
+  // "fav": the favourites list (shown as a list); "pl:<id>": a playlist (a list too, in its own order);
+  // "recent": the songs played lately (played from the side panel)
   const scan = {
     key,
     chat: key,
     type: "all",
     title,
-    ...(key === "fav" ? { fav: true } : { recent: true }),
+    ...(key === "fav" ? { fav: true } : key.startsWith("pl:") ? { playlist: key.slice(3) } : { recent: true }),
     items,
     missing: ids.length - items.size,
   };
@@ -920,13 +941,14 @@ function describeScan(scan, ids = null) {
     more: !!scan.more,
     // lists from several chats (favourites, a song search): each file goes to its own chat's folder
     outDir: settings.downloadDir
-      ? scan.fav || scan.search
+      ? scan.fav || scan.playlist || scan.search
         ? settings.downloadDir
         : chatDir(settings.downloadDir, scan.title)
       : null,
     ...(scan.fav && { fav: true, missing: scan.missing }),
     ...(scan.search && { search: true, query: scan.query, total: scan.total || null }),
     ...(scan.recent && { recent: true, missing: scan.missing }),
+    ...(scan.playlist && { playlist: scan.playlist, missing: scan.missing }),
     files: entries.map(([id, item]) => ({
       id,
       ...(item.fav && { fav: item.fav, chat: item.chatTitle }),
@@ -1587,6 +1609,39 @@ async function handleApi(req, res, url) {
       );
     }
 
+    case "GET /api/playlists":
+      requireReady();
+      return sendJson(res, 200, { playlists: sortPlaylists(playlistsOf[auth.me.id] || []) });
+
+    case "POST /api/playlists": {
+      // one change (core.js editPlaylists): create · rename · delete · add · remove · order
+      requireReady();
+      let result;
+      try {
+        result = editPlaylists(playlistsOf[auth.me.id] || [], await readJson(req));
+      } catch (err) {
+        return sendJson(res, 400, { error: err.message });
+      }
+      if (result.playlists.length) playlistsOf[auth.me.id] = result.playlists;
+      else delete playlistsOf[auth.me.id];
+      writeJsonFile(PLAYLISTS_FILE, playlistsOf);
+      return sendJson(res, 200, { playlists: sortPlaylists(result.playlists), id: result.id });
+    }
+
+    case "GET /api/playlists/files": {
+      // a playlist's songs, in its order, from every chat (like the favourites)
+      requireReady();
+      const p = (playlistsOf[auth.me.id] || []).find((x) => x.id === url.searchParams.get("id"));
+      if (!p) return sendJson(res, 404, { error: "Không tìm thấy playlist" });
+      const ctrl = new AbortController();
+      res.on("close", () => !res.writableEnded && ctrl.abort());
+      return sendJson(
+        res,
+        200,
+        describeScan(await favoritesScan(p.songs, ctrl.signal, { key: `pl:${p.id}`, title: p.name })),
+      );
+    }
+
     case "GET /api/favorites/files": {
       requireReady();
       const ctrl = new AbortController();
@@ -1646,7 +1701,7 @@ async function handleApi(req, res, url) {
       if (dir && remember) saveSettings({ downloadDir: base });
       return sendJson(res, 200, {
         added: enqueue(scan, ids, base),
-        outDir: scan.fav || scan.search ? base : chatDir(base, scan.title),
+        outDir: scan.fav || scan.playlist || scan.search ? base : chatDir(base, scan.title),
       });
     }
 
@@ -1707,7 +1762,11 @@ async function handleApi(req, res, url) {
       }
       if (!settings.downloadDir) throw httpError(409, "Chưa chọn thư mục tải xuống", { code: "NEED_DIR" });
       const scan = key && scans.get(key);
-      openFolder(scan && !scan.fav && !scan.search ? chatDir(settings.downloadDir, scan.title) : settings.downloadDir);
+      openFolder(
+        scan && !scan.fav && !scan.playlist && !scan.search
+          ? chatDir(settings.downloadDir, scan.title)
+          : settings.downloadDir,
+      );
       return sendJson(res, 200, { ok: true });
     }
 

@@ -205,6 +205,7 @@ const state = {
   cloud: null, // status of the MongoDB copy { enabled, connected, host, error, lastSync }
   visibleChats: null, // Set of chat ids this account chose to show, or null = all
   favorites: new Set(), // "<chat id>|<message id>" of this account's favourite files
+  playlists: [], // this account's playlists { id, name, songs, at, up }, newest first (core.js)
   favScope: "all", // "Bài hát yêu thích": "all" chats, or one chat id (list + what plays)
   playScan: null, // the list the playing song belongs to (may differ from the open one)
   playQueue: [], // ids of that list, in order, played one after another
@@ -971,6 +972,7 @@ function resetWorkspace() {
   state.visibleChats = null;
   forgetAvatars();
   state.favorites.clear();
+  state.playlists = [];
   state.selected.clear();
   state.jobs.clear();
   renderJobs();
@@ -1184,6 +1186,7 @@ async function loadDialogs() {
     state.visibleChats = visible.ids ? new Set(visible.ids) : null;
     renderDialogs();
     loadRecent();
+    loadPlaylists();
   } catch (err) {
     $("dialogs").innerHTML = `<div class="alert alert-danger m-3">${esc(err.message)}</div>`;
   }
@@ -1204,6 +1207,7 @@ function refreshAccountData() {
       state.visibleChats = visible.ids ? new Set(visible.ids) : null;
       renderDialogs();
       loadRecent(); // another device played something
+      loadPlaylists(); // …or changed a playlist
       if (state.chat === FAV_CHAT)
         loadFiles(); // the favourites list itself changed
       else if (state.scan) renderFiles(); // hearts on the open list
@@ -1278,6 +1282,7 @@ function dialogSortMenu() {
 
 function renderDialogs() {
   renderFavEntry();
+  renderPlEntry();
   const q = norm($("dialogSearch").value.trim());
   const shown = shownDialogs();
   const list = sortDialogs(shown.filter((d) => !q || norm(d.title).includes(q) || norm(d.username).includes(q)));
@@ -1540,6 +1545,7 @@ function scheduleSongSearch() {
 function scanTitle(scan) {
   if (scan?.fav) return t("Bài hát yêu thích");
   if (scan?.search) return t("Tìm: “{q}”", { q: scan.query });
+  if (scan?.playlist) return playlistById(scan.playlist)?.name || scan.title || "";
   return scan?.title || "";
 }
 
@@ -1869,6 +1875,8 @@ $("dialogs").addEventListener("click", (e) => {
 // ---------- files ----------
 
 function showChat(on) {
+  $("plView").classList.add("d-none");
+  $("plView").classList.remove("d-flex");
   show($("emptyView"), !on);
   $("emptyView").classList.toggle("d-flex", !on);
   $("chatView").classList.toggle("d-none", !on);
@@ -1883,6 +1891,7 @@ function openChat(chat) {
   state.query = "";
   $("fileSearch").value = "";
   renderDialogs();
+  if (chat === PL_HOME) return showPlaylists();
   return loadFiles();
 }
 
@@ -1942,6 +1951,8 @@ async function loadFiles({ fresh = false } = {}) {
   $("chatView").classList.toggle("fav-view", state.chat === FAV_CHAT); // no type filter there: all kinds, newest heart first
   const search = isSearchChat(state.chat) ? state.chat.slice(SEARCH_CHAT.length) : null;
   $("chatView").classList.toggle("search-view", search !== null); // songs only, from every chat
+  const plId = isPlChat(state.chat) ? state.chat.slice(PL_PREFIX.length) : null;
+  $("chatView").classList.toggle("pl-view", plId !== null); // a playlist: its order, its tools
   const ctrl = (state.scanCtrl = new AbortController());
   setScanning(true);
   showChat(true);
@@ -1949,11 +1960,13 @@ async function loadFiles({ fresh = false } = {}) {
   $("chatTitle").textContent =
     state.chat === FAV_CHAT
       ? t("Bài hát yêu thích")
-      : search !== null
-        ? t("Tìm: “{q}”", { q: search })
-        : dialog?.title || state.chat;
+      : plId !== null
+        ? playlistById(plId)?.name || t("Playlist")
+        : search !== null
+          ? t("Tìm: “{q}”", { q: search })
+          : dialog?.title || state.chat;
   // the header is the new chat's at once: its members (known, or asked now beside the scan), no old count
-  const plainChat = state.chat !== FAV_CHAT && search === null;
+  const plainChat = state.chat !== FAV_CHAT && search === null && plId === null;
   renderMembers();
   if (plainChat) loadMembers(state.chat);
   $("chatSub").textContent = "";
@@ -1973,22 +1986,31 @@ async function loadFiles({ fresh = false } = {}) {
       ? known
       : state.chat === FAV_CHAT
         ? await api(`/api/favorites/files?scan=${state.scanId}`, undefined, { signal: ctrl.signal })
-        : search !== null
-          ? await api(`/api/search/songs?q=${encodeURIComponent(search)}&scan=${state.scanId}`, undefined, {
+        : plId !== null
+          ? await api(`/api/playlists/files?id=${encodeURIComponent(plId)}&scan=${state.scanId}`, undefined, {
               signal: ctrl.signal,
             })
-          : await api(
-              `/api/files?chat=${encodeURIComponent(state.chat)}&type=${state.type}&scan=${state.scanId}`,
-              undefined,
-              { signal: ctrl.signal },
-            );
+          : search !== null
+            ? await api(`/api/search/songs?q=${encodeURIComponent(search)}&scan=${state.scanId}`, undefined, {
+                signal: ctrl.signal,
+              })
+            : await api(
+                `/api/files?chat=${encodeURIComponent(state.chat)}&type=${state.type}&scan=${state.scanId}`,
+                undefined,
+                { signal: ctrl.signal },
+              );
     if (token !== state.loadToken) return;
     state.scan = scan;
     state.keyChat.set(scan.key, state.chat);
     $("chatTitle").textContent = scanTitle(scan);
     renderFiles();
     if (scan.missing)
-      toast(t("{n} bài yêu thích không còn mở được (đã rời kênh hoặc tin đã bị xoá)", { n: scan.missing }), "warn");
+      toast(
+        scan.playlist
+          ? t("{n} bài trong playlist không còn mở được (đã rời kênh hoặc tin đã bị xoá)", { n: scan.missing })
+          : t("{n} bài yêu thích không còn mở được (đã rời kênh hoặc tin đã bị xoá)", { n: scan.missing }),
+        "warn",
+      );
   } catch (err) {
     if (token !== state.loadToken) return;
     setMessage(
@@ -2012,7 +2034,8 @@ function visibleFiles({ withSearch = true } = {}) {
       (!q || norm(`${f.name} ${f.title || ""} ${f.performer || ""}`).includes(q)) &&
       (!state.scan.fav ||
         (state.favorites.has(f.fav) && // "Bài hát yêu thích": an un-hearted file leaves the list
-          (state.favScope === "all" || f.fav.split("|")[0] === state.favScope))),
+          (state.favScope === "all" || f.fav.split("|")[0] === state.favScope))) &&
+      (!state.scan.playlist || inPlaylist(f, state.scan)), // a playlist: a song taken out leaves the list
   );
   return sortFiles(list);
 }
@@ -2170,6 +2193,436 @@ $("favEntry").addEventListener("click", (e) => {
 });
 $("favEntry").title = t("Bài hát yêu thích");
 
+// ---------- playlists (like Zing MP3's): made by the user, songs from any chat, in the order chosen ----------
+// The list of them is a grid of covers (state.chat = PL_HOME); one playlist opens like the favourites
+// (state.chat = "pl:<id>"). Shared by every device of the account (core.js editPlaylists, MongoDB "playlists").
+
+const PL_HOME = "playlists";
+const PL_PREFIX = "pl:";
+function isPlChat(chat) {
+  return typeof chat === "string" && chat.startsWith(PL_PREFIX);
+}
+function playlistById(id) {
+  return state.playlists.find((p) => p.id === id) || null;
+}
+/** The playlist open in the list, or null. */
+function openPlaylist() {
+  return isPlChat(state.chat) ? playlistById(state.chat.slice(PL_PREFIX.length)) : null;
+}
+/** Is this file of a playlist's list still in it (taken out here or on another device: it leaves the list)? */
+function inPlaylist(f, scan) {
+  const p = playlistById(scan.playlist);
+  return !!p && p.songs.includes(favId(f, scan));
+}
+
+async function loadPlaylists() {
+  try {
+    state.playlists = (await api("/api/playlists")).playlists || [];
+  } catch {
+    return; // offline: the ones known stay
+  }
+  afterPlaylistsChanged();
+}
+
+/** "Playlist" under the favourites: how many, highlighted while the grid or one of them is open. */
+function renderPlEntry() {
+  const active = state.chat === PL_HOME || isPlChat(state.chat);
+  $("plEntry").classList.toggle("active", active);
+  $("plEntrySub").classList.toggle("text-body-secondary", !active);
+  $("plEntrySub").innerHTML =
+    `<i class="bi bi-collection-play"></i> ${t("{n} playlist", { n: state.playlists.length })}`;
+}
+$("plEntry").addEventListener("click", (e) => {
+  e.preventDefault();
+  openChat(PL_HOME);
+});
+$("plEntry").title = t("Playlist");
+
+const rawChatId = (id) => String(id).replace(/^-(100)?/, "");
+
+/** A cover: the pictures of the chats of its first songs, 2x2 (one big picture when fewer than 4 chats). */
+function plCover(p, extra = "") {
+  const byRaw = new Map(state.dialogs.map((d) => [rawChatId(d.id), d]));
+  const chats = [];
+  for (const song of p.songs) {
+    const d = byRaw.get(song.split("|")[0]);
+    if (d && !chats.includes(d)) chats.push(d);
+    if (chats.length === 4) break;
+  }
+  if (!chats.length)
+    return `<div class="pl-cover"><span class="pl-cover-empty"><i class="bi bi-music-note-list"></i></span>${extra}</div>`;
+  const tiles = chats.length < 4 ? [chats[0]] : chats;
+  return `<div class="pl-cover${tiles.length === 1 ? " one" : ""}">${tiles.map(dialogAvatar).join("")}${extra}</div>`;
+}
+
+function renderPlGrid() {
+  $("plCount").textContent = t("{n} playlist", { n: state.playlists.length });
+  $("plGrid").innerHTML =
+    `<div class="pl-card pl-new" data-pl-new role="button" tabindex="0">
+      <div class="pl-cover"><i class="bi bi-plus-circle"></i><span>${t("Tạo playlist mới")}</span></div></div>` +
+    state.playlists
+      .map(
+        (p) => `<div class="pl-card" data-pl="${esc(p.id)}" role="button" tabindex="0" title="${esc(p.name)}">
+      ${plCover(p, p.songs.length ? `<button class="pl-cover-play" type="button" data-pl-play="${esc(p.id)}" title="${t("Phát")}" aria-label="${t("Phát")}"><i class="bi bi-play-fill"></i></button>` : "")}
+      <div class="dropdown pl-menu">
+        <button class="btn" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="${t("Tuỳ chọn")}"><i class="bi bi-three-dots"></i></button>
+        <ul class="dropdown-menu dropdown-menu-end shadow-sm">
+          <li><button class="dropdown-item" type="button" data-pl-rename="${esc(p.id)}"><i class="bi bi-pencil"></i> ${t("Đổi tên")}</button></li>
+          <li><button class="dropdown-item text-danger" type="button" data-pl-delete="${esc(p.id)}"><i class="bi bi-trash3"></i> ${t("Xoá playlist")}</button></li>
+        </ul>
+      </div>
+      <div class="pl-name">${esc(p.name)}</div>
+      <div class="pl-sub">${t("{n} bài", { n: p.songs.length })}</div></div>`,
+      )
+      .join("");
+}
+
+$("plGrid").addEventListener("click", (e) => {
+  const el = (sel) => e.target.closest(sel);
+  if (el("[data-pl-new]")) return void createPlaylist();
+  if (el("[data-pl-play]")) return void playPlaylist(el("[data-pl-play]").dataset.plPlay);
+  if (el("[data-pl-rename]")) return void renamePlaylist(el("[data-pl-rename]").dataset.plRename);
+  if (el("[data-pl-delete]")) return void deletePlaylist(el("[data-pl-delete]").dataset.plDelete);
+  if (el(".pl-menu")) return; // the ⋯ button
+  const card = el("[data-pl]");
+  if (card) openChat(PL_PREFIX + card.dataset.pl);
+});
+$("plGrid").addEventListener("keydown", (e) => {
+  if ((e.key === "Enter" || e.key === " ") && e.target.matches(".pl-card")) {
+    e.preventDefault();
+    e.target.click();
+  }
+});
+$("plBackBtn").addEventListener("click", () => (history.state?.view === "files" ? history.back() : setView("chats")));
+
+/** The grid in the main pane (instead of a list). */
+function showPlaylists() {
+  state.loadToken++; // a list still being read is dropped
+  stopScan();
+  setScanning(false);
+  state.scan = null;
+  state.selected.clear();
+  $("chatView").classList.remove("fav-view", "search-view", "pl-view");
+  showChat(false);
+  show($("emptyView"), false);
+  $("emptyView").classList.remove("d-flex");
+  $("plView").classList.remove("d-none");
+  $("plView").classList.add("d-flex");
+  renderPlGrid();
+  updateSelection();
+  loadPlaylists();
+}
+
+/** One change (core.js editPlaylists), then everything showing playlists follows; null when it failed. */
+async function editPlaylist(change) {
+  let r;
+  try {
+    r = await api("/api/playlists", change);
+  } catch (err) {
+    toast(err.message, "error");
+    return null;
+  }
+  state.playlists = r.playlists || [];
+  afterPlaylistsChanged(change);
+  return r;
+}
+
+/** The playlists changed (here or on another device): the entry, the grid, the open playlist, the player. */
+function afterPlaylistsChanged(change = null) {
+  renderPlEntry();
+  if (state.chat === PL_HOME) renderPlGrid();
+  // the player: a song taken out is skipped (liveOrder), a new order is followed
+  const ps = state.playScan;
+  if (ps?.playlist) {
+    const p = playlistById(ps.playlist);
+    if (p) {
+      const at = new Map(p.songs.map((k, i) => [k, i]));
+      ps.files.sort((a, b) => (at.get(favId(a, ps)) ?? 1e9) - (at.get(favId(b, ps)) ?? 1e9));
+      state.playQueue = ps.files.filter(playable).map((f) => f.id);
+      if (!state.shuffle) state.playOrder = orderFrom(state.playingId);
+      updateNavButtons();
+    }
+  }
+  if (!isPlChat(state.chat)) return;
+  const p = openPlaylist();
+  if (!p) return void openChat(PL_HOME); // deleted (here or elsewhere)
+  $("chatTitle").textContent = p.name;
+  const scan = state.scan;
+  if (!scan?.playlist) return;
+  scan.title = p.name;
+  const known = new Set(scan.files.map((f) => favId(f, scan)));
+  // songs added (here from another list, or on another device): their details are read again
+  if (p.songs.some((k) => !known.has(k)) && change?.op !== "order") return void loadFiles();
+  if (scan !== ps) {
+    const at = new Map(p.songs.map((k, i) => [k, i]));
+    scan.files.sort((a, b) => (at.get(favId(a, scan)) ?? 1e9) - (at.get(favId(b, scan)) ?? 1e9));
+  }
+  renderFiles();
+}
+
+const PL_NAME_MAX = 80; // core.js PLAYLIST_NAME_MAX
+
+/** Why a playlist name cannot be used ("" when it can): empty, too long, or another playlist's (`except`: its own). */
+function playlistNameError(name, except = null) {
+  const n = name.trim();
+  if (!n) return t("Hãy đặt tên cho playlist");
+  if (n.length > PL_NAME_MAX) return t("Tên playlist tối đa {n} ký tự", { n: PL_NAME_MAX });
+  if (state.playlists.some((p) => p.id !== except && p.name.trim().toLocaleLowerCase() === n.toLocaleLowerCase()))
+    return t("Đã có playlist trùng tên");
+  return "";
+}
+
+let plNameCheck = null; // the open name dialog's check: (typed?) -> can it be saved
+
+/**
+ * "Tạo playlist mới" / "Đổi tên": a name, asked in the usual dialog and checked as it is typed (empty, too long, the
+ * name of another playlist: said under it, "Lưu" greyed). `except`: the playlist being renamed (its own name is fine).
+ */
+async function askPlaylistName(title, value = "", except = null) {
+  let touched = false; // the reason shows once something is typed (or Lưu pressed), not on a new empty dialog
+  plNameCheck = (typed = false) => {
+    touched ||= typed;
+    const input = $("plNameInput");
+    if (!input) return false;
+    const error = playlistNameError(input.value, except);
+    const unchanged = except !== null && input.value.trim() === value.trim();
+    input.classList.toggle("is-invalid", !!error && touched);
+    $("plNameError").textContent = touched ? error : "";
+    $("plNameCount").textContent = `${input.value.trim().length}/${PL_NAME_MAX}`;
+    $("askOk").disabled = !!error || unchanged;
+    return !error && !unchanged;
+  };
+  const ok = await ask({
+    title,
+    body: `<input class="form-control" id="plNameInput" maxlength="${PL_NAME_MAX}" autocomplete="off"
+        placeholder="${t("Tên playlist")}" value="${esc(value)}" aria-describedby="plNameError">
+      <div class="d-flex gap-2 mt-1 small">
+        <span class="text-danger flex-grow-1" id="plNameError" role="alert"></span>
+        <span class="text-body-secondary" id="plNameCount"></span>
+      </div>`,
+    ok: t("Lưu"),
+    validate: () => plNameCheck?.(true) ?? true,
+  });
+  plNameCheck = null;
+  $("askOk").disabled = false; // the dialog is shared
+  return ok ? $("plNameInput")?.value.trim() || null : null;
+}
+$("askModal").addEventListener("shown.bs.modal", () => {
+  const input = $("plNameInput");
+  if (!input) return;
+  plNameCheck?.();
+  input.focus();
+  input.select();
+});
+// the name dialog: checked as it is typed (askPlaylistName sets plNameCheck while it is open)
+$("askBody").addEventListener("input", (e) => e.target.id === "plNameInput" && plNameCheck?.(true));
+$("askBody").addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && e.target.id === "plNameInput") {
+    e.preventDefault();
+    if (plNameCheck?.(true) ?? true) $("askOk").click(); // else the reason shows under the field
+  }
+});
+
+async function createPlaylist(songs = []) {
+  const name = await askPlaylistName(t("Tạo playlist mới"));
+  if (!name) return null;
+  const r = await editPlaylist({ op: "create", name, songs });
+  if (r)
+    toast(
+      songs.length
+        ? t("Đã tạo playlist “{name}” với {n} bài", { name, n: songs.length })
+        : t("Đã tạo playlist “{name}”", { name }),
+    );
+  return r;
+}
+
+async function renamePlaylist(id) {
+  const p = playlistById(id);
+  if (!p) return;
+  const name = await askPlaylistName(t("Đổi tên playlist"), p.name, id);
+  if (name && name !== p.name && (await editPlaylist({ op: "rename", id, name }))) toast(t("Đã đổi tên playlist"));
+}
+
+async function deletePlaylist(id) {
+  const p = playlistById(id);
+  if (!p) return;
+  const ok = await ask({
+    title: t("Xoá playlist"),
+    body: t("Xoá playlist “{name}”? Các bài hát vẫn còn trong kênh của chúng.", { name: esc(p.name) }),
+    ok: t("Xoá"),
+    okClass: "btn-danger",
+  });
+  if (ok && (await editPlaylist({ op: "delete", id }))) toast(t("Đã xoá playlist “{name}”", { name: p.name }), "info");
+}
+
+/** Open a playlist and play it from its first song (or a random one, shuffle on). */
+async function playPlaylist(id, shuffle = false) {
+  if (state.chat !== PL_PREFIX + id || !state.scan?.playlist) await openChat(PL_PREFIX + id);
+  if (!state.scan?.playlist) return;
+  const songs = visibleFiles({ withSearch: false }).filter(playable);
+  if (!songs.length) return toast(t("Playlist chưa có bài nào"), "info");
+  if (shuffle && !state.shuffle) {
+    state.shuffle = true;
+    renderModes();
+  }
+  const first = shuffle ? songs[Math.floor(Math.random() * songs.length)] : songs[0];
+  play(first.id);
+}
+$("plPlayBtn").addEventListener("click", () => openPlaylist() && playPlaylist(openPlaylist().id));
+$("plShuffleBtn").addEventListener("click", () => openPlaylist() && playPlaylist(openPlaylist().id, true));
+$("plRenameBtn").addEventListener("click", () => openPlaylist() && renamePlaylist(openPlaylist().id));
+$("plDeleteBtn").addEventListener("click", () => openPlaylist() && deletePlaylist(openPlaylist().id));
+
+// ---------- adding songs to a playlist: + on a row, or "Thêm vào playlist" for the ticked ones ----------
+
+const plPickModal = new bootstrap.Modal($("plPickModal"));
+let plPicking = []; // the songs ("<chat id>|<message id>") the dialog adds
+
+/** The + of a row / the button above the list: choose a playlist (or make one) for these songs. */
+function pickPlaylist(songs) {
+  plPicking = [...new Set(songs)];
+  if (!plPicking.length) return;
+  $("plPickTitle").textContent =
+    plPicking.length === 1 ? t("Thêm vào playlist") : t("Thêm {n} bài vào playlist", { n: plPicking.length });
+  $("plPickName").value = "";
+  checkPickName(false);
+  renderPlPick();
+  plPickModal.show();
+}
+
+function renderPlPick() {
+  $("plPickList").innerHTML = state.playlists.length
+    ? state.playlists
+        .map((p) => {
+          const all = plPicking.every((k) => p.songs.includes(k));
+          return `<button type="button" class="list-group-item list-group-item-action d-flex align-items-center gap-3 pl-pick-item" data-pick="${esc(p.id)}"${all ? " disabled" : ""}>
+        ${plCover(p)}
+        <span class="min-w-0 flex-grow-1"><span class="d-block text-truncate fw-semibold">${esc(p.name)}</span>
+        <small class="text-body-secondary">${t("{n} bài", { n: p.songs.length })}</small></span>
+        ${all ? `<span class="badge text-bg-success">${t("Đã có")}</span>` : '<i class="bi bi-plus-lg text-body-secondary"></i>'}</button>`;
+        })
+        .join("")
+    : `<div class="text-center text-body-secondary small p-4">${t("Chưa có playlist nào. Đặt tên ở trên để tạo playlist đầu tiên.")}</div>`;
+}
+
+$("plPickList").addEventListener("click", async (e) => {
+  const b = e.target.closest("[data-pick]");
+  if (!b) return;
+  const p = playlistById(b.dataset.pick);
+  const fresh = plPicking.filter((k) => !p.songs.includes(k)).length;
+  const songs = plPicking;
+  plPickModal.hide();
+  if (await editPlaylist({ op: "add", id: p.id, songs })) {
+    toast(
+      fresh < songs.length
+        ? t("Đã thêm {n} bài vào “{name}” ({m} bài đã có sẵn)", { n: fresh, name: p.name, m: songs.length - fresh })
+        : t("Đã thêm {n} bài vào “{name}”", { n: fresh, name: p.name }),
+    );
+    clearPickedSelection(songs);
+  }
+});
+/** The picker's "Tên playlist mới…": the same checks as the name dialog. */
+function checkPickName(typed) {
+  const input = $("plPickName");
+  const error = typed ? playlistNameError(input.value) : "";
+  input.classList.toggle("is-invalid", !!error);
+  $("plPickError").textContent = error;
+  return !error;
+}
+$("plPickName").addEventListener("input", () => $("plPickName").value.trim() && checkPickName(true));
+$("plPickNew").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const name = $("plPickName").value.trim();
+  if (!checkPickName(true)) return $("plPickName").focus();
+  const songs = plPicking;
+  plPickModal.hide();
+  if (await editPlaylist({ op: "create", name, songs })) {
+    toast(t("Đã tạo playlist “{name}” với {n} bài", { name, n: songs.length }));
+    clearPickedSelection(songs);
+  }
+});
+$("plPickModal").addEventListener("shown.bs.modal", () => !state.playlists.length && $("plPickName").focus());
+
+/** Added from the ticked rows: they are unticked (like after a download). */
+function clearPickedSelection(songs) {
+  if (!state.scan || songs.length < 2) return;
+  state.selected.clear();
+  renderFiles();
+}
+
+/** "<chat id>|<message id>" of the open list's playable ticked files. */
+function pickedSongs() {
+  if (!state.scan) return [];
+  return state.scan.files.filter((f) => state.selected.has(f.id) && playable(f)).map((f) => favId(f, state.scan));
+}
+$("addPlBtn").addEventListener("click", () => pickPlaylist(pickedSongs()));
+
+/** The last cell: + (add to a playlist), ✕ (take out) in a playlist's list, then the heart. */
+function plButtons(f, heart) {
+  if (!playable(f) || !state.scan) return heart;
+  const remove = state.scan.playlist
+    ? `<button class="btn btn-sm pl-remove-btn" data-plremove="${f.id}" title="${t("Bỏ khỏi playlist")}" aria-label="${t("Bỏ khỏi playlist")}"><i class="bi bi-x-lg"></i></button>`
+    : "";
+  // phones hide the "#" column, and its grip: one here instead, under the heart
+  const grip = state.scan.playlist
+    ? `<span class="pl-grip pl-grip-m" data-grip title="${t("Kéo để đổi thứ tự")}"><i class="bi bi-grip-horizontal"></i></span>`
+    : "";
+  return `${remove}<button class="btn btn-sm add-pl-btn" data-addpl="${f.id}" title="${t("Thêm vào playlist")}" aria-label="${t("Thêm vào playlist")}"><i class="bi bi-plus-lg"></i></button>${heart}${grip}`;
+}
+
+async function removeFromPlaylist(id) {
+  const scan = state.scan;
+  const f = scan?.files.find((x) => x.id === id);
+  if (!f || !scan.playlist) return;
+  const p = playlistById(scan.playlist);
+  if (await editPlaylist({ op: "remove", id: scan.playlist, songs: [favId(f, scan)] }))
+    toast(t("Đã bỏ “{song}” khỏi “{name}”", { song: displayName(f), name: p?.name || "" }), "info");
+}
+
+// ---------- a playlist's songs dragged by their grip to a new place (mouse and touch) ----------
+
+let plDrag = null; // { row, pointer, moved }
+
+$("files").addEventListener("pointerdown", (e) => {
+  const grip = e.target.closest("[data-grip]");
+  if (!grip || !state.scan?.playlist || !$("chatView").classList.contains("pl-sortable")) return;
+  e.preventDefault();
+  const row = grip.closest("tr");
+  plDrag = { row, pointer: e.pointerId, moved: false };
+  row.classList.add("pl-dragging");
+  document.body.classList.add("pl-drag-on");
+  grip.setPointerCapture(e.pointerId);
+});
+$("files").addEventListener("pointermove", (e) => {
+  if (!plDrag || e.pointerId !== plDrag.pointer) return;
+  const over = document.elementFromPoint(e.clientX, e.clientY)?.closest("#files tr");
+  if (over && over !== plDrag.row) {
+    const r = over.getBoundingClientRect();
+    over.parentNode.insertBefore(plDrag.row, e.clientY > r.top + r.height / 2 ? over.nextSibling : over);
+    plDrag.moved = true;
+  }
+  // near the top / bottom edge: the list scrolls
+  const w = $("filesWrap").getBoundingClientRect();
+  if (e.clientY < w.top + 48) $("filesWrap").scrollTop -= 14;
+  else if (e.clientY > w.bottom - 48) $("filesWrap").scrollTop += 14;
+});
+async function endPlDrag(e) {
+  if (!plDrag || e.pointerId !== plDrag.pointer) return;
+  const { row, moved } = plDrag;
+  plDrag = null;
+  row.classList.remove("pl-dragging");
+  document.body.classList.remove("pl-drag-on");
+  const scan = state.scan;
+  if (!moved || !scan?.playlist) return;
+  const ids = [...$("files").querySelectorAll("tr[data-id]")].map((tr) => Number(tr.dataset.id));
+  const pos = new Map(ids.map((id, i) => [id, i]));
+  scan.files.sort((a, b) => (pos.get(a.id) ?? 1e9) - (pos.get(b.id) ?? 1e9)); // at once, before the server answers
+  renderFiles();
+  await editPlaylist({ op: "order", id: scan.playlist, songs: scan.files.map((f) => favId(f, scan)) });
+}
+$("files").addEventListener("pointerup", endPlDrag);
+$("files").addEventListener("pointercancel", endPlDrag);
+
 // ---------- sidebar as a rail of icons (576–1023px) ----------
 
 const railMode = () => matchMedia("(min-width: 576px) and (max-width: 1023.98px) and (min-height: 501px)").matches;
@@ -2212,14 +2665,14 @@ function rowHtml(f, num) {
   return `<tr class="${cls}" data-id="${f.id}">
     <td class="ps-3"><input class="form-check-input" type="checkbox" ${sel ? "checked" : ""} tabindex="-1"></td>
     <td class="play">${playCell(f)}</td>
-    <td class="text-body-secondary small">${num}</td>
+    <td class="text-body-secondary small">${state.scan?.playlist ? `<span class="pl-grip" data-grip title="${t("Kéo để đổi thứ tự")}"><i class="bi bi-grip-vertical"></i></span>` : ""}${num}</td>
     <td class="text-truncate name-cell"><div class="name-main">${esc(displayName(f))}</div>
       ${file ? `<div class="small text-body-secondary text-truncate name-file">${file}</div>` : ""}
       ${posted ? `<div class="small text-body-secondary text-truncate name-file name-posted">${posted}</div>` : ""}
       ${f.chat ? `<div class="small text-truncate fav-chat"><i class="bi bi-megaphone"></i> ${esc(f.chat)}</div>` : ""}
       <div class="m-meta small text-body-secondary"><span class="m-size">${[fmt(f.size), fmtDur(f.duration)].filter(Boolean).join(" · ")}</span><span class="state-m">${stateCell(f)}</span></div></td>
     <td class="text-end text-body-secondary small">${fmt(f.size)}${f.duration ? `<div>${fmtDur(f.duration)}</div>` : ""}</td>
-    <td class="fav">${favCell(f)}</td></tr>`;
+    <td class="fav">${plButtons(f, favCell(f))}</td></tr>`;
 }
 
 /** "Bài hát yêu thích": one choice per chat that has favourites (with how many), plus "all chats". */
@@ -2251,6 +2704,11 @@ $("favScope").addEventListener("change", (e) => {
 
 function renderFiles() {
   renderFavScope();
+  // a playlist in its own order, nothing hidden by the search: its songs can be dragged to a new place
+  $("chatView").classList.toggle(
+    "pl-sortable",
+    !!state.scan.playlist && state.sort === "default" && !state.query.trim(),
+  );
   const files = visibleFiles();
   const index = new Map(state.scan.files.map((f, i) => [f.id, i + 1]));
   const more = state.scan.more ? "+" : ""; // more pages to load: the total is not known yet
@@ -2263,12 +2721,15 @@ function renderFiles() {
   syncFilterSheet();
   if (!files.length) {
     const favEmpty = state.scan.fav && !state.scan.files.some((f) => state.favorites.has(f.fav));
+    const plEmpty = state.scan.playlist && !state.scan.files.some((f) => inPlaylist(f, state.scan));
     setMessage(
-      favEmpty
-        ? `<i class="bi bi-heart display-5 fav-empty"></i><p class="mt-2 mb-1">${t("Chưa có bài hát yêu thích")}</p><p class="small">${t('Mở một kênh và bấm <i class="bi bi-heart"></i> ở cuối mỗi dòng để thêm vào đây.')}</p>`
-        : state.scan.files.length
-          ? t("Không có file khớp bộ lọc")
-          : `<i class="bi bi-inbox display-5"></i><p class="mt-2">${t("Kênh không có file loại này")}</p>`,
+      plEmpty
+        ? `<i class="bi bi-music-note-list display-5 text-primary"></i><p class="mt-2 mb-1">${t("Playlist chưa có bài nào")}</p><p class="small">${t('Mở một kênh và bấm <i class="bi bi-plus-lg"></i> ở mỗi bài để thêm vào đây.')}</p>`
+        : favEmpty
+          ? `<i class="bi bi-heart display-5 fav-empty"></i><p class="mt-2 mb-1">${t("Chưa có bài hát yêu thích")}</p><p class="small">${t('Mở một kênh và bấm <i class="bi bi-heart"></i> ở cuối mỗi dòng để thêm vào đây.')}</p>`
+          : state.scan.files.length
+            ? t("Không có file khớp bộ lọc")
+            : `<i class="bi bi-inbox display-5"></i><p class="mt-2">${t("Kênh không có file loại này")}</p>`,
     );
   } else {
     $("filesMsg").innerHTML = "";
@@ -2286,7 +2747,7 @@ const PAGE_SIZE = 500; // same as core.js
 function renderMore() {
   const scan = state.scan;
   $("filesMore").innerHTML =
-    !scan || scan.fav
+    !scan || scan.fav || scan.playlist
       ? ""
       : state.loadingMore
         ? `<span class="spinner-border spinner-border-sm text-primary"></span> ${t("Đang tải thêm…")}`
@@ -2299,7 +2760,7 @@ function renderMore() {
 
 async function loadMore() {
   const scan = state.scan;
-  if (!scan?.more || scan.fav || state.loadingMore || state.scanning) return;
+  if (!scan?.more || scan.fav || scan.playlist || state.loadingMore || state.scanning) return;
   const token = state.loadToken;
   state.loadingMore = true;
   renderMore();
@@ -2353,7 +2814,7 @@ function updateRow(id) {
   if (f) {
     row.querySelector(".state-m").innerHTML = stateCell(f);
     row.querySelector(".play").innerHTML = playCell(f);
-    row.querySelector(".fav").innerHTML = favCell(f);
+    row.querySelector(".fav").innerHTML = plButtons(f, favCell(f));
   }
 }
 
@@ -2364,6 +2825,7 @@ function updateSelection() {
     ? `<span class="badge text-bg-primary rounded-pill">${files.length}</span> <span class="d-none d-sm-inline">${t("file được chọn")}</span><span class="d-sm-none">${t("bài")}</span>${total ? ` · <strong>${fmt(total)}</strong>` : ""}`
     : `<span class="small text-body-secondary hint">${t("<kbd>Shift</kbd> + bấm để chọn liên tiếp")}</span>`;
   $("downloadBtn").disabled = !files.length;
+  $("addPlBtn").disabled = !files.some(playable);
   $("downloadBtn").querySelector("span").textContent = files.length
     ? t("Tải xuống ({n})", { n: files.length })
     : t("Tải xuống");
@@ -2375,6 +2837,14 @@ function updateSelection() {
 }
 
 $("files").addEventListener("click", (e) => {
+  const addPl = e.target.closest("[data-addpl]");
+  if (addPl) {
+    const f = state.scan.files.find((x) => x.id === Number(addPl.dataset.addpl));
+    return f && pickPlaylist([favId(f, state.scan)]);
+  }
+  const removePl = e.target.closest("[data-plremove]");
+  if (removePl) return removeFromPlaylist(Number(removePl.dataset.plremove));
+  if (e.target.closest("[data-grip]")) return; // dragged, not clicked
   const favBtn = e.target.closest("[data-fav]");
   if (favBtn) return toggleFav(Number(favBtn.dataset.fav));
   const playBtn = e.target.closest("[data-play]");
@@ -2568,7 +3038,7 @@ function showPlayingList() {
     state.selected.clear();
     state.query = "";
     $("fileSearch").value = "";
-    if (!scan.fav) {
+    if (!scan.fav && !scan.playlist) {
       state.type = scan.key.split("|")[1] || state.type; // the list was read with this type filter
       document
         .querySelectorAll("#typeSeg button")
@@ -2576,6 +3046,7 @@ function showPlayingList() {
     }
     $("chatView").classList.toggle("fav-view", scan.fav === true);
     $("chatView").classList.toggle("search-view", scan.search === true);
+    $("chatView").classList.toggle("pl-view", !!scan.playlist);
     state.scan = scan;
     showChat(true);
     $("chatTitle").textContent = scanTitle(scan);
@@ -2609,7 +3080,7 @@ function goHome() {
   state.selected.clear();
   state.query = "";
   $("fileSearch").value = "";
-  $("chatView").classList.remove("fav-view", "search-view");
+  $("chatView").classList.remove("fav-view", "search-view", "pl-view");
   showChat(false);
   renderDialogs();
   updateSelection();
@@ -2744,6 +3215,10 @@ function playFrom(scan, id) {
  */
 function liveOrder() {
   const scan = state.playScan;
+  if (scan?.playlist) {
+    const byId = new Map(scan.files.map((f) => [f.id, f]));
+    return state.playOrder.filter((id) => id === state.playingId || (byId.has(id) && inPlaylist(byId.get(id), scan)));
+  }
   if (!scan?.fav) return state.playOrder;
   const byId = new Map(scan.files.map((f) => [f.id, f]));
   return state.playOrder.filter(
@@ -3266,16 +3741,19 @@ async function restorePlayback() {
   try {
     const fav = saved.chat === FAV_CHAT;
     const recent = saved.chat === "recent";
+    const plId = isPlChat(saved.chat) ? saved.chat.slice(PL_PREFIX.length) : null;
     const search = isSearchChat(saved.chat) ? saved.chat.slice(SEARCH_CHAT.length) : null;
     if (search !== null && !saved.fav) return;
-    const type = fav || recent || search !== null ? null : String(saved.key).split("|")[1] || "all";
+    const type = fav || recent || plId !== null || search !== null ? null : String(saved.key).split("|")[1] || "all";
     let scan = fav
       ? await api("/api/favorites/files")
-      : recent
-        ? await api("/api/recent/files")
-        : search !== null
-          ? await api(`/api/search/songs?q=${encodeURIComponent(search)}`)
-          : await api(`/api/files?chat=${encodeURIComponent(saved.chat)}&type=${encodeURIComponent(type)}`);
+      : plId !== null
+        ? await api(`/api/playlists/files?id=${encodeURIComponent(plId)}`)
+        : recent
+          ? await api("/api/recent/files")
+          : search !== null
+            ? await api(`/api/search/songs?q=${encodeURIComponent(search)}`)
+            : await api(`/api/files?chat=${encodeURIComponent(saved.chat)}&type=${encodeURIComponent(type)}`);
     const isSaved = (f) => (search !== null ? f.fav === saved.fav : f.id === saved.id);
     // the song may be on a later page of a long list (500 files each; 50 for a song search)
     for (let pages = 0; !scan.files.some(isSaved) && scan.more && pages < (search !== null ? 4 : 20); pages++) {
@@ -3544,8 +4022,11 @@ async function hideOpenModals() {
 
 let askResolve = null;
 /** Bootstrap yes/no dialog; resolves true when confirmed. */
-async function ask({ title, body, ok = t("Đồng ý"), okClass = "btn-primary" }) {
+/** `validate`: before closing on "OK" — returns false to keep the dialog open (it shows why itself). */
+let askValidate = null;
+async function ask({ title, body, ok = t("Đồng ý"), okClass = "btn-primary", validate = null }) {
   await hideOpenModals();
+  askValidate = validate;
   $("askTitle").innerHTML = title;
   $("askBody").innerHTML = body;
   $("askOk").className = `btn ${okClass}`;
@@ -3557,6 +4038,7 @@ async function ask({ title, body, ok = t("Đồng ý"), okClass = "btn-primary" 
 }
 let askAnswer = false;
 $("askOk").addEventListener("click", () => {
+  if (askValidate && !askValidate()) return;
   askAnswer = true;
   askModal.hide();
 });
@@ -3566,6 +4048,7 @@ $("askModal").addEventListener("hidden.bs.modal", () => {
   askResolve = null;
   r?.(askAnswer);
   askAnswer = false;
+  askValidate = null;
 });
 
 // ---------- folder picker ----------

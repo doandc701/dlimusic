@@ -456,5 +456,42 @@
     "Telegram từ chối đăng nhập ({code}). Vui lòng thử lại.":
       "Telegram がログインを拒否しました（{code}）。もう一度お試しください。",
     "Đăng nhập không thành công. Vui lòng thử lại.": "ログインに失敗しました。もう一度お試しください。",
+    // playlists
+    Playlist: "プレイリスト",
+    "{n} playlist": "{n} 件のプレイリスト",
+    "{n} bài trong playlist không còn mở được (đã rời kênh hoặc tin đã bị xoá)":
+      "プレイリストの {n} 曲を開けません（チャンネルを退出したかメッセージが削除されました）",
+    "Tạo playlist mới": "新しいプレイリスト",
+    "Tuỳ chọn": "オプション",
+    "Đổi tên": "名前を変更",
+    "Xoá playlist": "プレイリストを削除",
+    "{n} bài": "{n} 曲",
+    "Tên playlist": "プレイリスト名",
+    "Đã tạo playlist “{name}” với {n} bài": "プレイリスト「{name}」を {n} 曲で作成しました",
+    "Đã tạo playlist “{name}”": "プレイリスト「{name}」を作成しました",
+    "Đổi tên playlist": "プレイリストの名前を変更",
+    "Đã đổi tên playlist": "プレイリストの名前を変更しました",
+    "Xoá playlist “{name}”? Các bài hát vẫn còn trong kênh của chúng.":
+      "プレイリスト「{name}」を削除しますか？曲はそれぞれのチャンネルに残ります。",
+    "Đã xoá playlist “{name}”": "プレイリスト「{name}」を削除しました",
+    "Playlist chưa có bài nào": "このプレイリストにはまだ曲がありません",
+    "Thêm vào playlist": "プレイリストに追加",
+    "Thêm {n} bài vào playlist": "{n} 曲をプレイリストに追加",
+    "Chưa có playlist nào. Đặt tên ở trên để tạo playlist đầu tiên.":
+      "プレイリストはまだありません。上に名前を入力して最初のプレイリストを作成しましょう。",
+    "Đã thêm {n} bài vào “{name}” ({m} bài đã có sẵn)": "「{name}」に {n} 曲を追加しました（{m} 曲は追加済み）",
+    "Đã thêm {n} bài vào “{name}”": "「{name}」に {n} 曲を追加しました",
+    "Bỏ khỏi playlist": "プレイリストから削除",
+    "Kéo để đổi thứ tự": "ドラッグして並べ替え",
+    "Đã bỏ “{song}” khỏi “{name}”": "「{song}」を「{name}」から削除しました",
+    'Mở một kênh và bấm <i class="bi bi-plus-lg"></i> ở mỗi bài để thêm vào đây.':
+      'チャンネルを開き、曲の <i class="bi bi-plus-lg"></i> を押すとここに追加されます。',
+    "Phát tất cả": "すべて再生",
+    "Phát ngẫu nhiên": "シャッフル再生",
+    "Tên playlist mới…": "新しいプレイリスト名…",
+    "Tạo & thêm": "作成して追加",
+    "Hãy đặt tên cho playlist": "プレイリストに名前を付けてください",
+    "Tên playlist tối đa {n} ký tự": "プレイリスト名は {n} 文字までです",
+    "Đã có playlist trùng tên": "同じ名前のプレイリストがすでにあります",
   },
 };

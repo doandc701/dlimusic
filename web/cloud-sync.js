@@ -196,6 +196,7 @@ export function createCloudSync({
     [keys.visibleChats]: "visibleChats",
     [keys.favorites]: "favorites",
     [keys.recent]: "recent",
+    [keys.playlists]: "playlists",
   };
   let account = null; // the token's account, while connected
   let retryTimer = null;

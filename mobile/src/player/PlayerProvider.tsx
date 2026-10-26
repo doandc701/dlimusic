@@ -269,6 +269,19 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
    * is left out (the playing one plays on; hearted again, it is back in its place) — read each time a song is picked.
    */
   function queue(list: FileList, playing: Song) {
+    // a playlist: its songs as they are now, in its order now (re-ordered / taken out since it started)
+    if (list.kind === "playlist") {
+      const p = library.playlists.find((x) => x.id === list.playlistId);
+      const at = new Map((p?.songs ?? []).map((k, i) => [k, i]));
+      // the playing song taken out of it: kept where it was (just before the song that followed it), so "next" is
+      // that one
+      if (!at.has(playing.key)) {
+        const i = list.songs.findIndex((s) => s.key === playing.key);
+        const after = list.songs.slice(i + 1).find((s) => at.has(s.key));
+        at.set(playing.key, after ? at.get(after.key)! - 0.5 : at.size);
+      }
+      return list.songs.filter((s) => playable(s) && at.has(s.key)).sort((a, b) => at.get(a.key)! - at.get(b.key)!);
+    }
     return list.songs.filter(
       (s) => playable(s) && (list.kind !== "fav" || s.key === playing.key || library.isFavorite(s.key)),
     );

@@ -349,6 +349,18 @@
             <small class="d-block text-truncate text-body-secondary" id="favEntrySub">0 bài</small></span
           ></a
         >
+        <!-- "Playlist": the account's playlists (like Zing MP3's), each with songs from any chat -->
+        <a
+          class="list-group-item list-group-item-action dialog-item fav-entry pl-entry d-flex align-items-center gap-2"
+          id="plEntry"
+          href="#"
+          role="button"
+        >
+          <span class="avatar rounded-circle pl-avatar"><i class="bi bi-music-note-list"></i></span>
+          <span class="min-w-0 side-text"
+            ><span class="d-block text-truncate fw-semibold">Playlist</span>
+            <small class="d-block text-truncate text-body-secondary" id="plEntrySub"></small></span
+        ></a>
         <div class="chats-bar d-none" id="chatsBar"></div>
         <div class="list-group list-group-flush overflow-auto flex-grow-1" id="dialogs">
           <div class="text-center p-4"><span class="spinner-border spinner-border-sm text-primary"></span></div>
@@ -388,6 +400,24 @@
               aria-label="Hai chú mèo con đang nhảy theo nhạc"
             ></div>
             <p class="small mt-2"><span class="hint-phone">Chạm vào mèo để chọn kênh</span></p>
+          </div>
+        </div>
+
+        <!-- the playlists: a grid of covers, "Tạo playlist mới" first (like Zing MP3) -->
+        <div class="flex-grow-1 d-none flex-column min-h-0 overflow-hidden" id="plView">
+          <div class="bg-body border-bottom px-3 py-2 d-flex align-items-center gap-2 chat-head">
+            <button
+              class="btn btn-sm btn-outline-secondary btn-icon d-sm-none flex-none"
+              id="plBackBtn"
+              title="Danh sách kênh"
+            >
+              <i class="bi bi-chevron-left"></i>
+            </button>
+            <h5 class="mb-0 flex-grow-1 text-truncate">Playlist</h5>
+            <span class="small text-body-secondary" id="plCount"></span>
+          </div>
+          <div class="flex-grow-1 overflow-auto bg-body p-3 p-sm-4">
+            <div class="pl-grid" id="plGrid"></div>
           </div>
         </div>
 
@@ -445,6 +475,21 @@
                 <i class="bi bi-grid"></i> <span class="d-none d-lg-inline">Tất cả</span>
               </button>
             </div>
+            <!-- a playlist: play it all / shuffled, rename, delete -->
+            <div class="pl-tools align-items-center gap-1 flex-none" id="plTools">
+              <button class="btn btn-sm btn-primary pl-play" id="plPlayBtn" title="Phát tất cả">
+                <i class="bi bi-play-fill"></i> <span class="d-none d-md-inline">Phát tất cả</span>
+              </button>
+              <button class="btn btn-sm btn-outline-primary btn-icon" id="plShuffleBtn" title="Phát ngẫu nhiên">
+                <i class="bi bi-shuffle"></i>
+              </button>
+              <button class="btn btn-sm btn-outline-secondary btn-icon" id="plRenameBtn" title="Đổi tên playlist">
+                <i class="bi bi-pencil"></i>
+              </button>
+              <button class="btn btn-sm btn-outline-danger btn-icon" id="plDeleteBtn" title="Xoá playlist">
+                <i class="bi bi-trash3"></i>
+              </button>
+            </div>
             <div class="btn-group btn-group-sm flex-none" role="group">
               <button class="btn btn-outline-secondary btn-icon" id="reloadBtn" title="Quét lại">
                 <i class="bi bi-arrow-clockwise"></i>
@@ -478,6 +523,9 @@
             <div class="ms-auto d-flex align-items-center gap-2 dl-tools">
               <span id="selInfo" class="small"></span>
               <span class="small text-body-secondary d-none d-sm-inline" id="fileCount"></span>
+              <button class="btn btn-sm btn-outline-primary" id="addPlBtn" disabled title="Thêm vào playlist">
+                <i class="bi bi-plus-lg"></i> <span class="d-none d-md-inline">Thêm vào playlist</span>
+              </button>
               <button class="btn btn-sm btn-primary px-3" id="downloadBtn" disabled>
                 <i class="bi bi-download"></i> <span>Tải xuống</span>
               </button>
@@ -739,6 +787,34 @@
           <div class="modal-footer">
             <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Huỷ</button>
             <button type="button" class="btn btn-primary" id="askOk">Đồng ý</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ add to a playlist ============ -->
+    <div class="modal fade" id="plPickModal" tabindex="-1" aria-labelledby="plPickTitle" aria-hidden="true">
+      <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable pl-pick-dialog">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title" id="plPickTitle">Thêm vào playlist</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Đóng"></button>
+          </div>
+          <div class="modal-body p-0">
+            <form class="d-flex gap-2 p-3 border-bottom" id="plPickNew">
+              <input
+                class="form-control form-control-sm"
+                id="plPickName"
+                maxlength="80"
+                placeholder="Tên playlist mới…"
+                autocomplete="off"
+              />
+              <button class="btn btn-sm btn-primary text-nowrap" type="submit">
+                <i class="bi bi-plus-lg"></i> Tạo &amp; thêm
+              </button>
+            </form>
+            <div class="small text-danger px-3 pt-2 empty-hide" id="plPickError" role="alert"></div>
+            <div class="list-group list-group-flush" id="plPickList"></div>
           </div>
         </div>
       </div>

@@ -116,6 +116,7 @@ before(async () => {
       VISIBLE_CHATS_FILE: path.join(TMP, "visible-chats.json"),
       FAVORITES_FILE: path.join(TMP, "favorites.json"),
       RECENT_FILE: path.join(TMP, "recent.json"),
+      PLAYLISTS_FILE: path.join(TMP, "playlists.json"),
       MONGODB_URI: "",
     },
     stdio: ["ignore", "pipe", "pipe"],
@@ -712,6 +713,48 @@ describe("telegram (real account)", () => {
     assert.equal((await first.done).scanId, null);
     ctrl.abort();
     await req;
+  });
+
+  test("playlists: made, renamed, songs added / removed / reordered, deleted; validated", async (t) => {
+    if (!ready) return t.skip("no logged-in session.txt");
+    const me = (await api("/api/status")).data.me;
+    const post = (body) => api("/api/playlists", { method: "POST", body });
+    // a run stopped half-way left some: start from none
+    for (const p of (await api("/api/playlists")).data.playlists) await post({ op: "delete", id: p.id });
+    assert.deepEqual((await api("/api/playlists")).data, { playlists: [] });
+    const made = await post({ op: "create", name: "  Chill  ", songs: ["1|1"] });
+    assert.equal(made.status, 200);
+    const id = made.data.id;
+    assert.deepEqual(
+      made.data.playlists.map((p) => [p.id, p.name, p.songs]),
+      [[id, "Chill", ["1|1"]]],
+    );
+    assert.deepEqual((await post({ op: "add", id, songs: ["1|1", "2|5", "3|9"] })).data.playlists[0].songs, [
+      "1|1",
+      "2|5",
+      "3|9",
+    ]);
+    assert.deepEqual((await post({ op: "order", id, songs: ["3|9", "1|1", "2|5"] })).data.playlists[0].songs, [
+      "3|9",
+      "1|1",
+      "2|5",
+    ]);
+    assert.deepEqual((await post({ op: "remove", id, songs: ["1|1"] })).data.playlists[0].songs, ["3|9", "2|5"]);
+    assert.equal((await post({ op: "rename", id, name: "Chill out" })).data.playlists[0].name, "Chill out");
+    assert.equal(JSON.parse(fs.readFileSync(path.join(TMP, "playlists.json"), "utf8"))[me.id][0].name, "Chill out");
+    assert.equal(fs.statSync(path.join(TMP, "playlists.json")).mode & 0o777, 0o600);
+    for (const bad of [
+      { op: "create", name: "   " },
+      { op: "create", name: "chill OUT" }, // the name of another playlist (letters' case aside)
+      { op: "rename", id, name: "" },
+      { op: "add", id: "nope", songs: ["1|1"] },
+      { op: "order", id, songs: ["9|9"] },
+      { op: "explode", id },
+    ])
+      assert.equal((await post(bad)).status, 400, JSON.stringify(bad));
+    assert.equal((await api(`/api/playlists/files?id=nope`)).status, 404);
+    assert.deepEqual((await post({ op: "delete", id })).data.playlists, []);
+    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(TMP, "playlists.json"), "utf8")), {}, "empty: not kept");
   });
 
   test("favourites: added / removed per account, newest first, validated", async (t) => {

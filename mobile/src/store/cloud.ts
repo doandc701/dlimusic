@@ -20,7 +20,7 @@ export const CLOUD_URL = (
 const TOKEN_KEY = "cloud.token"; // { token, account } in the phone's secure storage
 const RETRY_MS = 60_000;
 
-export type SharedName = "settings" | "history" | "visibleChats" | "favorites" | "recent";
+export type SharedName = "settings" | "history" | "visibleChats" | "favorites" | "recent" | "playlists";
 export type CloudStatus = { connected: boolean; error: string | null; lastSync: number | null; off?: boolean };
 type CloudError = Error & { status?: number; code?: string };
 

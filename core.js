@@ -796,13 +796,14 @@ export async function readPage(
 // ---------- data shared by every device of an account (kept in MongoDB) ----------
 // settings: { subfolderPerChat } (the download folder belongs to each device) · history: entries, newest
 // first · visibleChats: chat ids or null (= all) · favorites: "<chat id>|<message id>", newest first ·
-// recent: the songs played lately, { id: "<chat id>|<message id>", at, … }, newest first.
+// recent: the songs played lately, { id: "<chat id>|<message id>", at, … }, newest first · playlists:
+// { id, name, songs: ["<chat id>|<message id>"…] in their order, at (made), up (last changed) }.
 // Devices send operations, not whole copies, so two devices changing things at once lose nothing.
 
-export const ACCOUNT_NAMES = ["settings", "history", "visibleChats", "favorites", "recent"];
+export const ACCOUNT_NAMES = ["settings", "history", "visibleChats", "favorites", "recent", "playlists"];
 export const HISTORY_MAX = 2000;
 export const RECENT_MAX = 100;
-const LISTS = new Set(["history", "favorites", "recent"]);
+const LISTS = new Set(["history", "favorites", "recent", "playlists"]);
 /** Lists of entries with an id (history, recent plays) and how many are kept. */
 const ENTRY_MAX = { history: HISTORY_MAX, recent: RECENT_MAX };
 
@@ -813,6 +814,15 @@ const same = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 
 /** Operations turning `before` into `after`. */
 export function accountOps(name, before, after) {
+  if (name === "playlists") {
+    // one playlist at a time: two devices editing different playlists both keep their changes
+    const b = new Map((before || []).map((p) => [p.id, p]));
+    const aIds = new Set((after || []).map((p) => p.id));
+    const removed = [...b.keys()].filter((id) => !aIds.has(id));
+    const ops = removed.length ? [{ op: "remove", ids: removed }] : [];
+    for (const p of [...(after || [])].reverse()) if (!same(b.get(p.id), p)) ops.push({ op: "put", playlist: p });
+    return ops;
+  }
   if (name === "favorites") {
     const b = new Set(before || []);
     const a = new Set(after || []);
@@ -850,12 +860,91 @@ export function applyAccountOps(name, value, ops) {
     else if (o.op === "clear") v = [];
     else if (name === "favorites" && o.op === "add") v = [o.id, ...v.filter((x) => x !== o.id)];
     else if (name === "favorites" && o.op === "remove") v = v.filter((x) => x !== o.id);
+    else if (name === "playlists" && o.op === "put")
+      v = [o.playlist, ...v.filter((p) => p.id !== o.playlist.id)].slice(0, PLAYLISTS_MAX);
+    else if (name === "playlists" && o.op === "remove") v = v.filter((p) => !o.ids.includes(p.id));
     else if (name in ENTRY_MAX && o.op === "add") {
       const ids = new Set(o.entries.map((h) => h.id));
       v = [...o.entries, ...v.filter((h) => !ids.has(h.id))].slice(0, ENTRY_MAX[name]);
     } else if (name in ENTRY_MAX && o.op === "remove") v = v.filter((h) => !o.ids.includes(h.id));
   }
   return v;
+}
+
+// ---------- playlists (like Zing MP3's: made by the user, songs from any chat, in the order chosen) ----------
+
+export const PLAYLISTS_MAX = 200;
+export const PLAYLIST_SONGS_MAX = 1000;
+export const PLAYLIST_NAME_MAX = 80;
+
+/** A new playlist id: no two devices pick the same one. */
+export const newPlaylistId = () =>
+  Date.now().toString(36) +
+  Math.floor(Math.random() * 36 ** 6)
+    .toString(36)
+    .padStart(6, "0");
+
+/** The newest first (made last). */
+export const sortPlaylists = (list) => [...list].sort((a, b) => (b.at || 0) - (a.at || 0));
+
+/** A playlist as stored, cleaned; null when it is not one. */
+export function cleanPlaylist(p) {
+  if (!p || typeof p !== "object" || Array.isArray(p)) return null;
+  const id = typeof p.id === "string" && /^[a-z0-9]{4,24}$/.test(p.id) ? p.id : null;
+  const name = typeof p.name === "string" ? p.name.trim().slice(0, PLAYLIST_NAME_MAX) : "";
+  if (!id || !name || !Array.isArray(p.songs) || p.songs.length > PLAYLIST_SONGS_MAX) return null;
+  if (!p.songs.every(isFavoriteId)) return null;
+  const at = Number.isSafeInteger(p.at) ? p.at : 0;
+  const up = Number.isSafeInteger(p.up) ? p.up : at;
+  return { id, name, songs: [...new Set(p.songs)], at, up };
+}
+
+/**
+ * A change to the account's playlists, the same everywhere (local server, browser version, app). Returns the new
+ * list (and the id of a playlist made); throws an Error with a message to show when the change is not valid.
+ *   { op: "create", name, songs? }   { op: "rename", id, name }   { op: "delete", id }
+ *   { op: "add", id, songs }  (to the end, the ones already there stay where they are)
+ *   { op: "remove", id, songs }   { op: "order", id, songs }  (the same songs in a new order)
+ */
+export function editPlaylists(list, change, now = Date.now()) {
+  const playlists = list || [];
+  const name = typeof change?.name === "string" ? change.name.trim().slice(0, PLAYLIST_NAME_MAX) : "";
+  // another playlist already has this name (letters compared without case: "Chill" = "chill")
+  const taken = (except) =>
+    playlists.some((x) => x.id !== except && x.name.trim().toLocaleLowerCase() === name.toLocaleLowerCase());
+  const songs = Array.isArray(change?.songs) ? change.songs.filter(isFavoriteId) : [];
+  if (change?.op === "create") {
+    if (!name) throw new Error("Hãy đặt tên cho playlist");
+    if (taken(null)) throw new Error("Đã có playlist trùng tên");
+    if (playlists.length >= PLAYLISTS_MAX) throw new Error(`Tối đa ${PLAYLISTS_MAX} playlist`);
+    const p = { id: newPlaylistId(), name, songs: [...new Set(songs)].slice(0, PLAYLIST_SONGS_MAX), at: now, up: now };
+    return { playlists: [p, ...playlists], id: p.id };
+  }
+  const p = playlists.find((x) => x.id === change?.id);
+  if (!p) throw new Error("Không tìm thấy playlist");
+  const put = (q) => ({ playlists: playlists.map((x) => (x.id === p.id ? { ...q, up: now } : x)), id: p.id });
+  switch (change.op) {
+    case "rename":
+      if (!name) throw new Error("Hãy đặt tên cho playlist");
+      if (taken(p.id)) throw new Error("Đã có playlist trùng tên");
+      return put({ ...p, name });
+    case "delete":
+      return { playlists: playlists.filter((x) => x.id !== p.id), id: p.id };
+    case "add": {
+      const more = [...new Set(songs)].filter((s) => !p.songs.includes(s));
+      if (p.songs.length + more.length > PLAYLIST_SONGS_MAX)
+        throw new Error(`Một playlist có tối đa ${PLAYLIST_SONGS_MAX} bài`);
+      return put({ ...p, songs: [...p.songs, ...more] });
+    }
+    case "remove":
+      return put({ ...p, songs: p.songs.filter((s) => !songs.includes(s)) });
+    case "order":
+      // only the same songs, each once (a device that missed a change sends an order without it: kept at the end)
+      if (songs.some((s) => !p.songs.includes(s))) throw new Error("Thứ tự không khớp playlist");
+      return put({ ...p, songs: [...new Set([...songs, ...p.songs])] });
+    default:
+      throw new Error("Thao tác không hợp lệ");
+  }
 }
 
 /** A history id that two devices will not both pick (the old ones were 1, 2, 3… on every device). */
@@ -867,6 +956,13 @@ export const newHistoryId = () => Date.now() * 1000 + Math.floor(Math.random() *
  */
 export function mergeAccount(name, mine, theirs) {
   if (name === "favorites") return [...new Set([...(theirs || []), ...(mine || [])])];
+  if (name === "playlists") {
+    // the same playlist changed on two devices: the one changed last
+    const byId = new Map();
+    for (const p of [...(theirs || []), ...(mine || [])])
+      if (!byId.has(p.id) || (p.up || 0) > (byId.get(p.id).up || 0)) byId.set(p.id, p);
+    return sortPlaylists([...byId.values()]).slice(0, PLAYLISTS_MAX);
+  }
   if (name === "history") {
     const byId = new Map((theirs || []).map((h) => [h.id, h]));
     for (const h of mine || []) {

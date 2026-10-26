@@ -28,6 +28,8 @@ import {
   isFavoriteId,
   RECENT_MAX,
   FAVORITES_LIMIT,
+  editPlaylists,
+  sortPlaylists,
   QR_LOGIN,
   loginQr,
   newHistoryId,
@@ -58,6 +60,7 @@ const STORE = {
   visibleChats: "tdl.visibleChats",
   favorites: "tdl.favorites",
   recent: "tdl.recent",
+  playlists: "tdl.playlists", // { "<account id>": [{ id, name, songs, at, up }] } (core.js)
 };
 
 // API ID / hash baked in at build time (TG_API_ID / TG_API_HASH, e.g. from the project's .env).
@@ -592,13 +595,14 @@ async function favoritesScan(ids, signal, { key = "fav", title = "Bài hát yêu
   // Message ids repeat across chats, so the list uses its own ids (1, 2, …) in favourite order (newest first).
   const items = new Map();
   for (const id of ids) if (found.has(id)) items.set(items.size + 1, found.get(id));
-  // "fav": the favourites list (shown as a list); "recent": the songs played lately (played from the side panel)
+  // "fav": the favourites list (shown as a list); "pl:<id>": a playlist (a list too, in its own order);
+  // "recent": the songs played lately (played from the side panel)
   const scan = {
     key,
     chat: key,
     type: "all",
     title,
-    ...(key === "fav" ? { fav: true } : { recent: true }),
+    ...(key === "fav" ? { fav: true } : key.startsWith("pl:") ? { playlist: key.slice(3) } : { recent: true }),
     items,
     missing: ids.length - items.size,
   };
@@ -658,7 +662,11 @@ async function describeScan(scan, ids = null) {
     });
   }
   // lists from several chats (favourites, a song search): each file goes to its own chat's folder
-  const outDir = dirHandle ? (scan.fav || scan.search ? dirHandle.name : folderLabel(dirHandle, scan.title)) : null;
+  const outDir = dirHandle
+    ? scan.fav || scan.playlist || scan.search
+      ? dirHandle.name
+      : folderLabel(dirHandle, scan.title)
+    : null;
   return {
     key: scan.key,
     title: scan.title,
@@ -667,6 +675,7 @@ async function describeScan(scan, ids = null) {
     ...(scan.fav && { fav: true, missing: scan.missing }),
     ...(scan.search && { search: true, query: scan.query, total: scan.total || null }),
     ...(scan.recent && { recent: true, missing: scan.missing }),
+    ...(scan.playlist && { playlist: scan.playlist, missing: scan.missing }),
     files,
   };
 }
@@ -1270,6 +1279,34 @@ async function route(method, url, body, signal) {
         ),
       );
 
+    case "GET /api/playlists":
+      requireReady();
+      return { playlists: sortPlaylists(load(STORE.playlists, {})[auth.me.id] || []) };
+
+    case "POST /api/playlists": {
+      // one change (core.js editPlaylists): create · rename · delete · add · remove · order
+      requireReady();
+      const all = load(STORE.playlists, {});
+      let result;
+      try {
+        result = editPlaylists(all[auth.me.id] || [], body);
+      } catch (err) {
+        throw httpError(400, err.message);
+      }
+      if (result.playlists.length) all[auth.me.id] = result.playlists;
+      else delete all[auth.me.id];
+      save(STORE.playlists, all);
+      return { playlists: sortPlaylists(result.playlists), id: result.id };
+    }
+
+    case "GET /api/playlists/files": {
+      // a playlist's songs, in its order, from every chat (like the favourites)
+      requireReady();
+      const p = (load(STORE.playlists, {})[auth.me.id] || []).find((x) => x.id === url.searchParams.get("id"));
+      if (!p) throw httpError(404, "Không tìm thấy playlist");
+      return describeScan(await favoritesScan(p.songs, signal, { key: `pl:${p.id}`, title: p.name }));
+    }
+
     case "GET /api/favorites/files":
       requireReady();
       return describeScan(await favoritesScan(load(STORE.favorites, {})[auth.me.id] || [], signal));
@@ -1328,7 +1365,7 @@ async function route(method, url, body, signal) {
       if (dir && remember) await setDefaultDir(base);
       return {
         added: enqueue(scan, ids, { mode: "fs", base }),
-        outDir: scan.fav || scan.search ? base.name : folderLabel(base, scan.title),
+        outDir: scan.fav || scan.playlist || scan.search ? base.name : folderLabel(base, scan.title),
       };
     }
 

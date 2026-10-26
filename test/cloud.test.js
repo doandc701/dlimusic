@@ -28,6 +28,7 @@ import { createMirror } from "../cloud/mirror.js";
 import { createCloudApi, tcpSession } from "../cloud/api.js";
 import { createCloudSync, createAccountSync } from "../web/cloud-sync.js";
 import { readAccount, joinAccount, applyOps, checkOps } from "../cloud/account.js";
+import { editPlaylists, sortPlaylists } from "../core.js";
 
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
 const SESSION_A = "1BAAOMTQ5LjE1NC4xNjcuNTEBu" + "A".repeat(320);
@@ -334,7 +335,14 @@ describe("MongoDB storage", () => {
       assert.equal(a.status, 200);
       assert.equal(a.data.accountId, "111");
       assert.match(a.data.token, /^[\w-]{43}$/);
-      assert.deepEqual(a.data.data, { settings: null, history: [], visibleChats: null, favorites: [], recent: [] });
+      assert.deepEqual(a.data.data, {
+        settings: null,
+        history: [],
+        visibleChats: null,
+        favorites: [],
+        recent: [],
+        playlists: [],
+      });
       assert.equal(a.headers["cache-control"], "no-store");
 
       const ta = a.data.token;
@@ -363,7 +371,14 @@ describe("MongoDB storage", () => {
 
       // another account sees nothing of the first one
       const b = await call(h, "POST", "login", { body: { session: SESSION_B } });
-      assert.deepEqual(b.data.data, { settings: null, history: [], visibleChats: null, favorites: [], recent: [] });
+      assert.deepEqual(b.data.data, {
+        settings: null,
+        history: [],
+        visibleChats: null,
+        favorites: [],
+        recent: [],
+        playlists: [],
+      });
       assert.deepEqual((await call(h, "GET", "data", { token: b.data.token })).data.favorites, []);
 
       // removing
@@ -614,6 +629,7 @@ describe("MongoDB storage", () => {
       visibleChats: "tdl.visibleChats",
       favorites: "tdl.favorites",
       recent: "tdl.recent",
+      playlists: "tdl.playlists",
     };
     const env = {
       MONGODB_URI: "",
@@ -709,6 +725,7 @@ describe("MongoDB storage", () => {
         history: data.history || [],
         favorites: data.favorites || [],
         recent: data.recent || [],
+        playlists: data.playlists || [],
         visibleChats: data.visibleChats ?? null,
         subfolderPerChat: data.subfolderPerChat ?? true,
       };
@@ -791,6 +808,57 @@ describe("MongoDB storage", () => {
       await web.sync.pull();
       assert.equal(web.store.load(KEYS.recent)["111"][0].id, "5|50");
       assert.deepEqual(web.store.load(KEYS.visibleChats)["111"], ["1", "7"]);
+    });
+
+    test("playlists: made, renamed, reordered, deleted on one device; two devices on two playlists keep both", async () => {
+      const a = computer("111");
+      const b = computer("111");
+      await a.start();
+      await b.start();
+      const edit = (dev, change) => {
+        const r = editPlaylists(dev.app.playlists, change);
+        dev.change("playlists", r.playlists);
+        return r.id;
+      };
+      const chill = edit(a, { op: "create", name: "Chill", songs: ["1|1", "1|2"] });
+      await wait();
+      await a.sync.flush();
+      await b.sync.pull();
+      assert.deepEqual(
+        b.app.playlists.map((p) => [p.name, p.songs]),
+        [["Chill", ["1|1", "1|2"]]],
+      );
+      // at the same time: a renames and reorders "Chill", b makes "Gym"
+      edit(a, { op: "rename", id: chill, name: "Chill out" });
+      edit(a, { op: "order", id: chill, songs: ["1|2", "1|1"] });
+      edit(b, { op: "create", name: "Gym", songs: ["2|1"] });
+      await wait();
+      await a.sync.flush();
+      await b.sync.flush();
+      await a.sync.pull();
+      await b.sync.pull();
+      for (const dev of [a, b])
+        assert.deepEqual(
+          sortPlaylists(dev.app.playlists).map((p) => [p.name, p.songs]),
+          [
+            ["Gym", ["2|1"]],
+            ["Chill out", ["1|2", "1|1"]],
+          ],
+        );
+      edit(b, { op: "delete", id: chill });
+      await wait();
+      await b.sync.flush();
+      await a.sync.pull();
+      assert.deepEqual(
+        a.app.playlists.map((p) => p.name),
+        ["Gym"],
+        "deleted on one device, gone on the other",
+      );
+      // a device that does not know playlists (an older app) joins: they stay in MongoDB
+      assert.equal((await readAccount(db, "111")).playlists.length, 1);
+      const old = await joinAccount(db, "111", { favorites: [] });
+      assert.equal(old.playlists.length, 1);
+      assert.equal(checkOps("playlists", [{ op: "put", playlist: { id: "x", name: "", songs: [] } }]), undefined);
     });
 
     test("two devices changing things at the same time lose nothing", async () => {

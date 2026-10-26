@@ -110,7 +110,7 @@ export default function Chats() {
   const { chats, error, loading } = useChats();
   // a found song's chat (its avatar colour, channel or group icon), by the song's chat id
   const chatOf = useMemo(() => new Map((chats ?? []).map((c) => [c.id, c])), [chats]);
-  const { favorites, visibleChats, setVisibleChats, chatSort, setChatSort } = useLibrary();
+  const { favorites, playlists, visibleChats, setVisibleChats, chatSort, setChatSort } = useLibrary();
   const { now, playing, play, toggle } = usePlayer();
   const [found, setFound] = useState<Found | null>(null);
   const [songs, setSongs] = useState<Songs | null>(null);
@@ -442,6 +442,38 @@ export default function Chats() {
             <Icon name="music-note-beamed" size={12} color={t.textMuted} />
             <T size={13} muted>
               {tr("{n} bài · từ mọi kênh", { n: favorites.length })}
+            </T>
+          </View>
+        </View>
+      </Pressable>
+
+      {/* "Playlist": the account's playlists (like Zing MP3's), each with songs from any chat */}
+      <Pressable
+        onPress={() => {
+          haptic();
+          router.push("/playlists");
+        }}
+        style={({ pressed }) => [
+          styles.fav,
+          { borderBottomColor: t.border, backgroundColor: pressed ? t.bg : t.surface },
+        ]}
+        accessibilityRole="button"
+        accessibilityLabel={tr("Playlist")}
+      >
+        <LinearGradient
+          colors={["#f97316", "#ec4899"]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={styles.favAvatar}
+        >
+          <Icon name="music-note-list" size={16} color="#fff" />
+        </LinearGradient>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <T weight="semibold">{tr("Playlist")}</T>
+          <View style={styles.sub}>
+            <Icon name="collection-play" size={12} color={t.textMuted} />
+            <T size={13} muted>
+              {tr("{n} playlist", { n: playlists.length })}
             </T>
           </View>
         </View>

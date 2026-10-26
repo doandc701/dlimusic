@@ -1,12 +1,12 @@
 // What an account keeps on this phone: favourites, the songs played lately, which chats show in the list and how
-// they are sorted. Ids are the web's ("<chat id>|<message id>", the chat's own id without -100): favourites, recent
-// plays and visible chats are the same as on the web version through its sync server (cloud.ts); the order of the
-// chat list stays on this phone.
+// they are sorted, and the playlists. Ids are the web's ("<chat id>|<message id>", the chat's own id without -100):
+// favourites, recent plays, visible chats and playlists are the same as on the web version through its sync server
+// (cloud.ts); the order of the chat list stays on this phone.
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { createContext, use, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { AppState } from "react-native";
 
-import { RECENT_MAX } from "../../../core.js";
+import { RECENT_MAX, editPlaylists, sortPlaylists } from "../../../core.js";
 import { MOCK } from "../mock";
 import { useAuth } from "../telegram/AuthProvider";
 import { createCloud, setActiveCloud, type CloudStatus, type SharedName } from "./cloud";
@@ -23,6 +23,14 @@ export type RecentItem = {
   at: number;
 };
 export type ChatSort = "recent" | "az" | "za" | "type";
+/** A playlist (core.js): songs ("<chat id>|<message id>") from any chat, in the order chosen. */
+export type Playlist = { id: string; name: string; songs: string[]; at: number; up: number };
+/** One change to the playlists (core.js editPlaylists). */
+export type PlaylistChange =
+  | { op: "create"; name: string; songs?: string[] }
+  | { op: "rename"; id: string; name: string }
+  | { op: "delete"; id: string }
+  | { op: "add" | "remove" | "order"; id: string; songs: string[] };
 
 type Library = {
   favorites: string[]; // newest first
@@ -36,6 +44,9 @@ type Library = {
   setVisibleChats: (ids: string[] | null) => void;
   chatSort: ChatSort;
   setChatSort: (s: ChatSort) => void;
+  playlists: Playlist[]; // newest first
+  /** A change to the playlists: { id } (a playlist made: its id), or { error } (the message to show). */
+  editPlaylist: (change: PlaylistChange) => { id?: string; error?: string };
   sync: CloudStatus | null; // null: not tried yet
 };
 
@@ -51,6 +62,12 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
   const [recent, setRecent] = useState<RecentItem[]>([]);
   const [visibleChats, setVisible] = useState<string[] | null>(null);
   const [chatSort, setSort] = useState<ChatSort>("recent");
+  const [playlists, setPlaylistsState] = useState<Playlist[]>([]);
+  const playlistsNow = useRef<Playlist[]>([]); // the latest (two changes in a row build on each other)
+  const setPlaylists = useCallback((list: Playlist[]) => {
+    playlistsNow.current = list;
+    setPlaylistsState(sortPlaylists(list));
+  }, []);
   const [sync, setSync] = useState<CloudStatus | null>(null);
   // the shared items as they are now (what the sync reads), and the web's items the app does not use (kept as
   // MongoDB has them, so nothing is sent for them)
@@ -58,6 +75,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
     favorites: [],
     recent: [],
     visibleChats: null,
+    playlists: [],
     settings: null,
     history: [],
   });
@@ -69,7 +87,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!acct) return;
     let live = true;
-    AsyncStorage.multiGet([key("favorites"), key("recent"), key("visibleChats"), key("chatSort")])
+    AsyncStorage.multiGet([key("favorites"), key("recent"), key("visibleChats"), key("chatSort"), key("playlists")])
       .then((pairs) => {
         if (!live) return;
         const get = (i: number) => {
@@ -108,11 +126,28 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
         );
         setVisible(Array.isArray(get(2)) ? get(2) : null);
         setSort(["recent", "az", "za", "type"].includes(get(3)) ? get(3) : "recent");
+        setPlaylists(
+          Array.isArray(get(4))
+            ? get(4)
+            : MOCK
+              ? [
+                  {
+                    id: "mockchill01",
+                    name: "Nhạc chill cuối tuần",
+                    songs: ["1001|12", "1001|14", "1001|11"],
+                    at: 2,
+                    up: 2,
+                  },
+                  { id: "mockgym0002", name: "Tập gym", songs: ["1001|13"], at: 1, up: 1 },
+                ]
+              : [],
+        );
         if (MOCK) return;
         shared.current = {
           favorites: Array.isArray(get(0)) ? get(0) : [],
           recent: Array.isArray(get(1)) ? get(1) : [],
           visibleChats: Array.isArray(get(2)) ? get(2) : null,
+          playlists: Array.isArray(get(4)) ? get(4) : [],
           settings: null,
           history: [],
         };
@@ -125,6 +160,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
             if (name === "favorites") setFavorites((value as string[]) ?? []);
             else if (name === "recent") setRecent((value as RecentItem[]) ?? []);
             else if (name === "visibleChats") setVisible((value as string[] | null) ?? null);
+            else if (name === "playlists") setPlaylists((value as Playlist[]) ?? []);
             else return; // the web's settings / download history: not used here
             AsyncStorage.setItem(`acct:${acct}:${name}`, JSON.stringify(value)).catch(() => {});
           },
@@ -144,12 +180,12 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
       cloud.current = null;
       setSync(null);
     };
-  }, [acct, key]);
+  }, [acct, key, setPlaylists]);
 
   const save = useCallback(
     (name: string, value: unknown) => {
       if (acct) AsyncStorage.setItem(key(name), JSON.stringify(value)).catch(() => {});
-      if (name === "favorites" || name === "recent" || name === "visibleChats") {
+      if (name === "favorites" || name === "recent" || name === "visibleChats" || name === "playlists") {
         shared.current[name] = value;
         cloud.current?.changed(name);
       }
@@ -194,9 +230,20 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
         setSort(s);
         save("chatSort", s);
       },
+      playlists,
+      editPlaylist: (change) => {
+        try {
+          const r = editPlaylists(playlistsNow.current, change) as { playlists: Playlist[]; id?: string };
+          setPlaylists(r.playlists);
+          save("playlists", r.playlists);
+          return { id: r.id };
+        } catch (err) {
+          return { error: String((err as Error)?.message ?? err) };
+        }
+      },
       sync,
     };
-  }, [favorites, recent, visibleChats, chatSort, save, sync]);
+  }, [favorites, recent, visibleChats, chatSort, playlists, save, setPlaylists, sync]);
 
   return <LibraryContext value={value}>{children}</LibraryContext>;
 }

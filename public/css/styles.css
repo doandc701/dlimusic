@@ -1934,16 +1934,47 @@ body:has(.search-view) #filterSheet .type-filter {
   width: 100%;
   max-width: 640px;
 }
+.seek-wrap {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+}
 .dock-seek .seek {
   flex: 1 1 auto;
   min-width: 0;
   height: 1rem;
-  /* like YouTube: played (--played, set by ui.js paintSeek) in colour, loaded (--loaded) lighter, rest dark */
+  /* like YouTube: played (--played, set by ui.js paintSeek) in colour, up to the pointer (--hover) lighter still,
+     loaded (--loaded) lighter, rest dark */
   --seek-rest: var(--bs-secondary-bg);
   --seek-loaded: color-mix(in srgb, var(--bs-secondary-color) 40%, var(--bs-secondary-bg));
+  --seek-hover: color-mix(in srgb, var(--bs-body-color) 55%, var(--bs-secondary-bg));
   --seek-track:
     linear-gradient(90deg, #7c3aed, #ec4899) 0 0 / var(--played, 0%) 100% no-repeat,
+    linear-gradient(var(--seek-hover), var(--seek-hover)) 0 0 / var(--hover, 0%) 100% no-repeat,
     linear-gradient(var(--seek-loaded), var(--seek-loaded)) 0 0 / var(--loaded, 0%) 100% no-repeat, var(--seek-rest);
+}
+/* the time where the pointer is, above it */
+.seek-tip {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: var(--tip-x, 0);
+  transform: translateX(-50%);
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(20, 20, 24, 0.88);
+  color: #fff;
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.12s;
+  z-index: 5;
+}
+.seek-wrap.pointing .seek-tip {
+  opacity: 1;
 }
 .dock-seek .seek::-webkit-slider-runnable-track {
   background: var(--seek-track);
@@ -1972,6 +2003,19 @@ body:has(.search-view) #filterSheet .type-filter {
 }
 .player-dock .form-range::-webkit-slider-runnable-track {
   height: 0.3rem;
+}
+/* the bar grows a little while pointed at, like YouTube's */
+.player-dock .seek-wrap.pointing .seek::-webkit-slider-runnable-track {
+  height: 0.45rem;
+}
+.player-dock .seek-wrap.pointing .seek::-webkit-slider-thumb {
+  margin-top: -0.275rem;
+}
+.player-dock .seek::-moz-range-track {
+  height: 0.3rem;
+}
+.player-dock .seek-wrap.pointing .seek::-moz-range-track {
+  height: 0.45rem;
 }
 .player-dock .form-range::-webkit-slider-thumb {
   margin-top: -0.35rem;

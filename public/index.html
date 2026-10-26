@@ -669,16 +669,20 @@
         </div>
         <div class="dock-seek">
           <small class="time" id="curTime">0:00</small>
-          <input
-            type="range"
-            class="form-range seek"
-            id="seekRange"
-            min="0"
-            max="1000"
-            step="1"
-            value="0"
-            aria-label="Vị trí"
-          />
+          <!-- like YouTube: pointing at the bar shows the time there, and the bar up to it lighter -->
+          <div class="seek-wrap" id="seekWrap">
+            <input
+              type="range"
+              class="form-range seek"
+              id="seekRange"
+              min="0"
+              max="1000"
+              step="1"
+              value="0"
+              aria-label="Vị trí"
+            />
+            <span class="seek-tip" id="seekTip" aria-hidden="true"></span>
+          </div>
           <small class="time" id="durTime">0:00</small>
         </div>
       </div>

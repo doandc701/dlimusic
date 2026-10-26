@@ -3563,10 +3563,38 @@ $("seekRange").addEventListener("input", (e) => {
   paintSeek();
 });
 $("player").addEventListener("progress", paintSeek); // more of the song loaded
+
+// Like YouTube: pointing at the seek bar shows the time there above the pointer (kept inside the bar), and the
+// bar up to it lighter; while dragging (a finger too) it follows the thumb.
+function pointSeek(x) {
+  const wrap = $("seekWrap");
+  const bar = $("seekRange");
+  const dur = $("player").duration;
+  const r = bar.getBoundingClientRect();
+  if (!Number.isFinite(dur) || !dur || !r.width) return unpointSeek();
+  const f = Math.min(1, Math.max(0, (x - r.left) / r.width));
+  const tip = $("seekTip");
+  tip.textContent = fmtDur(f * dur) || "0:00";
+  const half = tip.offsetWidth / 2;
+  const at = Math.min(r.width - half, Math.max(half, f * r.width)) + (r.left - wrap.getBoundingClientRect().left);
+  wrap.style.setProperty("--tip-x", `${at}px`);
+  bar.style.setProperty("--hover", `${f * 100}%`);
+  wrap.classList.add("pointing");
+}
+function unpointSeek() {
+  $("seekWrap").classList.remove("pointing");
+  $("seekRange").style.setProperty("--hover", "0%");
+}
+$("seekRange").addEventListener("pointermove", (e) => pointSeek(e.clientX));
+$("seekRange").addEventListener("pointerdown", (e) => pointSeek(e.clientX));
+$("seekRange").addEventListener("pointerleave", () => !seeking && unpointSeek());
+$("seekRange").addEventListener("pointerup", (e) => e.pointerType !== "mouse" && unpointSeek());
+$("seekRange").addEventListener("pointercancel", unpointSeek);
 $("seekRange").addEventListener("change", (e) => {
   const p = $("player");
   if (Number.isFinite(p.duration)) p.currentTime = (e.target.value / 1000) * p.duration;
   seeking = false;
+  if (!$("seekRange").matches(":hover")) unpointSeek();
 });
 $("volRange").addEventListener("input", (e) => {
   $("player").volume = Number(e.target.value);

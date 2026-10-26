@@ -1042,6 +1042,7 @@ async function serveStream(req, port) {
     // playing, like the app: a song is fetched whole (and goes on while paused), the player reading it as it
     // comes; a long mix is read on ahead of the player. A download is read as it is written.
     const whole = !req.download && !local ? fetchWhole(req.key, req.id) : null;
+    if (whole && ["audio", "voice"].includes(mediaKind(item.msg))) playingNow(mediaUrl(req.key, req.id));
     const it = req.download
       ? source(range.start, range.end)
       : whole
@@ -1564,13 +1565,17 @@ function fetchProgress(url, got, size) {
  */
 function fetchWhole(key, id) {
   const url = mediaUrl(key, id);
-  if (wholes.has(url)) return wholes.get(url);
+  if (wholes.has(url)) {
+    const w = wholes.get(url);
+    w.stop = false; // stopped but not yet let go (it does at its next chunk): it goes on
+    return w;
+  }
   const item = scans.get(key)?.items.get(Number(id));
   const size = item?.info.size;
   if (!item || !size) return null;
   keepDc(item.msg.media?.document?.dcId);
   if (size > NEXT_MAX || !("caches" in self)) return null;
-  const w = { buf: new Uint8Array(size), got: 0, size, done: false, failed: null, waiters: new Set() };
+  const w = { buf: new Uint8Array(size), got: 0, size, done: false, failed: null, stop: false, waiters: new Set() };
   const wake = () => {
     for (const fn of w.waiters) fn();
     w.waiters.clear();
@@ -1583,6 +1588,7 @@ function fetchWhole(key, id) {
       w.got = w.size = w.buf.length;
     } else {
       for await (const chunk of telegramRange(item, 0, size - 1)) {
+        if (w.stop) throw new Error("stopped");
         w.buf.set(chunk.subarray(0, size - w.got), w.got);
         w.got = Math.min(size, w.got + chunk.length);
         fetchProgress(url, w.got, size);
@@ -1624,8 +1630,19 @@ async function* wholeRange(w, start, end) {
   }
 }
 
+/** The songs of the play now (the playing one and the next ones, ui.js asks for them in turn). */
+let wanted = new Set();
+
+/** A song picked to play that was not fetched ahead: it gets the whole line (the songs of before stop). */
+function playingNow(url) {
+  if (wanted.has(url)) return;
+  wanted = new Set([url]);
+  for (const [u, w] of wholes) if (u !== url && !w.done) w.stop = true;
+}
+
 /** The next songs, fetched ahead (see fetchWhole); resolves when there (false: streamed when it plays). */
 async function prefetch(key, id) {
+  wanted.add(mediaUrl(key, id));
   const w = fetchWhole(key, id);
   if (!w) return false;
   await w.job;

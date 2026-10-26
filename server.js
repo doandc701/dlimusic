@@ -1321,6 +1321,7 @@ function songFetch(item, url) {
     fetches.set(id, f);
     f.job = runSongFetch(f, item);
   }
+  f.stop = false; // stopped but not yet let go (it does at its next chunk): it goes on
   if (url) f.urls.add(url);
   f.used = Date.now();
   return f;
@@ -1377,8 +1378,36 @@ function trimPlayCache() {
 }
 
 /** Only these songs keep being fetched (the playing one and the next ones); the others stop. */
+let kept = new Set();
 function keepFetching(ids) {
+  kept = ids;
   for (const f of fetches.values()) if (!f.done && !ids.has(f.id)) f.stop = true;
+}
+
+/** A song picked to play that was not fetched ahead: it gets the whole line (the songs of before stop). */
+function playingNow(id) {
+  if (!kept.has(id)) keepFetching(new Set([id]));
+}
+
+// GramJS lets go of an idle data centre after ~30 s; the next song from it would wait for a new connection and
+// its authorisation (a second or more before it starts). Borrowed again every 20 s, as the browser build does.
+const warmDcs = new Map(); // dc id -> last time a song came from it
+let keepAliveTimer = null;
+function keepDc(dcId) {
+  if (!dcId || !client) return;
+  warmDcs.set(dcId, Date.now());
+  keepAliveTimer ??= setInterval(() => {
+    for (const [dc, at] of warmDcs) {
+      if (Date.now() - at > 30 * 60_000)
+        warmDcs.delete(dc); // nothing played from it for a while
+      else client?.getSender(dc).catch(() => warmDcs.delete(dc));
+    }
+    if (!warmDcs.size) {
+      clearInterval(keepAliveTimer);
+      keepAliveTimer = null;
+    }
+  }, 20_000);
+  keepAliveTimer.unref?.();
 }
 
 /** Bytes of a song's cache file as they arrive, with Range (the player does not wait for the end). */
@@ -1782,7 +1811,9 @@ async function handleApi(req, res, url) {
       if (!item.info.size || !["audio", "voice"].includes(mediaKind(item.msg)))
         return streamFromTelegram(req, res, item);
       // fetched whole into the cache as it plays (and while paused); a far jump streams meanwhile
+      keepDc(item.msg.media?.document?.dcId);
       const f = songFetch(item, `/api/media?key=${encodeURIComponent(scan.key)}&id=${url.searchParams.get("id")}`);
+      playingNow(f.id);
       const start = Number(/bytes=(\d+)-/.exec(req.headers.range || "")?.[1] || 0);
       if (!f.done && start > f.got + FAR_JUMP) return streamFromTelegram(req, res, item);
       fetchNews(f);

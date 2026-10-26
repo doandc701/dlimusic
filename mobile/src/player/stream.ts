@@ -1,8 +1,8 @@
 // Play a song while it is fetched from Telegram, piece by piece the way YouTube fetches a video, with only what
 // Expo Go has (so iPhone and Android alike):
 // - the song is fetched around the play position, not from start to end: play starts once its first START_SECONDS
-//   of music are there (after the ID3 tag), then the rest comes STEP_SECONDS of music at a time while it plays; a
-//   jump fetches from there;
+//   of music are there (after the ID3 tag; QUICK_START on a fast network), then the rest comes STEP_SECONDS of
+//   music at a time while it plays; a jump fetches from there;
 // - always fetching ahead, playing or paused, to the end of the song, then any part skipped by a jump: the song
 //   ends up whole in the cache;
 // - two pieces on their way at a time; after a wait, play goes on sooner on a fast network than on a slow one;
@@ -22,6 +22,7 @@ import { fetchHead, warmUp } from "./prefetch";
 const UNIT = 16 * 1024; // the smallest piece, and the map's unit
 const MAX_PIECE = 512 * 1024; // the largest piece GramJS asks Telegram for
 const START_SECONDS = 10; // play once this much music is there…
+const QUICK_START = 4; // …or this much on a network well faster than the music (it keeps ahead after)
 const STEP_SECONDS = 5; // …then fetch this much at a time
 const GUESS_BITRATE = 40 * 1024; // bytes / second of music when Telegram does not give the length (320 kbps)
 const PARALLEL = 2; // pieces fetched at the same time (a slow network's round trips overlap)…
@@ -38,6 +39,9 @@ const LEAD_SECONDS = 12; // …started this long before the part the player has 
 const SEEK_MARGIN = 64 * 1024; // a position needs this much past it fetched (positions are estimated from the size)
 const RESUME_FAST = START_SECONDS; // after a wait, go on once this much music is ahead (seconds) when the network is fast…
 const RESUME_SLOW = 15; // …or this much when it is barely faster than the music (fewer stops)
+
+/** The network's speed (bytes / second) as the last songs were fetched: a song starts sooner on a fast one. */
+let lastSpeed = 0;
 
 // what the stream does, in the dev server's terminal (npm run dev): to see why a song does not start on a phone
 const log = (...args: unknown[]) => __DEV__ && console.log("[stream]", ...args);
@@ -83,7 +87,7 @@ export class SongStream {
   private needWhole = false; // the player cannot open a part of this file (e.g. m4a with its index at the end)
   private failures = 0; // parts the player could not open
   private retryAt = 0; // bytes to have before trying again
-  private startBytes: number; // bytes from the start to have before the first try (START_SECONDS of music)
+  private musicAt = 0; // where the music starts (after the ID3 tag)
   private waitAt: number | null = null; // a position to go on from once enough has come in
   private cancelled = false;
   private paused = false; // play / pause asked by the user
@@ -95,7 +99,6 @@ export class SongStream {
     this.units = new Uint8Array(Math.ceil(o.size / UNIT));
     this.asked = new Uint8Array(this.units.length);
     this.parts = new File(o.file.uri + ".map");
-    this.startBytes = Math.min(o.size, this.bytesFor(START_SECONDS));
   }
 
   /** The player playing now. */
@@ -134,7 +137,7 @@ export class SongStream {
         const h = this.handle!;
         h.offset = 0;
         const end = id3End(h.readBytes(10));
-        if (end) this.startBytes = Math.min(size, end + this.bytesFor(START_SECONDS));
+        this.musicAt = end;
       }
       this.grow();
       const client = await getClient();
@@ -237,6 +240,7 @@ export class SongStream {
       if (!piece?.length) throw new Error("Telegram không trả về dữ liệu");
       const sample = piece.length / Math.max(0.05, (Date.now() - t0) / 1000);
       this.speed = this.speed ? this.speed * 0.7 + sample * 0.3 : sample;
+      lastSpeed = this.speed;
       this.write(next.from, piece);
       this.grow();
       this.wake(); // the other one may be resting for want of a piece to fetch
@@ -274,7 +278,7 @@ export class SongStream {
   private afterTag(head: Uint8Array) {
     const end = id3End(head);
     if (!end) return;
-    this.startBytes = Math.min(this.o.size, end + this.bytesFor(START_SECONDS));
+    this.musicAt = end;
     log(`ID3 tag ${(end / 1024).toFixed(0)} KB${end > SKIP_TAG ? " (blanked, music first)" : ""}`);
     if (end <= SKIP_TAG) return;
     const blank = new Uint8Array(Math.min(head.length, end));
@@ -379,7 +383,7 @@ export class SongStream {
     from -= from % UNIT;
     // STEP_SECONDS of music (START_SECONDS before play starts), in Telegram's ranges: a power of two, at a multiple
     // of itself (a 512 KB piece starts at a multiple of 512 KB…), so the largest such piece within it
-    const want = Math.max(UNIT, this.bytesFor(this.started ? STEP_SECONDS : START_SECONDS));
+    const want = Math.max(UNIT, this.bytesFor(this.started ? STEP_SECONDS : this.startSeconds()));
     let size = MAX_PIECE;
     const free = (n: number) => this.runEnd(from + n - UNIT, true) === from + n - UNIT; // no part already asked for
     while (size > UNIT && (size > want || from % size || !free(size))) size /= 2;
@@ -389,6 +393,18 @@ export class SongStream {
   /** Where the part the playing player has ends, in seconds (Infinity: it has the rest of the song). */
   private loadedEnd() {
     return this.view.end >= this.o.size ? Infinity : this.secondsAt(this.view.end);
+  }
+
+  /** Music to have before play starts: less on a network well faster than the music (this song's, or the last). */
+  private startSeconds() {
+    const bitrate = this.duration ? this.o.size / this.duration : GUESS_BITRATE;
+    const speed = this.speed || lastSpeed;
+    return speed * PARALLEL >= 3 * bitrate * this.o.rate() ? QUICK_START : START_SECONDS;
+  }
+
+  /** Bytes from the start to have before the first try. */
+  private startBytes() {
+    return Math.min(this.o.size, this.musicAt + this.bytesFor(this.startSeconds()));
   }
 
   /** After a wait: how much music to have ahead before going on (less on a fast network). */
@@ -402,7 +418,7 @@ export class SongStream {
     if (this.cancelled || this.opening) return;
     if (!this.started) {
       const got = this.runEnd(0);
-      const enough = this.failures ? got >= this.retryAt : got >= Math.min(this.startBytes, this.o.size);
+      const enough = this.failures ? got >= this.retryAt : got >= this.startBytes();
       if (this.done || (!this.needWhole && enough)) this.open(0, true);
       return;
     }

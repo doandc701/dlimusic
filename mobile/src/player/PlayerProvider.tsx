@@ -67,6 +67,30 @@ const players = [
 ] as [ReturnType<typeof createAudioPlayer>, ReturnType<typeof createAudioPlayer>];
 let activeIndex = 0;
 
+// A third player playing 2 s of silence in a loop the whole time the music is on, and the one the lock screen
+// follows. With the screen off, a phone keeps an app running only while it plays sound: the moment between two
+// songs (the next one being fetched), a wait for more of a song, a take-over between the two players, were enough
+// for iOS to put the app to sleep — the music stopped "after a few songs". And on Android each change of the lock
+// screen's player (at every take-over and every song) dropped and rebuilt the background playback service, which
+// Android may refuse with the screen off. The lock screen is set on this one once; each song only changes its
+// title. Its play / pause buttons act on this player: followed by the music (keeperExternal).
+const keeper = createAudioPlayer(require("../../../shared/assets/silence.wav"), {
+  updateInterval: 1000,
+  keepAudioSessionActive: true,
+});
+keeper.loop = true;
+let keeperOn = false; // what the app last asked of it
+let keeperAt = 0; // when (its state takes a moment to follow)
+let lockScreenSet = false;
+function keep(on: boolean) {
+  keeperOn = on;
+  keeperAt = Date.now();
+  try {
+    if (on) keeper.play();
+    else keeper.pause();
+  } catch {}
+}
+
 /**
  * The audio session: plays with the silent switch on, goes on in the background / with the screen locked, pauses
  * other apps' sound. Set at start, and again before each song, each "play" and each time the app leaves the
@@ -89,6 +113,23 @@ if (Platform.OS !== "web")
     .then((a) => (artwork = a.localUri ?? a.uri))
     .catch(() => {});
 const player = () => players[activeIndex]; // the one playing
+
+/** The song on the lock screen (and Android's notification): set once on the keeper, then only its title. */
+function showOnLockScreen(song: Song) {
+  const meta = {
+    title: song.title || song.name,
+    artist: song.performer || song.chat || chatById(song.chatId)?.title,
+    artworkUrl: artwork ?? undefined,
+  };
+  try {
+    if (lockScreenSet) keeper.updateLockScreenMetadata(meta);
+    else {
+      // a live stream for the system: no scrub bar (the keeper's own 2 s loop would show there)
+      keeper.setActiveForLockScreen(true, meta, { isLiveStream: true });
+      lockScreenSet = true;
+    }
+  } catch {}
+}
 
 type Clock = { currentTime: number; duration: number; progress: number }; // progress: 0..1 fetched (from the position)
 let clock: Clock = { currentTime: 0, duration: 0, progress: 0 };
@@ -158,12 +199,14 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   function play(list: FileList, song: Song) {
     if (!playable(song)) return;
     ++token.current;
+    keep(true); // sound all along the change of song (see keeper)
     for (const p of players) p.pause();
     audioMode();
     opened.current = false;
     setPlaying(false);
     setClock({ currentTime: 0, duration: song.duration ?? 0, progress: 0 });
     setNow({ song, list, phase: "fetching" });
+    if (!MOCK) showOnLockScreen(song);
     library.addRecent({
       id: song.key,
       name: song.name,
@@ -205,20 +248,15 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       onProgress: (progress) => live() && setClock({ progress }),
       onState: (state, err) => {
         if (!live()) return;
-        if (state === "error") return setNow((n) => n && { ...n, phase: "error", error: authErrorText(err) });
+        if (state === "error") {
+          keep(false);
+          return setNow((n) => n && { ...n, phase: "error", error: authErrorText(err) });
+        }
         setNow((n) => n && { ...n, phase: state === "fetching" ? "fetching" : "ready", waiting: state === "waiting" });
         if (state === "playing") {
           opened.current = true;
           setClock({ currentTime: player().currentTime, duration: player().duration });
           prefetchNext(list, song);
-          try {
-            // (again at each take-over: the lock screen follows the player playing)
-            player().setActiveForLockScreen(true, {
-              title: song.title || song.name,
-              artist: song.performer || song.chat || chatById(song.chatId)?.title,
-              artworkUrl: artwork ?? undefined,
-            });
-          } catch {}
         }
       },
     });
@@ -252,6 +290,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   function setPaused(paused: boolean) {
     heldUntil.current = Date.now() + 1000;
     setPlaying(!paused);
+    keep(!paused);
     stream.current?.setPaused(paused);
     if (!opened.current) return; // not in the player yet: it starts paused / playing as asked
     if (!paused) {
@@ -320,7 +359,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     const i = songs.findIndex((s) => s.key === now.song.key);
     let j = i + step;
     if (j < 0 || j >= songs.length) {
-      if (repeat !== "all" && ended) return;
+      if (repeat !== "all" && ended) return keep(false); // the end of the list: nothing more to play
       j = (j + songs.length) % songs.length;
     }
     play(now.list, songs[j]);
@@ -328,9 +367,20 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
   // a song that ends moves on (repeat one: plays it again)
   const nextRef = useRef(next);
+  const setPausedRef = useRef(setPaused);
   useEffect(() => {
     nextRef.current = next;
+    setPausedRef.current = setPaused;
   });
+  // the lock screen's / notification's play and pause (on the keeper), a call or an alarm (every player): the music
+  // follows when the keeper is not what the app asked for, a moment after it asked
+  useEffect(() => {
+    const sub = keeper.addListener("playbackStatusUpdate", (s) => {
+      if (Date.now() - keeperAt < 1500 || s.playing === keeperOn) return;
+      setPausedRef.current(!s.playing);
+    });
+    return () => sub.remove();
+  }, []);
   useEffect(() => {
     const subs = players.map((p, i) =>
       p.addListener("playbackStatusUpdate", (s) => {

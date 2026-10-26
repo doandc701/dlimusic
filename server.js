@@ -84,10 +84,15 @@ const PUBLIC_ASSETS = {
   "/img/favicon-192.png": "image/png",
   "/favicon.ico": "image/x-icon",
   "/img/apple-touch-icon.png": "image/png",
-  "/img/cat-headphones.webp": "image/webp",
   "/img/cat-dance-frames.webp": "image/webp",
-  "/img/cat-dance-grid.webp": "image/webp",
 };
+// Files the app uses too, kept once in shared/assets/ (shared/README.md), served under the page's usual URLs.
+const SHARED_ASSETS = {
+  "/img/cat-headphones.webp": ["cat-headphones.webp", "image/webp"],
+  "/img/cat-dance-grid.webp": ["cat-dance-grid.webp", "image/webp"],
+  "/sounds/silence.wav": ["silence.wav", "audio/wav"], // the bridge between two songs (ui.js)
+};
+const SHARED_DIR = path.join(ROOT_DIR, "shared", "assets");
 // the language files (public/js/lang/<code>.js): any that is there, so adding a language needs no change here
 const langAsset = (p) =>
   /^\/js\/lang\/[a-z]{2,3}(-[a-z0-9]+)?\.js$/i.test(p) && fs.existsSync(path.join(PUBLIC_DIR, p))
@@ -1794,6 +1799,11 @@ const server = http.createServer(async (req, res) => {
         "Content-Security-Policy": pageCsp(),
       });
       return res.end(html);
+    }
+    const shared = req.method === "GET" && SHARED_ASSETS[url.pathname];
+    if (shared) {
+      res.writeHead(200, { "Content-Type": shared[1], "Cache-Control": "no-store" });
+      return res.end(fs.readFileSync(path.join(SHARED_DIR, shared[0])));
     }
     const asset = req.method === "GET" && (PUBLIC_ASSETS[url.pathname] || langAsset(url.pathname));
     if (asset) {

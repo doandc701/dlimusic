@@ -113,6 +113,15 @@ for (const dir of ["css", "js", "img"])
     recursive: true,
     filter: (src) => !src.endsWith(".md"), // notes for whoever edits the files (js/lang/README.md)
   });
+// the files the app uses too (shared/assets/, see shared/README.md), under the page's usual URLs
+for (const [from, to] of [
+  ["cat-headphones.webp", "img/cat-headphones.webp"],
+  ["cat-dance-grid.webp", "img/cat-dance-grid.webp"],
+  ["silence.wav", "sounds/silence.wav"],
+]) {
+  fs.mkdirSync(path.dirname(path.join(OUT, to)), { recursive: true });
+  fs.copyFileSync(path.join(ROOT, "shared/assets", from), path.join(OUT, to));
+}
 // for search engines: what to crawl, and the page's address
 for (const file of ["robots.txt", "sitemap.xml", "favicon.ico"])
   fs.copyFileSync(path.join(ROOT, "public", file), path.join(OUT, file));

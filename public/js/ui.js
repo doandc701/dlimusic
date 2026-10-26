@@ -3120,6 +3120,42 @@ player.addEventListener("playing", async () => {
   }
 });
 
+// ---------- the bridge between two songs (screen locked) ----------
+// While the next song starts — a long mix (over the browser build's NEXT_MAX) is not fetched ahead: it opens its
+// Telegram stream only then — nothing plays, and a phone with the screen locked puts a silent page to sleep: the
+// next song never started, the music stopped "after a few songs". A second player playing silence in a loop covers
+// that moment (like the app's keeper), until the song plays. A phone lets a page start a sound only after a tap:
+// it is readied on the first one. Where a phone allows one sound at a time, the song's play() stops it (as before).
+const bridge = new Audio("sounds/silence.wav");
+bridge.loop = true;
+bridge.preload = "auto";
+bridge.setAttribute("playsinline", "");
+let bridgeReady = false;
+let bridgeTimer = 0;
+function readyBridge() {
+  if (bridgeReady) return;
+  bridgeReady = true;
+  bridge.muted = true;
+  bridge
+    .play()
+    .then(() => {
+      bridge.pause();
+      bridge.muted = false;
+    })
+    .catch(() => (bridgeReady = false)); // tried again on the next tap
+}
+for (const evt of ["pointerdown", "keydown"]) document.addEventListener(evt, readyBridge, { capture: true });
+function bridgeOn(on) {
+  clearTimeout(bridgeTimer);
+  if (!on) return void (bridge.paused || bridge.pause());
+  if (!bridgeReady) return;
+  bridge.currentTime = 0;
+  bridge.play().catch(() => {});
+  bridgeTimer = setTimeout(() => bridgeOn(false), 120_000); // a song that never starts: not silence for ever
+}
+player.addEventListener("playing", () => bridgeOn(false));
+player.addEventListener("pause", () => bridgeOn(false)); // paused by the user, the lock screen, a call…
+
 player.addEventListener("ended", () => {
   // The stream was cut (network) long before the song's real end: continue it instead of moving on.
   const f = state.playScan?.files.find((x) => x.id === state.playingId);
@@ -3129,7 +3165,11 @@ player.addEventListener("ended", () => {
     setSleep("off");
     return toast(t("Hết giờ hẹn, nhạc đã tạm dừng"), "info");
   }
+  const was = state.playingId;
+  bridgeOn(true);
   playNext(true);
+  // nothing comes next (the end of the list): no bridge; reading the chat's next page keeps it until that plays
+  if (state.playingId === was && !(state.playScan === state.scan && state.scan?.more)) bridgeOn(false);
 });
 // ---------- the start screen's cat: dancing kittens while music plays, the cat with headphones otherwise ----------
 

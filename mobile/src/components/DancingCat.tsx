@@ -50,7 +50,7 @@ function StillCat({ height, still }: { height: number; still: boolean }) {
   return (
     <Animated.View style={[size, style]}>
       <Image
-        source={require("@/assets/images/cat-headphones.webp")}
+        source={require("../../../shared/assets/cat-headphones.webp")}
         style={[StyleSheet.absoluteFill, { opacity: shade.opacity, transform: [{ translateY: shade.y }] }]}
         tintColor={shade.tint}
         blurRadius={shade.blur}
@@ -58,7 +58,7 @@ function StillCat({ height, still }: { height: number; still: boolean }) {
         accessible={false}
       />
       <Image
-        source={require("@/assets/images/cat-headphones.webp")}
+        source={require("../../../shared/assets/cat-headphones.webp")}
         style={StyleSheet.absoluteFill}
         contentFit="contain"
         accessibilityLabel={tr("Mèo đeo tai nghe đang thưởng thức nhạc")}
@@ -85,7 +85,7 @@ function Kittens({ height, rate }: { height: number; rate: number }) {
       accessibilityLabel={tr("Hai chú mèo con đang nhảy theo nhạc")}
     >
       <Image
-        source={require("@/assets/images/cat-dance-grid.webp")}
+        source={require("../../../shared/assets/cat-dance-grid.webp")}
         style={{
           width: w * COLS,
           height: height * ROWS,

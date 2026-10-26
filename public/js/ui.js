@@ -3207,6 +3207,10 @@ function playFrom(scan, id) {
     } catch {}
   }
   player.play().catch(() => {});
+  if (revealNext) {
+    revealNext = false;
+    requestAnimationFrame(revealPlaying); // once its row shows as playing
+  }
 }
 
 /**
@@ -3479,8 +3483,29 @@ $("sleepList").addEventListener("click", (e) => {
 $("player").addEventListener("timeupdate", sleepTick);
 renderSleep();
 
-$("prevBtn").addEventListener("click", playPrev);
-$("nextBtn").addEventListener("click", () => playNext());
+/**
+ * ⏮ / ⏭ pressed: the song now playing is brought into view in the open list (if it is that list and the row is
+ * off screen; a row already seen stays put). Not when a song ends by itself: the list someone is reading is not moved.
+ */
+function revealPlaying() {
+  if (!state.scan || state.scan !== state.playScan) return;
+  const row = $("files").querySelector(`tr[data-id="${state.playingId}"]`);
+  if (!row) return; // hidden by the search / a filter
+  const box = $("filesWrap").getBoundingClientRect();
+  const r = row.getBoundingClientRect();
+  const head = $("filesWrap").querySelector("thead")?.getBoundingClientRect().height || 0; // the sticky header
+  if (r.top >= box.top + head && r.bottom <= box.bottom) return;
+  row.scrollIntoView({ block: "center", behavior: "smooth" });
+}
+let revealNext = false; // ⏮ / ⏭ was pressed: the song it starts (maybe after the next page is read) is shown
+$("prevBtn").addEventListener("click", () => {
+  revealNext = true;
+  playPrev();
+});
+$("nextBtn").addEventListener("click", () => {
+  revealNext = true;
+  playNext();
+});
 
 function togglePlay() {
   const p = $("player");

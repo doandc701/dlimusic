@@ -5,7 +5,7 @@
 import { FlashList, type FlashListRef } from "@shopify/flash-list";
 import { LinearGradient } from "expo-linear-gradient";
 import { router, useLocalSearchParams } from "expo-router";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Alert, FlatList, Pressable, StyleSheet, TextInput, View } from "react-native";
 import ReorderableList, { useReorderableDrag } from "react-native-reorderable-list";
 
@@ -112,7 +112,7 @@ function ChatFiles() {
   const plainChat = !multi && !isSearch;
   const { favorites, isFavorite, toggleFavorite, playlists, editPlaylist } = useLibrary();
   const playlist = plId !== null ? (playlists.find((p) => p.id === plId) ?? null) : null;
-  const { now, playing, play, toggle, shuffle: shuffling, setShuffle } = usePlayer();
+  const { now, playing, play, toggle, shuffle: shuffling, setShuffle, jumps } = usePlayer();
 
   const [type, setType] = useState<FileType>("all");
   const [sort, setSort] = useState<Sort>("default");
@@ -140,6 +140,7 @@ function ChatFiles() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>();
   const listRef = useRef<FlashListRef<Song>>(null);
+  const dragListRef = useRef<FlatList<Song>>(null); // a playlist's re-orderable list
   // "near the end" fires again after every render while a short list stays on screen: read more only once per
   // length, or a short page that says there is more would read again and again
   const endFor = useRef(-1);
@@ -250,6 +251,25 @@ function ChatFiles() {
   }, [plId, plSongs, loading]);
   // dragged by their grip: only in the playlist's own order, nothing hidden by the search
   const sortable = plId !== null && sort === "default" && !query.trim() && type === "all";
+
+  // ⏮ / ⏭ in the player: the song it starts is brought into view when this list plays and its row is off screen
+  const onScreen = useRef(new Set<string>());
+  // the same function every time (a FlatList cannot be given another one)
+  const onViewable = useCallback(({ viewableItems }: { viewableItems: { item: Song }[] }) => {
+    onScreen.current = new Set(viewableItems.map((v) => v.item.key));
+  }, []);
+  const seenJumps = useRef(jumps);
+  useEffect(() => {
+    if (jumps === seenJumps.current) return;
+    seenJumps.current = jumps;
+    const key = now?.song.key;
+    if (!key || now?.list !== list || onScreen.current.has(key)) return;
+    const index = shown.findIndex((x) => x.key === key);
+    if (index < 0) return;
+    const to = { index, viewPosition: 0.5, animated: true };
+    if (dragListRef.current) dragListRef.current.scrollToIndex(to);
+    else listRef.current?.scrollToIndex(to);
+  }, [jumps, now, list, shown]);
 
   // opened on a song (a tap on the playing song's name, or on a song found by the search): read on until it is
   // there (a few pages at most), bring it into view and flash it
@@ -722,6 +742,9 @@ function ChatFiles() {
       {sortable ? (
         // a playlist: rows dragged by their grip to a new place
         <ReorderableList
+          ref={dragListRef}
+          onViewableItemsChanged={onViewable}
+          onScrollToIndexFailed={() => {}}
           data={shown}
           keyExtractor={(s) => s.key}
           extraData={[selected, now?.song.key, playing, favorites, tr.locale, flash]}
@@ -748,6 +771,7 @@ function ChatFiles() {
             read(list);
           }}
           onEndReachedThreshold={0.6}
+          onViewableItemsChanged={onViewable}
           ListEmptyComponent={emptyView}
           ListFooterComponent={footerView}
           renderItem={renderSong}

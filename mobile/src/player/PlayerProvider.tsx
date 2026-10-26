@@ -44,6 +44,7 @@ type PlayerApi = {
   seekTo: (seconds: number) => void;
   seekBy: (seconds: number) => void;
   next: (step?: 1 | -1) => void;
+  jumps: number; // ⏮ / ⏭ presses: a list showing the song brings it into view (not when a song ends by itself)
   shuffle: boolean;
   setShuffle: (on: boolean) => void;
   repeat: Repeat;
@@ -160,6 +161,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const [shuffle, setShuffleState] = useState(false);
   const [repeat, setRepeatState] = useState<Repeat>("off");
   const [speed, setSpeedState] = useState(1);
+  const [jumps, setJumps] = useState(0);
   const speedRef = useRef(1);
   useEffect(() => {
     speedRef.current = speed;
@@ -439,7 +441,11 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       if (stream.current) stream.current.seek(to);
       else player().seekTo(to);
     },
-    next: (step) => next(step),
+    next: (step) => {
+      next(step);
+      setJumps((n) => n + 1);
+    },
+    jumps,
     shuffle,
     setShuffle: (on) => {
       setShuffleState(on);

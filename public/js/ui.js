@@ -2134,6 +2134,7 @@ async function toggleFav(id, scan = state.scan) {
 
 /** After a heart changed: the open list (its row, or all of "Bài hát yêu thích"), the sidebar count, the player. */
 function refreshFavViews(id, scan = state.scan) {
+  if (state.playScan?.fav) updateNavButtons(); // "Bài hát yêu thích" playing: ⏭ follows the hearts (liveOrder)
   if (state.scan?.fav) renderFiles();
   else if (state.scan && scan?.key === state.scan.key) updateRow(id);
   renderFavEntry();
@@ -2737,10 +2738,24 @@ function playFrom(scan, id) {
   player.play().catch(() => {});
 }
 
+/**
+ * The play order as it is now: playing "Bài hát yêu thích", a song whose heart was taken off since is left out
+ * (the playing one plays on; hearted again, it is back in its place). Read each time a song is picked.
+ */
+function liveOrder() {
+  const scan = state.playScan;
+  if (!scan?.fav) return state.playOrder;
+  const byId = new Map(scan.files.map((f) => [f.id, f]));
+  return state.playOrder.filter(
+    (id) => id === state.playingId || (byId.has(id) && state.favorites.has(favId(byId.get(id), scan))),
+  );
+}
+
 /** ⏭ is greyed out at the end of the list when nothing repeats. */
 function updateNavButtons() {
-  const i = state.playOrder.indexOf(state.playingId);
-  $("nextBtn").disabled = !state.playScan || (state.repeat === "off" && i >= state.playOrder.length - 1);
+  const order = liveOrder();
+  const i = order.indexOf(state.playingId);
+  $("nextBtn").disabled = !state.playScan || (state.repeat === "off" && i >= order.length - 1);
   $("prevBtn").disabled = !state.playScan;
 }
 
@@ -2767,12 +2782,12 @@ function playNext(auto = false, { skip = false } = {}) {
     player.currentTime = 0;
     return void player.play().catch(() => {});
   }
-  const order = state.playOrder;
+  const order = liveOrder();
   const i = order.indexOf(state.playingId);
   let next = order[i + 1];
   if (next === undefined && state.repeat !== "off" && order.length) {
     if (state.shuffle) state.playOrder = orderFrom(null); // a fresh shuffle for the next round
-    next = state.playOrder[0];
+    next = liveOrder()[0];
   }
   if (next === undefined && state.playScan === state.scan && state.scan.more) {
     // the end of what is loaded, but the chat has more: read the next page, then go on
@@ -2791,7 +2806,7 @@ function playNext(auto = false, { skip = false } = {}) {
 function playPrev() {
   const player = $("player");
   if (!state.playScan) return;
-  const order = state.playOrder;
+  const order = liveOrder();
   const i = order.indexOf(state.playingId);
   let prev = order[i - 1];
   if (prev === undefined && state.repeat === "all" && order.length > 1) prev = order[order.length - 1];
@@ -3106,7 +3121,7 @@ player.addEventListener("playing", async () => {
   const at = `${scan.key}|${state.playingId}`;
   if (prefetchFor === at) return; // once per song (playing also fires after every buffering pause)
   prefetchFor = at;
-  const order = state.playOrder;
+  const order = liveOrder();
   const i = order.indexOf(state.playingId);
   const ahead = [order[i + 1], order[i + 2] ?? (state.repeat === "all" ? order[0] : undefined)].filter(
     (id) => id !== undefined && id !== state.playingId,

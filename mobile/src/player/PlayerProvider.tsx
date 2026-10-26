@@ -264,9 +264,19 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     s.start().catch((err) => live() && setNow((n) => n && { ...n, phase: "error", error: authErrorText(err) }));
   }
 
+  /**
+   * The songs a list plays, as they are now: in "Bài hát yêu thích", one whose heart was taken off since it started
+   * is left out (the playing one plays on; hearted again, it is back in its place) — read each time a song is picked.
+   */
+  function queue(list: FileList, playing: Song) {
+    return list.songs.filter(
+      (s) => playable(s) && (list.kind !== "fav" || s.key === playing.key || library.isFavorite(s.key)),
+    );
+  }
+
   /** The song "next" would play after `song` (with shuffle: picked now and kept), or null. */
   function pickNext(list: FileList, song: Song): Song | null {
-    const songs = list.songs.filter(playable);
+    const songs = queue(list, song);
     if (!songs.length) return null;
     if (shuffle && songs.length > 1) {
       const kept = songs.find((s) => s.key === upcoming.current && s.key !== song.key);
@@ -349,7 +359,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       player().play();
       return;
     }
-    const songs = now.list.songs.filter(playable);
+    const songs = queue(now.list, now.song);
     if (!songs.length) return;
     if (shuffle && songs.length > 1) {
       const pick = pickNext(now.list, now.song)!;

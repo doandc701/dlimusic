@@ -1521,7 +1521,8 @@ body {
   border-bottom: var(--bs-border-width) solid var(--bs-border-color);
 }
 @media (hover: hover) {
-  .fav-entry:hover {
+  /* not when it is the list open: its gradient and white text stay (a light background made them unreadable) */
+  .fav-entry:not(.active):hover {
     background: var(--bs-tertiary-bg);
   }
 }

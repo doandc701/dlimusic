@@ -3256,6 +3256,7 @@ if ("mediaSession" in navigator) {
  * could not be played, so even "repeat one" moves on. */
 function playNext(auto = false, { skip = false } = {}) {
   if (!state.playScan) return;
+  revealNext = true;
   const player = $("player");
   if (auto && state.repeat === "one" && !skip) {
     player.currentTime = 0;
@@ -3285,6 +3286,7 @@ function playNext(auto = false, { skip = false } = {}) {
 function playPrev() {
   const player = $("player");
   if (!state.playScan) return;
+  revealNext = true;
   const order = liveOrder();
   const i = order.indexOf(state.playingId);
   let prev = order[i - 1];
@@ -3484,8 +3486,9 @@ $("player").addEventListener("timeupdate", sleepTick);
 renderSleep();
 
 /**
- * ⏮ / ⏭ pressed: the song now playing is brought into view in the open list (if it is that list and the row is
- * off screen; a row already seen stays put). Not when a song ends by itself: the list someone is reading is not moved.
+ * Another song of the list (⏮ / ⏭, the end of a song, the headphones' or lock screen's buttons): the song now
+ * playing is brought into view in the open list (if it is that list and the row is off screen; a row already seen
+ * stays put).
  */
 function revealPlaying() {
   if (!state.scan || state.scan !== state.playScan) return;
@@ -3497,15 +3500,9 @@ function revealPlaying() {
   if (r.top >= box.top + head && r.bottom <= box.bottom) return;
   row.scrollIntoView({ block: "center", behavior: "smooth" });
 }
-let revealNext = false; // ⏮ / ⏭ was pressed: the song it starts (maybe after the next page is read) is shown
-$("prevBtn").addEventListener("click", () => {
-  revealNext = true;
-  playPrev();
-});
-$("nextBtn").addEventListener("click", () => {
-  revealNext = true;
-  playNext();
-});
+let revealNext = false; // playNext / playPrev: the song it starts (maybe after the next page is read) is shown
+$("prevBtn").addEventListener("click", () => playPrev());
+$("nextBtn").addEventListener("click", () => playNext());
 
 function togglePlay() {
   const p = $("player");

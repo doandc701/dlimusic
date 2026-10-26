@@ -252,7 +252,8 @@ function ChatFiles() {
   // dragged by their grip: only in the playlist's own order, nothing hidden by the search
   const sortable = plId !== null && sort === "default" && !query.trim() && type === "all";
 
-  // ⏮ / ⏭ in the player: the song it starts is brought into view when this list plays and its row is off screen
+  // another song of the list (⏮ / ⏭, the end of a song): it is brought into view when this list plays and its row
+  // is off screen
   const onScreen = useRef(new Set<string>());
   // the same function every time (a FlatList cannot be given another one)
   const onViewable = useCallback(({ viewableItems }: { viewableItems: { item: Song }[] }) => {

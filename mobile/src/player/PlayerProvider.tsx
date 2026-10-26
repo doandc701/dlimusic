@@ -44,7 +44,7 @@ type PlayerApi = {
   seekTo: (seconds: number) => void;
   seekBy: (seconds: number) => void;
   next: (step?: 1 | -1) => void;
-  jumps: number; // ⏮ / ⏭ presses: a list showing the song brings it into view (not when a song ends by itself)
+  jumps: number; // another song of the list (⏮ / ⏭, the end of a song): a list showing it brings it into view
   shuffle: boolean;
   setShuffle: (on: boolean) => void;
   repeat: Repeat;
@@ -418,6 +418,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
           // the end of the part fetched so far is not the end of the song
           if (stream.current?.finished()) return;
           nextRef.current(1, true);
+          setJumps((n) => n + 1);
         } else stream.current?.tick();
       }),
     );

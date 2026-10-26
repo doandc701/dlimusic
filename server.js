@@ -62,7 +62,7 @@ import {
 } from "./lib.js";
 import { createMirror } from "./cloud/mirror.js";
 import { openDb, ACCOUNT_DATA } from "./cloud/common.js";
-import { RECENT_MAX, editPlaylists, sortPlaylists } from "./core.js";
+import { RECENT_MAX, editPlaylists, sortPlaylists, setOrder } from "./core.js";
 import { readAccount, joinAccount, checkOps, applyOps } from "./cloud/account.js";
 import { createAccountSync } from "./web/cloud-sync.js";
 
@@ -108,6 +108,8 @@ const FAVORITES_FILE = path.resolve(process.env.FAVORITES_FILE || dataFile("favo
 const RECENT_FILE = path.resolve(process.env.RECENT_FILE || dataFile("recent.json"));
 // Playlists made by each Telegram account: { "<account id>": [{ id, name, songs, at, up }] } (core.js).
 const PLAYLISTS_FILE = path.resolve(process.env.PLAYLISTS_FILE || dataFile("playlists.json"));
+// The order each account dragged a chat's songs (or its favourites) to: { "<account id>": [{ id, songs, up }] }.
+const ORDERS_FILE = path.resolve(process.env.ORDERS_FILE || dataFile("orders.json"));
 // Which Telegram app (API ID / hash) to use: the built-in one from .env, or the user's own (see chosenCreds).
 const API_FILE = path.resolve(process.env.API_FILE || dataFile("api.json"));
 const HISTORY_LIMIT = 2000;
@@ -133,6 +135,7 @@ function writeJsonFile(file, data) {
     [FAVORITES_FILE]: "favorites",
     [RECENT_FILE]: "recent",
     [PLAYLISTS_FILE]: "playlists",
+    [ORDERS_FILE]: "orders",
     [SETTINGS_FILE]: "settings",
   }[file];
   if (shared) accountSync?.changed(shared);
@@ -176,6 +179,7 @@ for (const file of [
   FAVORITES_FILE,
   RECENT_FILE,
   PLAYLISTS_FILE,
+  ORDERS_FILE,
   SESSION_FILE,
 ]) {
   try {
@@ -375,6 +379,13 @@ const playlistsOf = (() => {
   return data && typeof data === "object" && !Array.isArray(data) ? data : {};
 })();
 
+// ---------- the order songs were dragged to, per Telegram account ----------
+
+const ordersOf = (() => {
+  const data = readJsonFile(ORDERS_FILE, {});
+  return data && typeof data === "object" && !Array.isArray(data) ? data : {};
+})();
+
 // ---------- data shared by every device of the signed-in account (MongoDB "acct:<id>:…") ----------
 // Same documents as the browser version (cloud/account.js), so this computer, the web app and any other
 // device show the same history, favourites, visible chats and settings. Off without MONGODB_URI.
@@ -390,6 +401,7 @@ accountSync = createAccountSync({
     if (name === "visibleChats") return visibleChats[acc] ?? null;
     if (name === "recent") return recentPlays[acc] || [];
     if (name === "playlists") return playlistsOf[acc] || [];
+    if (name === "orders") return ordersOf[acc] || [];
     return favorites[acc] || [];
   },
   apply(name, value) {
@@ -408,6 +420,7 @@ accountSync = createAccountSync({
       visibleChats: [visibleChats, VISIBLE_FILE],
       recent: [recentPlays, RECENT_FILE],
       playlists: [playlistsOf, PLAYLISTS_FILE],
+      orders: [ordersOf, ORDERS_FILE],
     }[name] || [favorites, FAVORITES_FILE];
     if (value === null || (name !== "visibleChats" && !value.length)) delete store[acc];
     else store[acc] = value;
@@ -1655,6 +1668,26 @@ async function handleApi(req, res, url) {
       else delete playlistsOf[auth.me.id];
       writeJsonFile(PLAYLISTS_FILE, playlistsOf);
       return sendJson(res, 200, { playlists: sortPlaylists(result.playlists), id: result.id });
+    }
+
+    case "GET /api/orders":
+      requireReady();
+      return sendJson(res, 200, { orders: ordersOf[auth.me.id] || [] });
+
+    case "POST /api/orders": {
+      // { id: "<chat id>" | "fav", songs: [...] in the order dragged to } (songs null: back to the list's own order)
+      requireReady();
+      const body = await readJson(req);
+      let orders;
+      try {
+        orders = setOrder(ordersOf[auth.me.id] || [], body.id, Array.isArray(body.songs) ? body.songs : null);
+      } catch (err) {
+        return sendJson(res, 400, { error: err.message });
+      }
+      if (orders.length) ordersOf[auth.me.id] = orders;
+      else delete ordersOf[auth.me.id];
+      writeJsonFile(ORDERS_FILE, ordersOf);
+      return sendJson(res, 200, { orders });
     }
 
     case "GET /api/playlists/files": {

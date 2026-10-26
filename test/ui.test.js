@@ -182,3 +182,15 @@ test("service worker: a file is only pulled from the page that asked (no link fr
   // other origins are never answered by the worker
   assert.equal(fetchFor("https://evil.example/api/media?key=k&id=1", "page-1"), undefined);
 });
+
+test("the page's orderFiles (songs dragged to a new place) is the same as core.js's", async () => {
+  const { orderFiles } = await import("../core.js");
+  const src = /^function orderFiles\(files, songs, keyOf\) \{[\s\S]*?^\}$/m.exec(script)?.[0];
+  assert.ok(src, "ui.js has orderFiles");
+  const page = vm.runInNewContext(`(${src})`);
+  const key = (f) => `1|${f}`;
+  const saved = ["1|3", "1|7", "1|6", "1|5", "1|4"];
+  for (const list of [[9, 8, 7, 6, 5, 4, 3, 2, 1], [7, 6, 55, 5, 4, 3], [7, 5, 3], [1, 2], []])
+    for (const songs of [saved, null, ["1|99"]])
+      assert.deepEqual([...page(list, songs, key)], orderFiles(list, songs, key), `${list} / ${songs}`);
+});

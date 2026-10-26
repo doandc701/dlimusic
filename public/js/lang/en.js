@@ -484,6 +484,9 @@
     "Đã thêm {n} bài vào “{name}”": "Added {n} {n|song|songs} to “{name}”",
     "Bỏ khỏi playlist": "Remove from playlist",
     "Kéo để đổi thứ tự": "Drag to reorder",
+    "Bỏ thứ tự đã kéo": "Undo the dragged order",
+    "Mặc định (thứ tự đã kéo)": "Default (your order)",
+    "Đã về thứ tự gốc của danh sách": "Back to the list's own order",
     "Đã bỏ “{song}” khỏi “{name}”": "Removed “{song}” from “{name}”",
     'Mở một kênh và bấm <i class="bi bi-plus-lg"></i> ở mỗi bài để thêm vào đây.':
       'Open a channel and press <i class="bi bi-plus-lg"></i> on a song to add it here.',

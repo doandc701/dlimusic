@@ -6,10 +6,20 @@ import { FlashList, type FlashListRef } from "@shopify/flash-list";
 import { LinearGradient } from "expo-linear-gradient";
 import { router, useLocalSearchParams } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Alert, FlatList, Pressable, StyleSheet, TextInput, View } from "react-native";
-import ReorderableList, { useReorderableDrag } from "react-native-reorderable-list";
+import {
+  ActivityIndicator,
+  Alert,
+  FlatList,
+  Pressable,
+  StyleSheet,
+  TextInput,
+  View,
+  type AnimatableNumericValue,
+} from "react-native";
+import { withSpring, withTiming, useSharedValue } from "react-native-reanimated";
+import ReorderableList, { useIsActive, useReorderableDrag } from "react-native-reorderable-list";
 
-import { PAGE_SIZE, SONG_PAGE, displayName } from "../../../../core.js";
+import { PAGE_SIZE, SONG_PAGE, displayName, orderFiles } from "../../../../core.js";
 import { DownloadBar } from "@/components/DownloadBar";
 import { Icon } from "@/components/Icon";
 import { NameSheet, PlaylistPicker } from "@/components/Playlists";
@@ -23,7 +33,15 @@ import { playable, usePlayer } from "@/player/PlayerProvider";
 import { prefetchHead, warmUp } from "@/player/prefetch";
 import { useLibrary } from "@/store/LibraryProvider";
 import { MOCK } from "@/mock";
-import { FavoritesScan, SongScan, chatById, type FileList, type FileType, type Song } from "@/telegram/library";
+import {
+  FavoritesScan,
+  SongScan,
+  chatById,
+  orderIdOf,
+  type FileList,
+  type FileType,
+  type Song,
+} from "@/telegram/library";
 import { chatMembers, knownMembers, songSearch } from "@/telegram/search";
 import { FONT, GRADIENT, tint, useTheme } from "@/theme";
 
@@ -81,14 +99,26 @@ type Members = { chatId: string; members: number | null; type: string };
 /** One of them, at random (a playlist's shuffled start). */
 const anyOf = <T,>(list: T[]) => list[Math.floor(Math.random() * list.length)];
 
-/** A playlist's row grip: pressed, the row follows the finger to its new place (react-native-reorderable-list). */
+/** A row's grip: pressed, the row follows the finger to its new place (react-native-reorderable-list). */
 function DragGrip({ label }: { label: string }) {
   const t = useTheme();
   const drag = useReorderableDrag();
+  const active = useIsActive();
   return (
     <Pressable onPressIn={drag} hitSlop={6} style={styles.rowBtn} accessibilityRole="button" accessibilityLabel={label}>
-      <Icon name="grip-vertical" size={17} color={t.textMuted} />
+      <Icon name="grip-vertical" size={17} color={active ? t.primary : t.textMuted} />
     </Pressable>
+  );
+}
+
+/** The row being dragged: lifted above the others (a shadow, an outline in the app's colour). */
+function Lifted({ children }: { children: React.ReactNode }) {
+  const t = useTheme();
+  const active = useIsActive();
+  return (
+    <View style={active ? [styles.lifted, { borderColor: tint(t.primary, 0.6), shadowColor: "#000" }] : undefined}>
+      {children}
+    </View>
   );
 }
 
@@ -110,7 +140,7 @@ function ChatFiles() {
   const multi = fav || plId !== null; // songs of several chats, read by their keys (no more pages)
   // a chat of the account (or one found by the search): its subscribers / members under the title
   const plainChat = !multi && !isSearch;
-  const { favorites, isFavorite, toggleFavorite, playlists, editPlaylist } = useLibrary();
+  const { favorites, isFavorite, toggleFavorite, playlists, editPlaylist, orderOf, setListOrder } = useLibrary();
   const playlist = plId !== null ? (playlists.find((p) => p.id === plId) ?? null) : null;
   const { now, playing, play, toggle, shuffle: shuffling, setShuffle, jumps } = usePlayer();
 
@@ -134,6 +164,11 @@ function ChatFiles() {
           ? songSearch(search, { fresh })
           : new SongScan(params.id, nextType, params.title);
   const [list, setList] = useState<FileList>(() => newList());
+  // a chat or the favourites: the order their songs were dragged to, if any (shown and played in "Mặc định")
+  const orderId = orderIdOf(list);
+  const saved = orderOf(orderId);
+  const sortLabel = (k: Sort) =>
+    k === "default" && saved ? "Mặc định (thứ tự đã kéo)" : (SORTS.find(([x]) => x === k)?.[1] ?? "");
   const [songs, setSongs] = useState<Song[]>([]);
   const [hasMore, setHasMore] = useState(true);
   const [count, setCount] = useState(0);
@@ -228,8 +263,9 @@ function ChatFiles() {
     const q = norm(query.trim());
     if (q) out = out.filter((s) => norm(`${s.title ?? ""} ${s.performer ?? ""} ${s.name} ${s.chat ?? ""}`).includes(q));
     if (sort !== "default") out = [...out].sort(SORT_FN[sort]);
+    else if (saved) out = orderFiles(out, saved, (s: Song) => s.key) as Song[];
     return out;
-  }, [songs, fav, plId, playlist, isSearch, scope, type, query, sort, isFavorite]);
+  }, [songs, fav, plId, playlist, isSearch, scope, type, query, sort, isFavorite, saved]);
 
   // a playlist: songs added to it (from another list, or on another device) are read; deleted: back
   const plSongs = playlist?.songs;
@@ -249,8 +285,32 @@ function ChatFiles() {
     // rescan is this screen's own loader
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [plId, plSongs, loading]);
-  // dragged by their grip: only in the playlist's own order, nothing hidden by the search
-  const sortable = plId !== null && sort === "default" && !query.trim() && type === "all";
+  // dragged by their grip: a playlist, a chat, the favourites, in their own order, nothing hidden by the search
+  const sortable = (plId !== null ? type === "all" : orderId !== null) && sort === "default" && !query.trim();
+  // the row lifted grows a little (and is put down again)
+  const lift = useSharedValue<AnimatableNumericValue>(1);
+
+  /** A row dropped at a new place: the new order kept (a playlist's, or the list's own one), the row shines. */
+  function reorder(from: number, to: number) {
+    const keys = shown.map((x) => x.key);
+    const [moved] = keys.splice(from, 1);
+    keys.splice(to, 0, moved);
+    if (from !== to) setFlash(moved);
+    if (plId !== null) {
+      const r = editPlaylist({ op: "order", id: plId, songs: keys });
+      if (r.error) toast(tr(r.error), "error");
+      return;
+    }
+    if (!orderId) return;
+    // the rows shown take the places they had among the whole list (the ones a filter hides stay where they are)
+    const all = orderFiles(fav ? songs.filter((s) => isFavorite(s.key)) : songs, saved, (s: Song) => s.key) as Song[];
+    const slots = new Set(keys);
+    let i = 0;
+    setListOrder(
+      orderId,
+      all.map((s) => (slots.has(s.key) ? keys[i++] : s.key)),
+    );
+  }
 
   // another song of the list (⏮ / ⏭, the end of a song): it is brought into view when this list plays and its row
   // is off screen
@@ -741,7 +801,7 @@ function ChatFiles() {
       </View>
 
       {sortable ? (
-        // a playlist: rows dragged by their grip to a new place
+        // rows dragged by their grip to a new place: lifted, the others making room, a tick at each new place
         <ReorderableList
           ref={dragListRef}
           onViewableItemsChanged={onViewable}
@@ -749,16 +809,28 @@ function ChatFiles() {
           data={shown}
           keyExtractor={(s) => s.key}
           extraData={[selected, now?.song.key, playing, favorites, tr.locale, flash]}
+          onEndReached={() => {
+            if (multi || !hasMore || loading || endFor.current === songs.length) return;
+            endFor.current = songs.length;
+            read(list);
+          }}
+          onEndReachedThreshold={0.6}
           ListEmptyComponent={emptyView}
           ListFooterComponent={footerView}
-          renderItem={renderSong}
-          onReorder={({ from, to }) => {
-            const keys = shown.map((x) => x.key);
-            const [moved] = keys.splice(from, 1);
-            keys.splice(to, 0, moved);
-            const r = editPlaylist({ op: "order", id: plId!, songs: keys });
-            if (r.error) toast(tr(r.error), "error");
+          renderItem={(info) => <Lifted>{renderSong(info)}</Lifted>}
+          shouldUpdateActiveItem
+          animationDuration={180}
+          cellAnimations={{ opacity: 1, transform: [{ scale: lift }] }}
+          onDragStart={() => {
+            "worklet";
+            lift.value = withSpring(1.03, { damping: 14, stiffness: 220 });
           }}
+          onIndexChange={() => haptic()}
+          onDragEnd={() => {
+            "worklet";
+            lift.value = withTiming(1, { duration: 160 });
+          }}
+          onReorder={({ from, to }) => reorder(from, to)}
         />
       ) : (
         <FlashList
@@ -792,11 +864,22 @@ function ChatFiles() {
           value={tr(TYPES.find(([k]) => k === type)?.[1] ?? "")}
           onPress={() => setPick("type")}
         />
-        <Field
-          label={tr("Sắp xếp")}
-          value={tr(SORTS.find(([k]) => k === sort)?.[1] ?? "")}
-          onPress={() => setPick("sort")}
-        />
+        <Field label={tr("Sắp xếp")} value={tr(sortLabel(sort))} onPress={() => setPick("sort")} />
+        {saved && sort === "default" && (
+          // dragged to an order of its own: back to the list's own one
+          <Pressable
+            onPress={() => {
+              haptic();
+              setListOrder(orderId!, null);
+              toast(tr("Đã về thứ tự gốc của danh sách"), "info");
+            }}
+            style={({ pressed }) => [styles.option, { backgroundColor: pressed ? t.bg : "transparent" }]}
+            accessibilityRole="button"
+          >
+            <Icon name="arrow-counterclockwise" size={16} color={t.primary} />
+            <T color={t.primary}>{tr("Bỏ thứ tự đã kéo")}</T>
+          </Pressable>
+        )}
         <T size={13} muted style={{ textAlign: "center" }}>
           {tr("{n} file", { n: `${shown.length}/${songs.length}${hasMore && !multi ? "+" : ""}` })}
         </T>
@@ -828,7 +911,7 @@ function ChatFiles() {
                 style={[styles.option, active && { backgroundColor: t.primary }]}
               >
                 <T style={{ flex: 1 }} color={active ? "#fff" : undefined}>
-                  {tr(label)}
+                  {tr(pick === "sort" ? sortLabel(k as Sort) : label)}
                 </T>
                 {active && <Icon name="check2" size={15} color="#fff" />}
               </Pressable>
@@ -960,6 +1043,13 @@ const styles = StyleSheet.create({
   headLine: { lineHeight: 17, minHeight: 17 },
   heart: { width: 34, height: 34, alignItems: "center", justifyContent: "center" },
   rowBtn: { width: 30, height: 34, alignItems: "center", justifyContent: "center" },
+  lifted: {
+    borderWidth: 1,
+    shadowOpacity: 0.28,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 12,
+  },
   plBar: { flexDirection: "row", alignItems: "center", gap: 8 },
   empty: { alignItems: "center", padding: 32 },
   more: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, padding: 14 },

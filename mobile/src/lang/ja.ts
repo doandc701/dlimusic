@@ -281,6 +281,9 @@ export default {
     "Bỏ khỏi playlist": "プレイリストから削除",
     "Thêm vào playlist": "プレイリストに追加",
     "Kéo để đổi thứ tự": "ドラッグして並べ替え",
+    "Bỏ thứ tự đã kéo": "並べ替えを元に戻す",
+    "Mặc định (thứ tự đã kéo)": "標準（並べ替えた順）",
+    "Đã về thứ tự gốc của danh sách": "リスト本来の順に戻しました",
     "Xoá playlist": "プレイリストを削除",
     "Xoá playlist “{name}”? Các bài hát vẫn còn trong kênh của chúng.":
       "プレイリスト「{name}」を削除しますか？曲はそれぞれのチャンネルに残ります。",

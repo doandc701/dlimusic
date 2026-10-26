@@ -797,13 +797,14 @@ export async function readPage(
 // settings: { subfolderPerChat } (the download folder belongs to each device) · history: entries, newest
 // first · visibleChats: chat ids or null (= all) · favorites: "<chat id>|<message id>", newest first ·
 // recent: the songs played lately, { id: "<chat id>|<message id>", at, … }, newest first · playlists:
-// { id, name, songs: ["<chat id>|<message id>"…] in their order, at (made), up (last changed) }.
+// { id, name, songs: ["<chat id>|<message id>"…] in their order, at (made), up (last changed) } · orders: the order
+// a chat's songs (or the favourites) were dragged to, { id: "<chat id>" or "fav", songs: […] in that order, up }.
 // Devices send operations, not whole copies, so two devices changing things at once lose nothing.
 
-export const ACCOUNT_NAMES = ["settings", "history", "visibleChats", "favorites", "recent", "playlists"];
+export const ACCOUNT_NAMES = ["settings", "history", "visibleChats", "favorites", "recent", "playlists", "orders"];
 export const HISTORY_MAX = 2000;
 export const RECENT_MAX = 100;
-const LISTS = new Set(["history", "favorites", "recent", "playlists"]);
+const LISTS = new Set(["history", "favorites", "recent", "playlists", "orders"]);
 /** Lists of entries with an id (history, recent plays) and how many are kept. */
 const ENTRY_MAX = { history: HISTORY_MAX, recent: RECENT_MAX };
 
@@ -814,13 +815,14 @@ const same = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 
 /** Operations turning `before` into `after`. */
 export function accountOps(name, before, after) {
-  if (name === "playlists") {
-    // one playlist at a time: two devices editing different playlists both keep their changes
+  if (name in BY_ID) {
+    // one playlist (one list's order) at a time: two devices changing different ones both keep their changes
+    const { field } = BY_ID[name];
     const b = new Map((before || []).map((p) => [p.id, p]));
     const aIds = new Set((after || []).map((p) => p.id));
     const removed = [...b.keys()].filter((id) => !aIds.has(id));
     const ops = removed.length ? [{ op: "remove", ids: removed }] : [];
-    for (const p of [...(after || [])].reverse()) if (!same(b.get(p.id), p)) ops.push({ op: "put", playlist: p });
+    for (const p of [...(after || [])].reverse()) if (!same(b.get(p.id), p)) ops.push({ op: "put", [field]: p });
     return ops;
   }
   if (name === "favorites") {
@@ -860,9 +862,10 @@ export function applyAccountOps(name, value, ops) {
     else if (o.op === "clear") v = [];
     else if (name === "favorites" && o.op === "add") v = [o.id, ...v.filter((x) => x !== o.id)];
     else if (name === "favorites" && o.op === "remove") v = v.filter((x) => x !== o.id);
-    else if (name === "playlists" && o.op === "put")
-      v = [o.playlist, ...v.filter((p) => p.id !== o.playlist.id)].slice(0, PLAYLISTS_MAX);
-    else if (name === "playlists" && o.op === "remove") v = v.filter((p) => !o.ids.includes(p.id));
+    else if (name in BY_ID && o.op === "put") {
+      const p = o[BY_ID[name].field];
+      v = [p, ...v.filter((x) => x.id !== p.id)].slice(0, BY_ID[name].max);
+    } else if (name in BY_ID && o.op === "remove") v = v.filter((p) => !o.ids.includes(p.id));
     else if (name in ENTRY_MAX && o.op === "add") {
       const ids = new Set(o.entries.map((h) => h.id));
       v = [...o.entries, ...v.filter((h) => !ids.has(h.id))].slice(0, ENTRY_MAX[name]);
@@ -947,6 +950,63 @@ export function editPlaylists(list, change, now = Date.now()) {
   }
 }
 
+// ---------- orders: a chat's songs or the favourites, dragged to the order the user wants ----------
+// A chat's songs cannot be moved in Telegram: the order is the account's own, shown and played in "Mặc định".
+
+export const ORDERS_MAX = 100; // lists with an order of their own (the oldest changed go)
+export const ORDER_SONGS_MAX = 2000; // songs kept in an order (the ones past it follow in the list's own order)
+
+/** The id of a list's order: "fav", or the chat's id. */
+export const isOrderId = (v) => typeof v === "string" && /^(fav|-?\d{1,20})$/.test(v);
+
+/** An order as stored, cleaned; null when it is not one. */
+export function cleanOrder(o) {
+  if (!o || typeof o !== "object" || Array.isArray(o) || !isOrderId(o.id)) return null;
+  if (!Array.isArray(o.songs) || o.songs.length > ORDER_SONGS_MAX || !o.songs.every(isFavoriteId)) return null;
+  return { id: o.id, songs: [...new Set(o.songs)], up: Number.isSafeInteger(o.up) ? o.up : 0 };
+}
+
+/** The orders with one list's order set (songs: its songs in the new order) or taken away (songs null). */
+export function setOrder(list, id, songs, now = Date.now()) {
+  if (!isOrderId(id)) throw new Error("Danh sách không hợp lệ");
+  const rest = (list || []).filter((o) => o.id !== id);
+  if (!songs) return rest;
+  const clean = [...new Set(songs.filter(isFavoriteId))].slice(0, ORDER_SONGS_MAX);
+  return [{ id, songs: clean, up: now }, ...rest].slice(0, ORDERS_MAX);
+}
+
+/**
+ * A list (in its own order: the newest first) put in a saved order. The songs not in it keep their place around
+ * it: the ones before all of it (posted since) on top, the ones after it (older pages read later) at the end,
+ * the ones between right after the song they followed. keyOf: a file's "<chat id>|<message id>".
+ */
+export function orderFiles(files, songs, keyOf) {
+  if (!songs?.length) return files;
+  const rank = new Map(songs.map((k, i) => [k, i]));
+  const ranked = files.map((f) => rank.get(keyOf(f)));
+  const first = ranked.findIndex((r) => r !== undefined);
+  if (first < 0) return files;
+  const last = ranked.findLastIndex((r) => r !== undefined);
+  const top = [];
+  const bottom = [];
+  const after = new Map(); // a song in the order -> the ones that followed it
+  let prev = null;
+  files.forEach((f, i) => {
+    if (ranked[i] !== undefined) prev = f;
+    else if (i < first) top.push(f);
+    else if (i > last) bottom.push(f);
+    else after.set(prev, [...(after.get(prev) || []), f]);
+  });
+  const known = files.filter((_, i) => ranked[i] !== undefined).sort((a, b) => rank.get(keyOf(a)) - rank.get(keyOf(b)));
+  return [...top, ...known.flatMap((f) => [f, ...(after.get(f) || [])]), ...bottom];
+}
+
+/** Lists of items with an id, changed one item at a time: the op's field, how many are kept, their order. */
+const BY_ID = {
+  playlists: { field: "playlist", max: PLAYLISTS_MAX, sort: sortPlaylists },
+  orders: { field: "order", max: ORDERS_MAX, sort: (l) => [...l].sort((a, b) => (b.up || 0) - (a.up || 0)) },
+};
+
 /** A history id that two devices will not both pick (the old ones were 1, 2, 3… on every device). */
 export const newHistoryId = () => Date.now() * 1000 + Math.floor(Math.random() * 1000);
 
@@ -956,12 +1016,12 @@ export const newHistoryId = () => Date.now() * 1000 + Math.floor(Math.random() *
  */
 export function mergeAccount(name, mine, theirs) {
   if (name === "favorites") return [...new Set([...(theirs || []), ...(mine || [])])];
-  if (name === "playlists") {
-    // the same playlist changed on two devices: the one changed last
+  if (name in BY_ID) {
+    // the same playlist (list's order) changed on two devices: the one changed last
     const byId = new Map();
     for (const p of [...(theirs || []), ...(mine || [])])
       if (!byId.has(p.id) || (p.up || 0) > (byId.get(p.id).up || 0)) byId.set(p.id, p);
-    return sortPlaylists([...byId.values()]).slice(0, PLAYLISTS_MAX);
+    return BY_ID[name].sort([...byId.values()]).slice(0, BY_ID[name].max);
   }
   if (name === "history") {
     const byId = new Map((theirs || []).map((h) => [h.id, h]));

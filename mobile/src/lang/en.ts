@@ -279,6 +279,9 @@ export default {
     "Bỏ khỏi playlist": "Remove from playlist",
     "Thêm vào playlist": "Add to playlist",
     "Kéo để đổi thứ tự": "Drag to reorder",
+    "Bỏ thứ tự đã kéo": "Undo the dragged order",
+    "Mặc định (thứ tự đã kéo)": "Default (your order)",
+    "Đã về thứ tự gốc của danh sách": "Back to the list's own order",
     "Xoá playlist": "Delete playlist",
     "Xoá playlist “{name}”? Các bài hát vẫn còn trong kênh của chúng.":
       "Delete playlist “{name}”? The songs stay in their channels.",

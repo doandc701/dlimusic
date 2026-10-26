@@ -556,3 +556,48 @@ describe("chat profile photos (GET /api/avatars)", () => {
     assert.match((await avatars.get(["-100999"]))["-100999"], /^data:/, "a search result can be asked for");
   });
 });
+
+describe("orders (songs dragged to a new place)", async () => {
+  const { orderFiles, setOrder, cleanOrder, ORDERS_MAX, ORDER_SONGS_MAX } = await import("../core.js");
+  const key = (f) => `1|${f}`;
+  const ids = (list) => list.join(",");
+
+  test("a list in its saved order; the songs not in it keep their place around it", () => {
+    // the list's own order is the newest first: 9 8 7 6 5 4 3 2 1
+    const own = [9, 8, 7, 6, 5, 4, 3, 2, 1];
+    assert.equal(ids(orderFiles(own, null, key)), ids(own), "no order: as it is");
+    assert.equal(ids(orderFiles(own, ["1|99"], key)), ids(own), "none of it there: as it is");
+    // dragged when 7…3 were there: 3 on top, then 7 6 5 4
+    const saved = ["1|3", "1|7", "1|6", "1|5", "1|4"];
+    assert.equal(ids(orderFiles([7, 6, 5, 4, 3], saved, key)), "3,7,6,5,4");
+    // 9 and 8 posted since (on top), 2 and 1 read later (at the end)
+    assert.equal(ids(orderFiles(own, saved, key)), "9,8,3,7,6,5,4,2,1");
+    // a song between them that was not there then follows the one it came after in the list
+    assert.equal(ids(orderFiles([7, 6, 55, 5, 4, 3], saved, key)), "3,7,6,55,5,4");
+    // filtered (some not shown): the others keep their saved order
+    assert.equal(ids(orderFiles([7, 5, 3], saved, key)), "3,7,5");
+  });
+
+  test("setOrder puts one list's order first, takes it away, keeps at most so many", () => {
+    let orders = setOrder([], "123", ["1|2", "1|1", "1|2", "bad"], 5);
+    assert.deepEqual(orders, [{ id: "123", songs: ["1|2", "1|1"], up: 5 }]);
+    orders = setOrder(orders, "fav", ["2|1"], 6);
+    assert.deepEqual(
+      orders.map((o) => o.id),
+      ["fav", "123"],
+    );
+    assert.deepEqual(
+      setOrder(orders, "123", null).map((o) => o.id),
+      ["fav"],
+    );
+    assert.throws(() => setOrder(orders, "pl:x", []), /không hợp lệ/);
+    const many = Array.from({ length: ORDER_SONGS_MAX + 5 }, (_, i) => `1|${i + 1}`);
+    assert.equal(setOrder([], "1", many)[0].songs.length, ORDER_SONGS_MAX);
+    let lots = [];
+    for (let i = 0; i < ORDERS_MAX + 3; i++) lots = setOrder(lots, String(i), ["1|1"], i);
+    assert.equal(lots.length, ORDERS_MAX);
+    assert.equal(lots[0].id, String(ORDERS_MAX + 2), "the newest kept");
+    assert.equal(cleanOrder({ id: "fav", songs: ["x"] }), null);
+    assert.deepEqual(cleanOrder({ id: "-5", songs: ["1|1"], up: 3 }), { id: "-5", songs: ["1|1"], up: 3 });
+  });
+});

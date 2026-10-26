@@ -117,6 +117,7 @@ before(async () => {
       FAVORITES_FILE: path.join(TMP, "favorites.json"),
       RECENT_FILE: path.join(TMP, "recent.json"),
       PLAYLISTS_FILE: path.join(TMP, "playlists.json"),
+      ORDERS_FILE: path.join(TMP, "orders.json"),
       MONGODB_URI: "",
     },
     stdio: ["ignore", "pipe", "pipe"],
@@ -755,6 +756,31 @@ describe("telegram (real account)", () => {
     assert.equal((await api(`/api/playlists/files?id=nope`)).status, 404);
     assert.deepEqual((await post({ op: "delete", id })).data.playlists, []);
     assert.deepEqual(JSON.parse(fs.readFileSync(path.join(TMP, "playlists.json"), "utf8")), {}, "empty: not kept");
+  });
+
+  test("orders: a list's songs in the order dragged to, per account; back to its own order; validated", async (t) => {
+    if (!ready) return t.skip("no logged-in session.txt");
+    const me = (await api("/api/status")).data.me;
+    const post = (body) => api("/api/orders", { method: "POST", body });
+    for (const o of (await api("/api/orders")).data.orders) await post({ id: o.id, songs: null });
+    assert.deepEqual((await api("/api/orders")).data, { orders: [] });
+    const r = await post({ id: "100", songs: ["100|3", "100|1", "100|2"] });
+    assert.equal(r.status, 200);
+    assert.deepEqual(
+      r.data.orders.map((o) => [o.id, o.songs]),
+      [["100", ["100|3", "100|1", "100|2"]]],
+    );
+    await post({ id: "fav", songs: ["5|1"] });
+    assert.deepEqual(
+      JSON.parse(fs.readFileSync(path.join(TMP, "orders.json"), "utf8"))[me.id].map((o) => o.id),
+      ["fav", "100"],
+    );
+    assert.equal(fs.statSync(path.join(TMP, "orders.json")).mode & 0o777, 0o600);
+    assert.equal((await post({ id: "pl:abc", songs: [] })).status, 400);
+    assert.equal((await post({ id: 5, songs: [] })).status, 400);
+    await post({ id: "100", songs: null });
+    assert.deepEqual((await post({ id: "fav", songs: null })).data.orders, []);
+    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(TMP, "orders.json"), "utf8")), {}, "empty: not kept");
   });
 
   test("favourites: added / removed per account, newest first, validated", async (t) => {

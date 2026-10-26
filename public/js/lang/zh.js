@@ -461,6 +461,9 @@
     "Đã thêm {n} bài vào “{name}”": "已将 {n} 首添加到“{name}”",
     "Bỏ khỏi playlist": "从歌单移除",
     "Kéo để đổi thứ tự": "拖动以排序",
+    "Bỏ thứ tự đã kéo": "撤销拖动排序",
+    "Mặc định (thứ tự đã kéo)": "默认（自定义顺序）",
+    "Đã về thứ tự gốc của danh sách": "已恢复列表的原始顺序",
     "Đã bỏ “{song}” khỏi “{name}”": "已将“{song}”从“{name}”移除",
     'Mở một kênh và bấm <i class="bi bi-plus-lg"></i> ở mỗi bài để thêm vào đây.':
       '打开一个频道，点击歌曲旁的 <i class="bi bi-plus-lg"></i> 即可添加到这里。',

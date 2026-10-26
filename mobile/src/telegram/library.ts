@@ -100,6 +100,7 @@ export function toSong(msg: Api.Message, chatId: string, chat?: string): Song | 
 export interface FileList {
   kind: "chat" | "fav" | "recent" | "search" | "playlist"; // a chat's files, "Bài hát yêu thích", "Phát gần đây", "Tìm: “…”", a playlist
   playlistId?: string; // a playlist: its id (what plays follows it as it is now)
+  chatId?: string; // a chat's files: its id
   songs: Song[];
   more: boolean;
   message(id: number): Api.Message | undefined;
@@ -210,4 +211,10 @@ export class FavoritesScan implements FileList {
     this.songs = this.keys.map((k) => found.get(k)).filter((s): s is Song => !!s);
     this.more = false;
   }
+}
+
+/** The id of a list's order of its own (core.js orders): "fav", a chat's own id; null for the other lists. */
+export function orderIdOf(list: FileList) {
+  if (list.kind === "fav") return "fav";
+  return list.kind === "chat" && list.chatId ? songKey(list.chatId, 0).split("|")[0] : null;
 }

@@ -206,6 +206,7 @@ const state = {
   visibleChats: null, // Set of chat ids this account chose to show, or null = all
   favorites: new Set(), // "<chat id>|<message id>" of this account's favourite files
   playlists: [], // this account's playlists { id, name, songs, at, up }, newest first (core.js)
+  orders: [], // the order this account dragged lists to { id: "<chat id>" | "fav", songs, up } (core.js)
   favScope: "all", // "Bài hát yêu thích": "all" chats, or one chat id (list + what plays)
   playScan: null, // the list the playing song belongs to (may differ from the open one)
   playQueue: [], // ids of that list, in order, played one after another
@@ -1187,6 +1188,7 @@ async function loadDialogs() {
     renderDialogs();
     loadRecent();
     loadPlaylists();
+    loadOrders();
   } catch (err) {
     $("dialogs").innerHTML = `<div class="alert alert-danger m-3">${esc(err.message)}</div>`;
   }
@@ -1208,6 +1210,7 @@ function refreshAccountData() {
       renderDialogs();
       loadRecent(); // another device played something
       loadPlaylists(); // …or changed a playlist
+      loadOrders(); // …or dragged songs to a new place
       if (state.chat === FAV_CHAT)
         loadFiles(); // the favourites list itself changed
       else if (state.scan) renderFiles(); // hearts on the open list
@@ -2055,7 +2058,8 @@ const SORTS = {
 /** Sorted copy; "default" keeps the channel order (newest first). Ties keep the channel order. */
 function sortFiles(list) {
   const cmp = SORTS[state.sort];
-  if (!cmp) return list;
+  if (!cmp) return inOwnOrder(state.scan, list); // the order dragged to, when there is one
+
   const pos = new Map(state.scan.files.map((f, i) => [f.id, i]));
   return [...list].sort((a, b) => cmp(a, b) || pos.get(a.id) - pos.get(b.id));
 }
@@ -2564,7 +2568,7 @@ function plButtons(f, heart) {
     ? `<button class="btn btn-sm pl-remove-btn" data-plremove="${f.id}" title="${t("Bỏ khỏi playlist")}" aria-label="${t("Bỏ khỏi playlist")}"><i class="bi bi-x-lg"></i></button>`
     : "";
   // phones hide the "#" column, and its grip: one here instead, under the heart
-  const grip = state.scan.playlist
+  const grip = draggable(state.scan)
     ? `<span class="pl-grip pl-grip-m" data-grip title="${t("Kéo để đổi thứ tự")}"><i class="bi bi-grip-horizontal"></i></span>`
     : "";
   return `${remove}<button class="btn btn-sm add-pl-btn" data-addpl="${f.id}" title="${t("Thêm vào playlist")}" aria-label="${t("Thêm vào playlist")}"><i class="bi bi-plus-lg"></i></button>${heart}${grip}`;
@@ -2579,46 +2583,214 @@ async function removeFromPlaylist(id) {
     toast(t("Đã bỏ “{song}” khỏi “{name}”", { song: displayName(f), name: p?.name || "" }), "info");
 }
 
-// ---------- a playlist's songs dragged by their grip to a new place (mouse and touch) ----------
+// ---------- songs dragged by their grip to a new place (mouse and touch) ----------
+// Any list in its own order ("Mặc định", nothing searched): a playlist keeps its new order, a chat's songs and the
+// favourites get an order of the account's own (a chat's songs cannot be moved in Telegram), on every device.
+// The row lifted follows the pointer, the others slide out of its way, and it settles where it is dropped.
 
-let plDrag = null; // { row, pointer, moved }
+const ORDER_SONGS_MAX = 2000; // core.js: songs kept in an order
+
+/**
+ * core.js orderFiles (this page does not load core.js; test/ui.test.js checks they agree): a list (in its own
+ * order) put in a saved order, the songs not in it keeping their place around it — the ones before all of it
+ * on top, the ones after it at the end, the ones between right after the song they followed.
+ */
+function orderFiles(files, songs, keyOf) {
+  if (!songs?.length) return files;
+  const rank = new Map(songs.map((k, i) => [k, i]));
+  const ranked = files.map((f) => rank.get(keyOf(f)));
+  const first = ranked.findIndex((r) => r !== undefined);
+  if (first < 0) return files;
+  const last = ranked.findLastIndex((r) => r !== undefined);
+  const top = [];
+  const bottom = [];
+  const after = new Map(); // a song in the order -> the ones that followed it
+  let prev = null;
+  files.forEach((f, i) => {
+    if (ranked[i] !== undefined) prev = f;
+    else if (i < first) top.push(f);
+    else if (i > last) bottom.push(f);
+    else after.set(prev, [...(after.get(prev) || []), f]);
+  });
+  const known = files.filter((_, i) => ranked[i] !== undefined).sort((a, b) => rank.get(keyOf(a)) - rank.get(keyOf(b)));
+  return [...top, ...known.flatMap((f) => [f, ...(after.get(f) || [])]), ...bottom];
+}
+
+/** A list whose songs can be dragged to a new place: a playlist, a chat, the favourites. */
+const draggable = (scan) => !!scan?.playlist || !!orderIdOf(scan);
+
+/** The id of a list's order (core.js): "fav", the chat's id; null for lists that have none of their own. */
+function orderIdOf(scan) {
+  if (!scan || scan.playlist || scan.search || scan.recent) return null;
+  return scan.fav ? "fav" : scan.key.split("|")[0];
+}
+const savedOrder = (scan) => state.orders.find((o) => o.id === orderIdOf(scan))?.songs || null;
+/** A list's files in its own order: the order dragged to when there is one. */
+const inOwnOrder = (scan, files) => orderFiles(files, savedOrder(scan), (f) => favId(f, scan));
+
+async function loadOrders() {
+  try {
+    state.orders = (await api("/api/orders")).orders || [];
+  } catch {
+    return; // offline: the ones known stay
+  }
+  afterOrdersChanged();
+}
+
+/** The open list and the one playing follow the orders (changed here or on another device). */
+function afterOrdersChanged() {
+  if (state.scan && orderIdOf(state.scan)) renderFiles();
+  const ps = state.playScan;
+  if (ps && orderIdOf(ps) && ps === state.scan && state.sort === "default") {
+    state.playQueue = visibleFiles({ withSearch: false })
+      .filter(playable)
+      .map((f) => f.id);
+    if (!state.shuffle) state.playOrder = orderFrom(state.playingId);
+    updateNavButtons();
+  }
+}
+
+/** A list's order: songs in the new order, or null (back to the list's own). */
+async function saveOrder(scan, songs) {
+  const id = orderIdOf(scan);
+  const before = state.orders;
+  state.orders = [...(songs ? [{ id, songs, up: Date.now() }] : []), ...state.orders.filter((o) => o.id !== id)]; // at once, before the server answers
+  afterOrdersChanged();
+  let saved;
+  try {
+    saved = (await api("/api/orders", { id, songs })).orders || [];
+  } catch (err) {
+    state.orders = before;
+    afterOrdersChanged();
+    return toast(err.message, "error");
+  }
+  const same = (a, b) =>
+    JSON.stringify(a.map((o) => [o.id, o.songs])) === JSON.stringify(b.map((o) => [o.id, o.songs]));
+  const shown = same(saved, state.orders); // as shown already: not drawn again (the row dropped still shines)
+  state.orders = saved;
+  if (!shown) afterOrdersChanged();
+}
+
+$("orderResetBtn").addEventListener("click", async () => {
+  if (!state.scan || !savedOrder(state.scan)) return;
+  await saveOrder(state.scan, null);
+  toast(t("Đã về thứ tự gốc của danh sách"), "info");
+});
+
+let drag = null; // { row, pointer, grab, moved, scroll, y }
+
+/** Rows move to new places: each slides there from where it was (FLIP). */
+function slide(rows, move) {
+  const before = new Map(rows.map((r) => [r, r.offsetTop]));
+  move();
+  for (const r of rows) {
+    const dy = before.get(r) - r.offsetTop;
+    if (!dy) continue;
+    r.style.transition = "none";
+    r.style.transform = `translateY(${dy}px)`;
+    r.getBoundingClientRect(); // there first…
+    r.style.transition = "";
+    r.style.transform = ""; // …then slides to its place
+  }
+}
+
+/** The lifted row under the pointer; it changes place with a neighbour once over half of it. */
+function dragTo(clientY) {
+  const { row, grab } = drag;
+  const wrap = $("filesWrap");
+  drag.y = clientY;
+  const top = clientY + wrap.scrollTop - grab; // where the row's top should be
+  // past half of a neighbour: they change places
+  let next = row.nextElementSibling;
+  while (next && top + row.offsetHeight > next.offsetTop + next.offsetHeight / 2) {
+    const after = next;
+    slide([after], () => after.after(row));
+    drag.moved = true;
+    next = row.nextElementSibling;
+  }
+  let prev = row.previousElementSibling;
+  while (prev && top < prev.offsetTop + prev.offsetHeight / 2) {
+    const before = prev;
+    slide([before], () => before.before(row));
+    drag.moved = true;
+    prev = row.previousElementSibling;
+  }
+  row.style.transform = `translateY(${top - row.offsetTop}px)`;
+}
+
+/** Held near the list's top / bottom edge: it scrolls (faster nearer the edge), the row going along. */
+function dragScroll() {
+  if (!drag) return;
+  const wrap = $("filesWrap");
+  const box = wrap.getBoundingClientRect();
+  const head = wrap.querySelector("thead")?.getBoundingClientRect().height || 0;
+  const edge = 56;
+  const up = box.top + head + edge - drag.y;
+  const down = drag.y - (box.bottom - edge);
+  const step = up > 0 ? -Math.min(18, up / 3) : down > 0 ? Math.min(18, down / 3) : 0;
+  if (step) {
+    const was = wrap.scrollTop;
+    wrap.scrollTop += step;
+    if (wrap.scrollTop !== was) dragTo(drag.y);
+  }
+  drag.scroll = requestAnimationFrame(dragScroll);
+}
 
 $("files").addEventListener("pointerdown", (e) => {
   const grip = e.target.closest("[data-grip]");
-  if (!grip || !state.scan?.playlist || !$("chatView").classList.contains("pl-sortable")) return;
+  if (!grip || !$("chatView").classList.contains("pl-sortable") || drag) return;
   e.preventDefault();
   const row = grip.closest("tr");
-  plDrag = { row, pointer: e.pointerId, moved: false };
+  const wrap = $("filesWrap");
+  $("files").classList.add("drag-on"); // before measuring: it changes the box the rows are measured from
   row.classList.add("pl-dragging");
   document.body.classList.add("pl-drag-on");
+  drag = { row, pointer: e.pointerId, grab: e.clientY + wrap.scrollTop - row.offsetTop, moved: false, y: e.clientY };
   grip.setPointerCapture(e.pointerId);
+  drag.scroll = requestAnimationFrame(dragScroll);
 });
 $("files").addEventListener("pointermove", (e) => {
-  if (!plDrag || e.pointerId !== plDrag.pointer) return;
-  const over = document.elementFromPoint(e.clientX, e.clientY)?.closest("#files tr");
-  if (over && over !== plDrag.row) {
-    const r = over.getBoundingClientRect();
-    over.parentNode.insertBefore(plDrag.row, e.clientY > r.top + r.height / 2 ? over.nextSibling : over);
-    plDrag.moved = true;
-  }
-  // near the top / bottom edge: the list scrolls
-  const w = $("filesWrap").getBoundingClientRect();
-  if (e.clientY < w.top + 48) $("filesWrap").scrollTop -= 14;
-  else if (e.clientY > w.bottom - 48) $("filesWrap").scrollTop += 14;
+  if (!drag || e.pointerId !== drag.pointer) return;
+  dragTo(e.clientY);
 });
+
 async function endPlDrag(e) {
-  if (!plDrag || e.pointerId !== plDrag.pointer) return;
-  const { row, moved } = plDrag;
-  plDrag = null;
+  if (!drag || e.pointerId !== drag.pointer) return;
+  const { row, moved } = drag;
+  cancelAnimationFrame(drag.scroll);
+  drag = null;
+  // it settles into its place…
+  row.style.transform = "";
   row.classList.remove("pl-dragging");
   document.body.classList.remove("pl-drag-on");
+  await new Promise((r) => setTimeout(r, 190));
+  $("files").classList.remove("drag-on");
   const scan = state.scan;
-  if (!moved || !scan?.playlist) return;
-  const ids = [...$("files").querySelectorAll("tr[data-id]")].map((tr) => Number(tr.dataset.id));
-  const pos = new Map(ids.map((id, i) => [id, i]));
-  scan.files.sort((a, b) => (pos.get(a.id) ?? 1e9) - (pos.get(b.id) ?? 1e9)); // at once, before the server answers
-  renderFiles();
-  await editPlaylist({ op: "order", id: scan.playlist, songs: scan.files.map((f) => favId(f, scan)) });
+  const id = Number(row.dataset.id);
+  let saving = null;
+  if (moved && scan) {
+    const shown = [...$("files").querySelectorAll("tr[data-id]")].map((tr) => Number(tr.dataset.id));
+    const byId = new Map(scan.files.map((f) => [f.id, f]));
+    // the rows shown take the places they had among the whole list (the ones a filter hides stay where they are)
+    const all = scan.playlist ? [...scan.files] : inOwnOrder(scan, scan.files);
+    const slots = new Set(shown);
+    let i = 0;
+    const order = all.map((f) => (slots.has(f.id) ? byId.get(shown[i++]) : f));
+    if (scan.playlist) {
+      scan.files = order; // at once, before the server answers
+      renderFiles();
+      saving = editPlaylist({ op: "order", id: scan.playlist, songs: order.map((f) => favId(f, scan)) });
+    } else
+      saving = saveOrder(
+        scan,
+        order.slice(0, ORDER_SONGS_MAX).map((f) => favId(f, scan)),
+      );
+  }
+  // …then shines a moment where it landed
+  const landed = $("files").querySelector(`tr[data-id="${id}"]`);
+  landed?.classList.add("drop-flash");
+  setTimeout(() => landed?.classList.remove("drop-flash"), 700);
+  await saving;
 }
 $("files").addEventListener("pointerup", endPlDrag);
 $("files").addEventListener("pointercancel", endPlDrag);
@@ -2665,7 +2837,7 @@ function rowHtml(f, num) {
   return `<tr class="${cls}" data-id="${f.id}">
     <td class="ps-3"><input class="form-check-input" type="checkbox" ${sel ? "checked" : ""} tabindex="-1"></td>
     <td class="play">${playCell(f)}</td>
-    <td class="text-body-secondary small">${state.scan?.playlist ? `<span class="pl-grip" data-grip title="${t("Kéo để đổi thứ tự")}"><i class="bi bi-grip-vertical"></i></span>` : ""}${num}</td>
+    <td class="text-body-secondary small">${draggable(state.scan) ? `<span class="pl-grip" data-grip title="${t("Kéo để đổi thứ tự")}"><i class="bi bi-grip-vertical"></i></span>` : ""}${num}</td>
     <td class="text-truncate name-cell"><div class="name-main">${esc(displayName(f))}</div>
       ${file ? `<div class="small text-body-secondary text-truncate name-file">${file}</div>` : ""}
       ${posted ? `<div class="small text-body-secondary text-truncate name-file name-posted">${posted}</div>` : ""}
@@ -2704,13 +2876,18 @@ $("favScope").addEventListener("change", (e) => {
 
 function renderFiles() {
   renderFavScope();
-  // a playlist in its own order, nothing hidden by the search: its songs can be dragged to a new place
+  // a list in its own order, nothing hidden by the search: its songs can be dragged to a new place
   $("chatView").classList.toggle(
     "pl-sortable",
-    !!state.scan.playlist && state.sort === "default" && !state.query.trim(),
+    draggable(state.scan) && state.sort === "default" && !state.query.trim(),
   );
+  const custom = !!savedOrder(state.scan);
+  show($("orderResetBtn"), custom && state.sort === "default");
+  $("sortSel").options[0].textContent = custom ? t("Mặc định (thứ tự đã kéo)") : t("Mặc định (mới nhất)");
+  $("sortSelM").options[0].textContent = $("sortSel").options[0].textContent;
   const files = visibleFiles();
-  const index = new Map(state.scan.files.map((f, i) => [f.id, i + 1]));
+  // "#": the place in the list's own order (the one dragged to, when there is one)
+  const index = new Map(inOwnOrder(state.scan, state.scan.files).map((f, i) => [f.id, i + 1]));
   const more = state.scan.more ? "+" : ""; // more pages to load: the total is not known yet
   const all = `${state.scan.files.length}${more}`;
   $("fileCount").textContent = t("{n}/{total} file", { n: files.length, total: all });

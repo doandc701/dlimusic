@@ -519,6 +519,15 @@
                 <option value="dur-asc">Thời lượng ngắn → dài</option>
               </select>
             </div>
+            <!-- the list dragged to an order of its own: back to the list's own one -->
+            <button
+              class="btn btn-sm btn-outline-secondary btn-icon d-none"
+              id="orderResetBtn"
+              title="Bỏ thứ tự đã kéo"
+              aria-label="Bỏ thứ tự đã kéo"
+            >
+              <i class="bi bi-arrow-counterclockwise"></i>
+            </button>
             <!-- right corner, above the list: what is selected + download -->
             <div class="ms-auto d-flex align-items-center gap-2 dl-tools">
               <span id="selInfo" class="small"></span>

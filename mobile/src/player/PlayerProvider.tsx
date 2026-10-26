@@ -13,10 +13,10 @@ import { createContext, use, useEffect, useRef, useState, useSyncExternalStore, 
 
 import { AppState, Platform } from "react-native";
 
-import { authErrorText } from "../../../core.js";
+import { authErrorText, orderFiles } from "../../../core.js";
 import { MOCK } from "../mock";
 import { useLibrary } from "../store/LibraryProvider";
-import { chatById, type FileList, type Song } from "../telegram/library";
+import { chatById, orderIdOf, type FileList, type Song } from "../telegram/library";
 import { cacheFile } from "./cache";
 import { prefetchHead, takeHead } from "./prefetch";
 import { SongStream } from "./stream";
@@ -284,9 +284,11 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       }
       return list.songs.filter((s) => playable(s) && at.has(s.key)).sort((a, b) => at.get(a.key)! - at.get(b.key)!);
     }
-    return list.songs.filter(
+    const songs = list.songs.filter(
       (s) => playable(s) && (list.kind !== "fav" || s.key === playing.key || library.isFavorite(s.key)),
     );
+    // a chat or the favourites dragged to an order of their own: played in it
+    return orderFiles(songs, library.orderOf(orderIdOf(list)), (s: Song) => s.key) as Song[];
   }
 
   /** The song "next" would play after `song` (with shuffle: picked now and kept), or null. */

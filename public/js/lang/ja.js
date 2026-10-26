@@ -483,6 +483,9 @@
     "Đã thêm {n} bài vào “{name}”": "「{name}」に {n} 曲を追加しました",
     "Bỏ khỏi playlist": "プレイリストから削除",
     "Kéo để đổi thứ tự": "ドラッグして並べ替え",
+    "Bỏ thứ tự đã kéo": "並べ替えを元に戻す",
+    "Mặc định (thứ tự đã kéo)": "標準（並べ替えた順）",
+    "Đã về thứ tự gốc của danh sách": "リスト本来の順に戻しました",
     "Đã bỏ “{song}” khỏi “{name}”": "「{song}」を「{name}」から削除しました",
     'Mở một kênh và bấm <i class="bi bi-plus-lg"></i> ở mỗi bài để thêm vào đây.':
       'チャンネルを開き、曲の <i class="bi bi-plus-lg"></i> を押すとここに追加されます。',

@@ -2618,23 +2618,55 @@ body:has(.pl-view) #filterSheet .type-filter {
   padding: 0.25rem 0.15rem;
   margin-right: 0.15rem;
 }
-.pl-view.pl-sortable .pl-grip {
+.pl-sortable .pl-grip {
   display: inline-block;
 }
 .pl-grip-m {
   display: none !important; /* the phones' grip (the "#" column's one is hidden there) */
 }
 @media (max-width: 575.98px) {
-  .pl-view.pl-sortable .pl-grip-m {
+  .pl-sortable .pl-grip-m {
     display: block !important;
     text-align: center;
     font-size: 1.1rem;
     padding: 0.1rem 0;
   }
 }
-.file-table tr.pl-dragging {
-  opacity: 0.55;
-  background: color-mix(in srgb, #db2777 10%, var(--bs-body-bg));
+/* dragging: the row lifted follows the pointer above the others, which slide out of its way */
+#files.drag-on > tr {
+  position: relative; /* all measured from the same box (offsetTop), the lifted one above the others */
+  transition: transform 0.18s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+#files.drag-on > tr.pl-dragging {
+  transition: none; /* follows the pointer as it moves */
+  z-index: 3;
+  box-shadow:
+    0 10px 28px rgba(0, 0, 0, 0.28),
+    0 0 0 1px color-mix(in srgb, #db2777 55%, transparent);
+}
+#files.drag-on > tr.pl-dragging > td {
+  background: color-mix(in srgb, #db2777 12%, var(--bs-body-bg));
+}
+.pl-dragging .pl-grip,
+.pl-dragging .pl-grip-m {
+  color: #db2777;
+}
+/* dropped: it shines a moment where it landed */
+@keyframes drop-flash {
+  from {
+    background: color-mix(in srgb, #db2777 28%, var(--bs-body-bg));
+  }
+}
+#files > tr.drop-flash > td {
+  animation: drop-flash 0.7s ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  #files.drag-on > tr {
+    transition: none;
+  }
+  #files > tr.drop-flash > td {
+    animation: none;
+  }
 }
 body.pl-drag-on,
 body.pl-drag-on * {

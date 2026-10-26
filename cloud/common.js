@@ -11,7 +11,16 @@
 
 import crypto from "node:crypto";
 import { MongoClient } from "mongodb";
-import { normalizeChatIds, isFavoriteId, FAVORITES_LIMIT, RECENT_MAX, PLAYLISTS_MAX, cleanPlaylist } from "../core.js";
+import {
+  normalizeChatIds,
+  isFavoriteId,
+  FAVORITES_LIMIT,
+  RECENT_MAX,
+  PLAYLISTS_MAX,
+  cleanPlaylist,
+  ORDERS_MAX,
+  cleanOrder,
+} from "../core.js";
 
 export const DEFAULT_DB = "tele_downloader";
 const TOKEN_TTL_DAYS = 400;
@@ -200,6 +209,12 @@ export const ACCOUNT_DATA = {
     if (v === null) return null;
     if (!Array.isArray(v) || v.length > PLAYLISTS_MAX) return undefined;
     const out = v.map(cleanPlaylist);
+    return out.every(Boolean) ? out : undefined;
+  },
+  orders(v) {
+    if (v === null) return null;
+    if (!Array.isArray(v) || v.length > ORDERS_MAX) return undefined;
+    const out = v.map(cleanOrder);
     return out.every(Boolean) ? out : undefined;
   },
   recent(v) {

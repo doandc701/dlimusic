@@ -206,7 +206,7 @@ const state = {
   visibleChats: null, // Set of chat ids this account chose to show, or null = all
   favorites: new Set(), // "<chat id>|<message id>" of this account's favourite files
   playlists: [], // this account's playlists { id, name, songs, at, up }, newest first (core.js)
-  orders: [], // the order this account dragged lists to { id: "<chat id>" | "fav", songs, up } (core.js)
+  orders: [], // lists dragged to an order of their own { id: "<chat id>" | "fav", songs }, while the page is open
   favScope: "all", // "Bài hát yêu thích": "all" chats, or one chat id (list + what plays)
   playScan: null, // the list the playing song belongs to (may differ from the open one)
   playQueue: [], // ids of that list, in order, played one after another
@@ -1188,7 +1188,6 @@ async function loadDialogs() {
     renderDialogs();
     loadRecent();
     loadPlaylists();
-    loadOrders();
   } catch (err) {
     $("dialogs").innerHTML = `<div class="alert alert-danger m-3">${esc(err.message)}</div>`;
   }
@@ -1210,7 +1209,6 @@ function refreshAccountData() {
       renderDialogs();
       loadRecent(); // another device played something
       loadPlaylists(); // …or changed a playlist
-      loadOrders(); // …or dragged songs to a new place
       if (state.chat === FAV_CHAT)
         loadFiles(); // the favourites list itself changed
       else if (state.scan) renderFiles(); // hearts on the open list
@@ -2584,11 +2582,10 @@ async function removeFromPlaylist(id) {
 }
 
 // ---------- songs dragged by their grip to a new place (mouse and touch) ----------
-// Any list in its own order ("Mặc định", nothing searched): a playlist keeps its new order, a chat's songs and the
-// favourites get an order of the account's own (a chat's songs cannot be moved in Telegram), on every device.
-// The row lifted follows the pointer, the others slide out of its way, and it settles where it is dropped.
-
-const ORDER_SONGS_MAX = 2000; // core.js: songs kept in an order
+// Any list in its own order ("Mặc định", nothing searched): a playlist keeps its new order (saved, on every
+// device); a chat's songs and the favourites are shown and played in it while the page is open (loaded again,
+// they are back in their own order). The row lifted follows the pointer, the others slide out of its way, and it
+// settles where it is dropped.
 
 /**
  * core.js orderFiles (this page does not load core.js; test/ui.test.js checks they agree): a list (in its own
@@ -2628,15 +2625,6 @@ const savedOrder = (scan) => state.orders.find((o) => o.id === orderIdOf(scan))?
 /** A list's files in its own order: the order dragged to when there is one. */
 const inOwnOrder = (scan, files) => orderFiles(files, savedOrder(scan), (f) => favId(f, scan));
 
-async function loadOrders() {
-  try {
-    state.orders = (await api("/api/orders")).orders || [];
-  } catch {
-    return; // offline: the ones known stay
-  }
-  afterOrdersChanged();
-}
-
 /** The open list and the one playing follow the orders (changed here or on another device). */
 function afterOrdersChanged() {
   if (state.scan && orderIdOf(state.scan)) renderFiles();
@@ -2650,30 +2638,16 @@ function afterOrdersChanged() {
   }
 }
 
-/** A list's order: songs in the new order, or null (back to the list's own). */
-async function saveOrder(scan, songs) {
+/** A list's order: songs in the new order, or null (back to the list's own); kept while the page is open. */
+function saveOrder(scan, songs) {
   const id = orderIdOf(scan);
-  const before = state.orders;
-  state.orders = [...(songs ? [{ id, songs, up: Date.now() }] : []), ...state.orders.filter((o) => o.id !== id)]; // at once, before the server answers
+  state.orders = [...(songs ? [{ id, songs }] : []), ...state.orders.filter((o) => o.id !== id)];
   afterOrdersChanged();
-  let saved;
-  try {
-    saved = (await api("/api/orders", { id, songs })).orders || [];
-  } catch (err) {
-    state.orders = before;
-    afterOrdersChanged();
-    return toast(err.message, "error");
-  }
-  const same = (a, b) =>
-    JSON.stringify(a.map((o) => [o.id, o.songs])) === JSON.stringify(b.map((o) => [o.id, o.songs]));
-  const shown = same(saved, state.orders); // as shown already: not drawn again (the row dropped still shines)
-  state.orders = saved;
-  if (!shown) afterOrdersChanged();
 }
 
-$("orderResetBtn").addEventListener("click", async () => {
+$("orderResetBtn").addEventListener("click", () => {
   if (!state.scan || !savedOrder(state.scan)) return;
-  await saveOrder(state.scan, null);
+  saveOrder(state.scan, null);
   toast(t("Đã về thứ tự gốc của danh sách"), "info");
 });
 
@@ -2794,9 +2768,9 @@ async function endPlDrag(e) {
       renderFiles();
       saving = editPlaylist({ op: "order", id: scan.playlist, songs: order.map((f) => favId(f, scan)) });
     } else
-      saving = saveOrder(
+      saveOrder(
         scan,
-        order.slice(0, ORDER_SONGS_MAX).map((f) => favId(f, scan)),
+        order.map((f) => favId(f, scan)),
       );
   }
   // …then shines a moment where it landed

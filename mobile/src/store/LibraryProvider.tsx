@@ -1,12 +1,12 @@
 // What an account keeps on this phone: favourites, the songs played lately, which chats show in the list and how
-// they are sorted, the playlists, and the order songs were dragged to. Ids are the web's ("<chat id>|<message id>", the chat's own id without -100):
-// favourites, recent plays, visible chats, playlists and orders are the same as on the web version through its sync server
+// they are sorted, and the playlists (and, while the app is open, the order songs were dragged to). Ids are the web's ("<chat id>|<message id>", the chat's own id without -100):
+// favourites, recent plays, visible chats and playlists are the same as on the web version through its sync server
 // (cloud.ts); the order of the chat list stays on this phone.
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { createContext, use, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { AppState } from "react-native";
 
-import { ORDER_SONGS_MAX, RECENT_MAX, editPlaylists, setOrder, sortPlaylists } from "../../../core.js";
+import { RECENT_MAX, editPlaylists, sortPlaylists } from "../../../core.js";
 import { MOCK } from "../mock";
 import { useAuth } from "../telegram/AuthProvider";
 import { createCloud, setActiveCloud, type CloudStatus, type SharedName } from "./cloud";
@@ -25,8 +25,9 @@ export type RecentItem = {
 export type ChatSort = "recent" | "az" | "za" | "type";
 /** A playlist (core.js): songs ("<chat id>|<message id>") from any chat, in the order chosen. */
 export type Playlist = { id: string; name: string; songs: string[]; at: number; up: number };
-/** The order a chat's songs (id: the chat's own id) or the favourites (id "fav") were dragged to (core.js). */
-export type Order = { id: string; songs: string[]; up: number };
+/** The order a chat's songs (id: the chat's own id) or the favourites (id "fav") were dragged to, while the app is
+ * open (opened again, they are in their own order). */
+export type Order = { id: string; songs: string[] };
 /** One change to the playlists (core.js editPlaylists). */
 export type PlaylistChange =
   | { op: "create"; name: string; songs?: string[] }
@@ -51,7 +52,7 @@ type Library = {
   editPlaylist: (change: PlaylistChange) => { id?: string; error?: string };
   /** The songs of a list in the order they were dragged to (null: its own order). */
   orderOf: (id: string | null) => string[] | null;
-  /** A list's songs dragged to a new order (null: back to its own). */
+  /** A list's songs dragged to a new order (null: back to its own), for as long as the app is open. */
   setListOrder: (id: string, songs: string[] | null) => void;
   sync: CloudStatus | null; // null: not tried yet
 };
@@ -83,7 +84,6 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
     recent: [],
     visibleChats: null,
     playlists: [],
-    orders: [],
     settings: null,
     history: [],
   });
@@ -95,14 +95,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!acct) return;
     let live = true;
-    AsyncStorage.multiGet([
-      key("favorites"),
-      key("recent"),
-      key("visibleChats"),
-      key("chatSort"),
-      key("playlists"),
-      key("orders"),
-    ])
+    AsyncStorage.multiGet([key("favorites"), key("recent"), key("visibleChats"), key("chatSort"), key("playlists")])
       .then((pairs) => {
         if (!live) return;
         const get = (i: number) => {
@@ -157,14 +150,13 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
                 ]
               : [],
         );
-        setOrders(Array.isArray(get(5)) ? get(5) : []);
+        setOrders([]); // another account: none
         if (MOCK) return;
         shared.current = {
           favorites: Array.isArray(get(0)) ? get(0) : [],
           recent: Array.isArray(get(1)) ? get(1) : [],
           visibleChats: Array.isArray(get(2)) ? get(2) : null,
           playlists: Array.isArray(get(4)) ? get(4) : [],
-          orders: Array.isArray(get(5)) ? get(5) : [],
           settings: null,
           history: [],
         };
@@ -178,7 +170,6 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
             else if (name === "recent") setRecent((value as RecentItem[]) ?? []);
             else if (name === "visibleChats") setVisible((value as string[] | null) ?? null);
             else if (name === "playlists") setPlaylists((value as Playlist[]) ?? []);
-            else if (name === "orders") setOrders((value as Order[]) ?? []);
             else return; // the web's settings / download history: not used here
             AsyncStorage.setItem(`acct:${acct}:${name}`, JSON.stringify(value)).catch(() => {});
           },
@@ -203,7 +194,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
   const save = useCallback(
     (name: string, value: unknown) => {
       if (acct) AsyncStorage.setItem(key(name), JSON.stringify(value)).catch(() => {});
-      if (["favorites", "recent", "visibleChats", "playlists", "orders"].includes(name)) {
+      if (["favorites", "recent", "visibleChats", "playlists"].includes(name)) {
         shared.current[name as SharedName] = value;
         cloud.current?.changed(name as SharedName);
       }
@@ -260,11 +251,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
         }
       },
       orderOf: (id) => (id ? (orders.find((o) => o.id === id)?.songs ?? null) : null),
-      setListOrder: (id, songs) => {
-        const next = setOrder(orders, id, songs ? songs.slice(0, ORDER_SONGS_MAX) : null) as Order[];
-        setOrders(next);
-        save("orders", next);
-      },
+      setListOrder: (id, songs) => setOrders([...(songs ? [{ id, songs }] : []), ...orders.filter((o) => o.id !== id)]),
       sync,
     };
   }, [favorites, recent, visibleChats, chatSort, playlists, orders, save, setPlaylists, sync]);

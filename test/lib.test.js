@@ -557,8 +557,8 @@ describe("chat profile photos (GET /api/avatars)", () => {
   });
 });
 
-describe("orders (songs dragged to a new place)", async () => {
-  const { orderFiles, setOrder, cleanOrder, ORDERS_MAX, ORDER_SONGS_MAX } = await import("../core.js");
+describe("songs dragged to a new place", async () => {
+  const { orderFiles } = await import("../core.js");
   const key = (f) => `1|${f}`;
   const ids = (list) => list.join(",");
 
@@ -576,28 +576,5 @@ describe("orders (songs dragged to a new place)", async () => {
     assert.equal(ids(orderFiles([7, 6, 55, 5, 4, 3], saved, key)), "3,7,6,55,5,4");
     // filtered (some not shown): the others keep their saved order
     assert.equal(ids(orderFiles([7, 5, 3], saved, key)), "3,7,5");
-  });
-
-  test("setOrder puts one list's order first, takes it away, keeps at most so many", () => {
-    let orders = setOrder([], "123", ["1|2", "1|1", "1|2", "bad"], 5);
-    assert.deepEqual(orders, [{ id: "123", songs: ["1|2", "1|1"], up: 5 }]);
-    orders = setOrder(orders, "fav", ["2|1"], 6);
-    assert.deepEqual(
-      orders.map((o) => o.id),
-      ["fav", "123"],
-    );
-    assert.deepEqual(
-      setOrder(orders, "123", null).map((o) => o.id),
-      ["fav"],
-    );
-    assert.throws(() => setOrder(orders, "pl:x", []), /không hợp lệ/);
-    const many = Array.from({ length: ORDER_SONGS_MAX + 5 }, (_, i) => `1|${i + 1}`);
-    assert.equal(setOrder([], "1", many)[0].songs.length, ORDER_SONGS_MAX);
-    let lots = [];
-    for (let i = 0; i < ORDERS_MAX + 3; i++) lots = setOrder(lots, String(i), ["1|1"], i);
-    assert.equal(lots.length, ORDERS_MAX);
-    assert.equal(lots[0].id, String(ORDERS_MAX + 2), "the newest kept");
-    assert.equal(cleanOrder({ id: "fav", songs: ["x"] }), null);
-    assert.deepEqual(cleanOrder({ id: "-5", songs: ["1|1"], up: 3 }), { id: "-5", songs: ["1|1"], up: 3 });
   });
 });

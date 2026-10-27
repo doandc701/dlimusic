@@ -30,7 +30,6 @@ import {
   FAVORITES_LIMIT,
   editPlaylists,
   sortPlaylists,
-  setOrder,
   QR_LOGIN,
   loginQr,
   newHistoryId,
@@ -62,7 +61,6 @@ const STORE = {
   favorites: "tdl.favorites",
   recent: "tdl.recent",
   playlists: "tdl.playlists", // { "<account id>": [{ id, name, songs, at, up }] } (core.js)
-  orders: "tdl.orders", // { "<account id>": [{ id, songs, up }] }: the order songs were dragged to (core.js)
 };
 
 // API ID / hash baked in at build time (TG_API_ID / TG_API_HASH, e.g. from the project's .env).
@@ -1300,26 +1298,6 @@ async function route(method, url, body, signal) {
       else delete all[auth.me.id];
       save(STORE.playlists, all);
       return { playlists: sortPlaylists(result.playlists), id: result.id };
-    }
-
-    case "GET /api/orders":
-      requireReady();
-      return { orders: load(STORE.orders, {})[auth.me.id] || [] };
-
-    case "POST /api/orders": {
-      // { id: "<chat id>" | "fav", songs: [...] in the order dragged to } (songs null: back to the list's own order)
-      requireReady();
-      const all = load(STORE.orders, {});
-      let orders;
-      try {
-        orders = setOrder(all[auth.me.id] || [], body.id, Array.isArray(body.songs) ? body.songs : null);
-      } catch (err) {
-        throw httpError(400, err.message);
-      }
-      if (orders.length) all[auth.me.id] = orders;
-      else delete all[auth.me.id];
-      save(STORE.orders, all);
-      return { orders };
     }
 
     case "GET /api/playlists/files": {

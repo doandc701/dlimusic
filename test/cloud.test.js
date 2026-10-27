@@ -28,7 +28,7 @@ import { createMirror } from "../cloud/mirror.js";
 import { createCloudApi, tcpSession } from "../cloud/api.js";
 import { createCloudSync, createAccountSync } from "../web/cloud-sync.js";
 import { readAccount, joinAccount, applyOps, checkOps } from "../cloud/account.js";
-import { editPlaylists, sortPlaylists, setOrder } from "../core.js";
+import { editPlaylists, sortPlaylists } from "../core.js";
 
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
 const SESSION_A = "1BAAOMTQ5LjE1NC4xNjcuNTEBu" + "A".repeat(320);
@@ -342,7 +342,6 @@ describe("MongoDB storage", () => {
         favorites: [],
         recent: [],
         playlists: [],
-        orders: [],
       });
       assert.equal(a.headers["cache-control"], "no-store");
 
@@ -379,7 +378,6 @@ describe("MongoDB storage", () => {
         favorites: [],
         recent: [],
         playlists: [],
-        orders: [],
       });
       assert.deepEqual((await call(h, "GET", "data", { token: b.data.token })).data.favorites, []);
 
@@ -632,7 +630,6 @@ describe("MongoDB storage", () => {
       favorites: "tdl.favorites",
       recent: "tdl.recent",
       playlists: "tdl.playlists",
-      orders: "tdl.orders",
     };
     const env = {
       MONGODB_URI: "",
@@ -729,7 +726,6 @@ describe("MongoDB storage", () => {
         favorites: data.favorites || [],
         recent: data.recent || [],
         playlists: data.playlists || [],
-        orders: data.orders || [],
         visibleChats: data.visibleChats ?? null,
         subfolderPerChat: data.subfolderPerChat ?? true,
       };
@@ -863,37 +859,6 @@ describe("MongoDB storage", () => {
       const old = await joinAccount(db, "111", { favorites: [] });
       assert.equal(old.playlists.length, 1);
       assert.equal(checkOps("playlists", [{ op: "put", playlist: { id: "x", name: "", songs: [] } }]), undefined);
-    });
-
-    test("orders: one list's order changed on each of two devices, both kept; the same one: the last", async () => {
-      const a = computer("111");
-      const b = computer("111");
-      await a.start();
-      await b.start();
-      const order = (dev, id, songs, now) => dev.change("orders", setOrder(dev.app.orders, id, songs, now));
-      order(a, "100", ["100|2", "100|1"], 10);
-      order(b, "fav", ["5|5", "6|6"], 11);
-      await wait();
-      await a.sync.flush();
-      await b.sync.flush();
-      await a.sync.pull();
-      await b.sync.pull();
-      for (const dev of [a, b])
-        assert.deepEqual(dev.app.orders.map((o) => [o.id, o.songs]).sort(), [
-          ["100", ["100|2", "100|1"]],
-          ["fav", ["5|5", "6|6"]],
-        ]);
-      order(b, "100", null);
-      await wait();
-      await b.sync.flush();
-      await a.sync.pull();
-      assert.deepEqual(
-        a.app.orders.map((o) => o.id),
-        ["fav"],
-        "back to the list's own order on one device, on the other too",
-      );
-      assert.equal(checkOps("orders", [{ op: "put", order: { id: "pl:x", songs: [] } }]), undefined);
-      assert.equal(checkOps("orders", [{ op: "remove", ids: ["../x"] }]), undefined);
     });
 
     test("two devices changing things at the same time lose nothing", async () => {

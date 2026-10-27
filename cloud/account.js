@@ -14,9 +14,6 @@ import {
   FAVORITES_LIMIT,
   PLAYLISTS_MAX,
   cleanPlaylist,
-  ORDERS_MAX,
-  cleanOrder,
-  isOrderId,
 } from "../core.js";
 
 const docId = (acc, name) => `acct:${acc}:${name}`;
@@ -94,18 +91,6 @@ export function checkOps(name, ops) {
       o.ids.every((id) => typeof id === "string" && id.length <= 24)
     ) {
       out.push({ op: "remove", ids: o.ids });
-    } else if (name === "orders" && o.op === "put") {
-      const order = cleanOrder(o.order);
-      if (!order) return undefined;
-      out.push({ op: "put", order });
-    } else if (
-      name === "orders" &&
-      o.op === "remove" &&
-      Array.isArray(o.ids) &&
-      o.ids.length <= ORDERS_MAX &&
-      o.ids.every(isOrderId)
-    ) {
-      out.push({ op: "remove", ids: o.ids });
     } else if ((name === "history" || name === "recent") && o.op === "clear") {
       out.push({ op: "clear" });
     } else return undefined;
@@ -124,17 +109,16 @@ export async function applyOps(db, acc, name, ops) {
       else await col.updateOne({ _id }, { $set: { value: o.value, updatedAt: now } }, { upsert: true });
     } else if (o.op === "clear") {
       await col.updateOne({ _id }, { $set: { value: [], updatedAt: now } }, { upsert: true });
-    } else if ((name === "playlists" || name === "orders") && o.op === "put") {
-      // the playlist (list's order) replaced whole (its name, songs and their order), put first
-      const item = name === "playlists" ? o.playlist : o.order;
-      await col.updateOne({ _id }, { $pull: { value: { id: item.id } }, $set: { updatedAt: now } }, { upsert: true });
+    } else if (name === "playlists" && o.op === "put") {
+      // the playlist replaced whole (its name, songs and their order), put first
       await col.updateOne(
         { _id },
-        {
-          $push: {
-            value: { $each: [item], $position: 0, $slice: name === "playlists" ? PLAYLISTS_MAX : ORDERS_MAX },
-          },
-        },
+        { $pull: { value: { id: o.playlist.id } }, $set: { updatedAt: now } },
+        { upsert: true },
+      );
+      await col.updateOne(
+        { _id },
+        { $push: { value: { $each: [o.playlist], $position: 0, $slice: PLAYLISTS_MAX } } },
         { upsert: true },
       );
     } else if (name === "favorites") {

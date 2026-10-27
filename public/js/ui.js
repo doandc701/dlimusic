@@ -2677,7 +2677,7 @@ $("orderResetBtn").addEventListener("click", async () => {
   toast(t("Đã về thứ tự gốc của danh sách"), "info");
 });
 
-let drag = null; // { row, pointer, grab, moved, scroll, y, y0 (where the finger went down) }
+let drag = null; // { row, pointer, grab, moved, scroll, y, y0 (where the finger went down), later (to draw) }
 
 /** Rows move to new places: each slides there from where it was (FLIP). */
 function slide(rows, move) {
@@ -2731,6 +2731,7 @@ function dragTo(clientY) {
  */
 function dragScroll() {
   if (!drag) return;
+  if (!drag.row.isConnected) return void endPlDrag({ pointerId: drag.pointer }); // the row went: the drag ends
   const wrap = $("filesWrap");
   const box = wrap.getBoundingClientRect();
   const head = wrap.querySelector("thead")?.getBoundingClientRect().height || 0;
@@ -2767,7 +2768,7 @@ $("files").addEventListener("pointermove", (e) => {
 
 async function endPlDrag(e) {
   if (!drag || e.pointerId !== drag.pointer) return;
-  const { row, moved } = drag;
+  const { row, moved, later } = drag;
   cancelAnimationFrame(drag.scroll);
   drag = null;
   // it settles into its place…
@@ -2779,6 +2780,7 @@ async function endPlDrag(e) {
   const scan = state.scan;
   const id = Number(row.dataset.id);
   let saving = null;
+  if (later && !moved) renderFiles(); // what came in while it was held
   if (moved && scan) {
     const shown = [...$("files").querySelectorAll("tr[data-id]")].map((tr) => Number(tr.dataset.id));
     const byId = new Map(scan.files.map((f) => [f.id, f]));
@@ -2803,8 +2805,9 @@ async function endPlDrag(e) {
   setTimeout(() => landed?.classList.remove("drop-flash"), 700);
   await saving;
 }
-$("files").addEventListener("pointerup", endPlDrag);
-$("files").addEventListener("pointercancel", endPlDrag);
+// on the page, not the list: lifted over the player (or the row drawn again), the finger still ends the drag
+document.addEventListener("pointerup", endPlDrag);
+document.addEventListener("pointercancel", endPlDrag);
 
 // ---------- sidebar as a rail of icons (576–1023px) ----------
 
@@ -2886,6 +2889,9 @@ $("favScope").addEventListener("change", (e) => {
 });
 
 function renderFiles() {
+  // a row being dragged: drawn when it is dropped (a page read meanwhile would take the row from under the finger,
+  // and the drop with it: the list scrolled on and on)
+  if (drag) return void (drag.later = true);
   renderFavScope();
   // a list in its own order, nothing hidden by the search: its songs can be dragged to a new place
   $("chatView").classList.toggle(

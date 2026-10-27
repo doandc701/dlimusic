@@ -2622,9 +2622,9 @@ body:has(.pl-view) #filterSheet .type-filter {
   display: inline-block;
 }
 .pl-grip-m {
-  display: none !important; /* the phones' grip (the "#" column's one is hidden there) */
+  display: none !important; /* the grip of phones and tablets (the "#" column, with its grip, is hidden there) */
 }
-@media (max-width: 575.98px) {
+@media (max-width: 991.98px), (max-height: 500px) and (orientation: landscape) {
   .pl-sortable .pl-grip-m {
     display: block !important;
     text-align: center;

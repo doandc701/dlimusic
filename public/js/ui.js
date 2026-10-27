@@ -2677,7 +2677,7 @@ $("orderResetBtn").addEventListener("click", async () => {
   toast(t("Đã về thứ tự gốc của danh sách"), "info");
 });
 
-let drag = null; // { row, pointer, grab, moved, scroll, y }
+let drag = null; // { row, pointer, grab, moved, scroll, y, y0 (where the finger went down) }
 
 /** Rows move to new places: each slides there from where it was (FLIP). */
 function slide(rows, move) {
@@ -2699,7 +2699,14 @@ function dragTo(clientY) {
   const { row, grab } = drag;
   const wrap = $("filesWrap");
   drag.y = clientY;
-  const top = clientY + wrap.scrollTop - grab; // where the row's top should be
+  // where the row's top should be: within the rows (pushed past the last one it made the list longer, which the
+  // edge's scrolling followed on and on)
+  const first = $("files").firstElementChild;
+  const last = $("files").lastElementChild;
+  const top = Math.min(
+    Math.max(clientY + wrap.scrollTop - grab, first.offsetTop),
+    last.offsetTop + last.offsetHeight - row.offsetHeight,
+  );
   // past half of a neighbour: they change places
   let next = row.nextElementSibling;
   while (next && top + row.offsetHeight > next.offsetTop + next.offsetHeight / 2) {
@@ -2718,19 +2725,22 @@ function dragTo(clientY) {
   row.style.transform = `translateY(${top - row.offsetTop}px)`;
 }
 
-/** Held near the list's top / bottom edge: it scrolls (faster nearer the edge), the row going along. */
+/**
+ * Held near the list's top / bottom edge: it scrolls, faster deeper into the edge, the row going along. Only once
+ * the finger went a little way that way: a row picked up near an edge (a phone's short list) does not run off.
+ */
 function dragScroll() {
   if (!drag) return;
   const wrap = $("filesWrap");
   const box = wrap.getBoundingClientRect();
   const head = wrap.querySelector("thead")?.getBoundingClientRect().height || 0;
-  const edge = 56;
-  const up = box.top + head + edge - drag.y;
-  const down = drag.y - (box.bottom - edge);
-  const step = up > 0 ? -Math.min(18, up / 3) : down > 0 ? Math.min(18, down / 3) : 0;
-  if (step) {
+  const edge = Math.min(56, (box.height - head) * 0.15);
+  const up = drag.y < drag.y0 - 12 ? box.top + head + edge - drag.y : 0;
+  const down = drag.y > drag.y0 + 12 ? drag.y - (box.bottom - edge) : 0;
+  const depth = Math.min(1, Math.max(up, down, 0) / edge); // past the edge (over the player…): no faster
+  if (depth > 0) {
     const was = wrap.scrollTop;
-    wrap.scrollTop += step;
+    wrap.scrollTop += Math.round(1 + 9 * depth * depth) * (up > 0 ? -1 : 1);
     if (wrap.scrollTop !== was) dragTo(drag.y);
   }
   drag.scroll = requestAnimationFrame(dragScroll);
@@ -2745,7 +2755,8 @@ $("files").addEventListener("pointerdown", (e) => {
   $("files").classList.add("drag-on"); // before measuring: it changes the box the rows are measured from
   row.classList.add("pl-dragging");
   document.body.classList.add("pl-drag-on");
-  drag = { row, pointer: e.pointerId, grab: e.clientY + wrap.scrollTop - row.offsetTop, moved: false, y: e.clientY };
+  const grab = e.clientY + wrap.scrollTop - row.offsetTop;
+  drag = { row, pointer: e.pointerId, grab, moved: false, y: e.clientY, y0: e.clientY };
   grip.setPointerCapture(e.pointerId);
   drag.scroll = requestAnimationFrame(dragScroll);
 });

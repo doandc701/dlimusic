@@ -299,6 +299,7 @@
     "Nhiều bài liên tiếp không phát được nên đã dừng. Kiểm tra mạng rồi thử lại.":
       "连续多首歌曲无法播放，已停止。请检查网络后重试。",
     "Không phát được {name} — chuyển sang bài tiếp theo": "无法播放 {name} — 切换到下一首",
+    "trình phát không đọc được file": "播放器无法读取该文件",
     // preview, dialogs, folder picker
     "Trình duyệt không phát được video này (định dạng không hỗ trợ). Bạn vẫn có thể tải về.":
       "浏览器无法播放此视频（格式不受支持）。你仍可以下载。",

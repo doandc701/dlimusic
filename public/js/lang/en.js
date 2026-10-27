@@ -306,6 +306,7 @@
     "Nhiều bài liên tiếp không phát được nên đã dừng. Kiểm tra mạng rồi thử lại.":
       "Several songs in a row couldn't play, so playback stopped. Check your connection and try again.",
     "Không phát được {name} — chuyển sang bài tiếp theo": "Couldn't play {name} — skipping to the next song",
+    "trình phát không đọc được file": "the player cannot read the file",
     // preview, dialogs, folder picker
     "Trình duyệt không phát được video này (định dạng không hỗ trợ). Bạn vẫn có thể tải về.":
       "Your browser can't play this video (unsupported format). You can still download it.",

@@ -4102,10 +4102,26 @@ player.addEventListener("error", () => {
     return toast(t("Nhiều bài liên tiếp không phát được nên đã dừng. Kiểm tra mạng rồi thử lại."), "error");
   }
   const failed = state.playingId;
-  toast(t("Không phát được {name} — chuyển sang bài tiếp theo", { name }), "warn");
+  const src = player.getAttribute("src");
+  // why (the player does not say): the same address asked again for its first bytes, its answer shown
+  whyNotPlayed(src).then((why) => {
+    toast(t("Không phát được {name} — chuyển sang bài tiếp theo", { name }) + (why ? ` (${why})` : ""), "warn");
+  });
   // unless the user picked another song meanwhile
   setTimeout(() => state.playingId === failed && playNext(true, { skip: true }), 600);
 });
+
+/** The reason a song could not be played, as its address answers now ("" when it answers fine). */
+async function whyNotPlayed(src) {
+  try {
+    const res = await fetch(src, { headers: { Range: "bytes=0-1" } });
+    if (res.ok) return `${t("trình phát không đọc được file")} · ${res.headers.get("Content-Type") || "?"}`;
+    const text = (await res.text().catch(() => "")).trim().slice(0, 120);
+    return text ? `${res.status}: ${text}` : String(res.status);
+  } catch (err) {
+    return String(err?.message || err);
+  }
+}
 
 // ---------- photo / video preview ----------
 

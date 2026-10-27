@@ -306,6 +306,7 @@
     "Nhiều bài liên tiếp không phát được nên đã dừng. Kiểm tra mạng rồi thử lại.":
       "複数の曲を続けて再生できなかったため停止しました。接続を確認してもう一度お試しください。",
     "Không phát được {name} — chuyển sang bài tiếp theo": "{name} を再生できません — 次の曲に進みます",
+    "trình phát không đọc được file": "プレーヤーがファイルを読み込めません",
     // preview, dialogs, folder picker
     "Trình duyệt không phát được video này (định dạng không hỗ trợ). Bạn vẫn có thể tải về.":
       "このブラウザーではこの動画を再生できません（未対応の形式）。ダウンロードは可能です。",

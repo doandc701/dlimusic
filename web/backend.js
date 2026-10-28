@@ -481,7 +481,11 @@ function logout() {
   photoCache.clear();
   avatars.clear();
   wholes.clear();
-  if ("caches" in self) caches.delete(NEXT_CACHE).catch(() => {}); // another account may sign in here
+  if ("caches" in self) {
+    // another account may sign in here
+    caches.delete(NEXT_CACHE).catch(() => {});
+    caches.delete(LONG_CACHE).catch(() => {});
+  }
   cancelQueued();
   pendingInput = null;
   earlyPhone = null;
@@ -1043,12 +1047,16 @@ async function serveStream(req, port) {
     // comes; a long mix is read on ahead of the player. A download is read as it is written.
     const whole = !req.download && !local ? fetchWhole(req.key, req.id) : null;
     if (whole && ["audio", "voice"].includes(mediaKind(item.msg))) playingNow(mediaUrl(req.key, req.id));
+    // a long mix sought far past what is fetched: that part is streamed meanwhile (the fetch goes on from the start)
+    const far = whole?.long && !whole.done && range.start > whole.got + FAR_JUMP;
     const it = req.download
       ? source(range.start, range.end)
-      : whole
+      : whole && !far
         ? wholeRange(whole, range.start, range.end)
-        : readAhead(source(range.start, range.end), undefined, (got) =>
-            fetchProgress(mediaUrl(req.key, req.id), range.start + got, size),
+        : readAhead(
+            source(range.start, range.end),
+            undefined,
+            whole ? null : (got) => fetchProgress(mediaUrl(req.key, req.id), range.start + got, size),
           );
     let received = 0;
     port.onmessage = async (m) => {
@@ -1546,7 +1554,14 @@ function keepDc(dcId) {
 const NEXT_CACHE = "tdl-next-songs";
 const NEXT_KEEP = 4; // songs kept in that cache (the playing one, the next two…)
 const NEXT_MAX = 40 * 1024 * 1024; // a song up to this size is fetched whole, once; longer mixes stream
-const wholes = new Map(); // media URL -> { buf, got, size, done, failed, waiters, job }
+const wholes = new Map(); // media URL -> { got, size, done, failed, stop, waiters, job, read(from, to), long? }
+// A longer mix playing is fetched whole too, start to end, in parts of PART bytes kept in the browser's cache (not
+// in memory: a mix can be hundreds of MB): sought back or ahead within what is there, it plays at once and the
+// fetch goes on — the grey bar is not started again. The last LONG_KEEP mixes are kept.
+const LONG_CACHE = "tdl-long-songs";
+const PART = 8 * 1024 * 1024; // a multiple of CHUNK
+const LONG_KEEP = 2;
+const FAR_JUMP = 4 * 1024 * 1024; // a position this far past what is fetched is streamed meanwhile
 const mediaUrl = (key, id) => `/api/media?key=${encodeURIComponent(key)}&id=${id}`;
 
 /** How far a song is fetched (the player's grey bar), at most every 300 ms per song. */
@@ -1561,9 +1576,10 @@ function fetchProgress(url, got, size) {
 /**
  * A song (up to NEXT_MAX) fetched whole, start to end, whether it plays, is paused or comes next — like the app.
  * The player reads it as it comes (wholeRange), and once whole it goes to the worker's cache: played again,
- * sought, or reached with the screen locked, it needs no network. null when it is not fetched this way.
+ * sought, or reached with the screen locked, it needs no network. A longer mix: the same while it plays (not ahead:
+ * `ahead`), kept in parts (fetchLong). null when it is not fetched this way.
  */
-function fetchWhole(key, id) {
+function fetchWhole(key, id, { ahead = false } = {}) {
   const url = mediaUrl(key, id);
   if (wholes.has(url)) {
     const w = wholes.get(url);
@@ -1574,8 +1590,10 @@ function fetchWhole(key, id) {
   const size = item?.info.size;
   if (!item || !size) return null;
   keepDc(item.msg.media?.document?.dcId);
-  if (size > NEXT_MAX || !("caches" in self)) return null;
+  if (!("caches" in self)) return null;
+  if (size > NEXT_MAX) return ahead ? null : fetchLong(url, item, size);
   const w = { buf: new Uint8Array(size), got: 0, size, done: false, failed: null, stop: false, waiters: new Set() };
+  w.read = async (from, to) => w.buf.slice(from, to);
   const wake = () => {
     for (const fn of w.waiters) fn();
     w.waiters.clear();
@@ -1616,14 +1634,90 @@ function fetchWhole(key, id) {
   return w;
 }
 
+/** A long mix fetched whole while it plays (see LONG_CACHE): its parts kept in the cache, the one filling in memory. */
+function fetchLong(url, item, size) {
+  const parts = []; // part index -> Blob (from the cache once it is there)
+  const w = { got: 0, size, done: false, failed: null, stop: false, waiters: new Set(), long: true };
+  let cur = new Uint8Array(Math.min(PART, size)); // the part being filled
+  w.read = async (from, to) => {
+    const i = Math.floor(from / PART);
+    const end = Math.min(to, (i + 1) * PART) - i * PART;
+    if (parts[i]) return new Uint8Array(await parts[i].slice(from - i * PART, end).arrayBuffer());
+    return cur.slice(from - i * PART, end);
+  };
+  const wake = () => {
+    for (const fn of w.waiters) fn();
+    w.waiters.clear();
+  };
+  const partKey = (i) => `${url}&part=${i}`;
+  w.job = (async () => {
+    const cache = await caches.open(LONG_CACHE);
+    // only the last LONG_KEEP mixes keep their parts (the cache's keys are full addresses, oldest first)
+    const full = (u) => new URL(u, location.href).href;
+    const keys = (await cache.keys()).map((r) => r.url);
+    const others = [...new Set(keys.map((k) => k.replace(/&part=\d+$/, "")))].filter((u) => u !== full(url));
+    const gone = others.slice(0, Math.max(0, others.length - (LONG_KEEP - 1)));
+    for (const k of keys) if (gone.some((u) => k.startsWith(u + "&part="))) await cache.delete(k);
+    for (const [u, x] of wholes) if (x.long && x !== w && gone.includes(full(u))) wholes.delete(u);
+    // fetched before (in part): from where it stopped
+    for (let i = 0; w.got < size; i++) {
+      const hit = await cache.match(partKey(i));
+      if (!hit) break;
+      parts[i] = await hit.blob();
+      w.got = Math.min(size, w.got + parts[i].size);
+    }
+    fetchProgress(url, w.got, size);
+    wake();
+    cur = new Uint8Array(Math.min(PART, size - w.got));
+    let fill = 0;
+    if (w.got < size)
+      for await (const chunk of telegramRange(item, w.got, size - 1)) {
+        if (w.stop) throw new Error("stopped");
+        let c = chunk.subarray(0, size - w.got);
+        while (c.length) {
+          const n = Math.min(c.length, cur.length - fill);
+          cur.set(c.subarray(0, n), fill);
+          fill += n;
+          w.got += n;
+          c = c.subarray(n);
+          if (fill === cur.length) {
+            // a part full: kept (in memory until the cache has it), the next one starts
+            const i = Math.floor((w.got - 1) / PART);
+            parts[i] = new Blob([cur]);
+            const blob = parts[i];
+            cache
+              .put(partKey(i), new Response(blob))
+              .then(() => cache.match(partKey(i)))
+              .then((r) => r?.blob())
+              .then((b) => b && parts[i] === blob && (parts[i] = b))
+              .catch(() => {}); // storage full: it stays in memory
+            cur = new Uint8Array(Math.min(PART, size - w.got));
+            fill = 0;
+          }
+        }
+        fetchProgress(url, w.got, size);
+        wake();
+      }
+    w.done = true;
+    fetchProgress(url, size, size);
+    wake();
+  })().catch((err) => {
+    w.failed = err;
+    wake();
+    if (wholes.get(url) === w) wholes.delete(url); // asked again next time (from the parts kept)
+  });
+  wholes.set(url, w);
+  return w;
+}
+
 /** Bytes start..end of a song being fetched whole, as they arrive (the player does not wait for the end). */
 async function* wholeRange(w, start, end) {
   let pos = start;
   while (pos <= end) {
     if (w.got > pos) {
-      const to = Math.min(w.got, end + 1, pos + 512 * 1024);
-      yield w.buf.slice(pos, to);
-      pos = to;
+      const piece = await w.read(pos, Math.min(w.got, end + 1, pos + 512 * 1024));
+      yield piece;
+      pos += piece.length;
     } else if (w.failed) throw w.failed;
     else if (w.done) return;
     else await new Promise((r) => w.waiters.add(r));
@@ -1643,7 +1737,7 @@ function playingNow(url) {
 /** The next songs, fetched ahead (see fetchWhole); resolves when there (false: streamed when it plays). */
 async function prefetch(key, id) {
   wanted.add(mediaUrl(key, id));
-  const w = fetchWhole(key, id);
+  const w = fetchWhole(key, id, { ahead: true });
   if (!w) return false;
   await w.job;
   return !w.failed;

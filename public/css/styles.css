@@ -2734,6 +2734,11 @@ body.pl-drag-on * {
 .share-link input {
   font-size: 0.8rem;
 }
+.share-revoke {
+  --bs-btn-padding-y: 0.15rem;
+  --bs-btn-padding-x: 0.6rem;
+  --bs-btn-font-size: 0.8rem;
+}
 
 /* a message line that takes no room while it is empty (the playlist picker's name error) */
 .empty-hide:empty {

@@ -557,5 +557,7 @@
     "Bài này đang được tải lên, hãy thử lại sau ít phút":
       "This song is still being uploaded, try again in a few minutes",
     "Link phát nhạc đã hết hạn": "The playback link has expired",
+    "Mở DLiMusic": "Open DLiMusic",
+    "Tới bài này trong danh sách": "Go to this song in the list",
   },
 };

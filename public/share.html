@@ -37,55 +37,69 @@
     />
     <link
       rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/@fontsource/be-vietnam-pro@5.3.0/500.css"
+      integrity="sha384-/brKXsQ9HNPeIbWnE/gQ5qD3RWQy8x8eTXQaZOPpb3CYnlgGHBpjDTT7vnrsBm2W"
+      crossorigin="anonymous"
+    />
+    <link
+      rel="stylesheet"
       href="https://cdn.jsdelivr.net/npm/@fontsource/be-vietnam-pro@5.3.0/600.css"
       integrity="sha384-+KBBy2X9d0DKtfNEwwCmfGITI0kYdYEZ8Zb/nvCTOBlRLi1jnCIYmcwIXURTwzjz"
       crossorigin="anonymous"
     />
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/@fontsource/be-vietnam-pro@5.3.0/700.css"
+      integrity="sha384-IRUu+AGBg3+2KEmOfNOfNGlsXhgSQy9Jzm8uraZTloFx3ybT7o0oKR0DDCLxZTV+"
+      crossorigin="anonymous"
+    />
+    <!-- the app's own look: colours, buttons, the player dock (the same as the main page) -->
+    <link rel="stylesheet" href="/css/styles.css" />
     <style>
-      :root {
-        --bs-font-sans-serif: "Be Vietnam Pro", system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
-        --bs-body-font-size: 0.9375rem;
-        --bs-body-line-height: 1.55;
-        --sh-accent: #7c3aed;
-      }
-      [data-bs-theme="dark"] {
-        --sh-accent: #a78bfa;
-      }
-      body {
-        min-height: 100dvh;
-        padding-bottom: 7.5rem; /* room for the player */
-        -webkit-font-smoothing: antialiased;
+      /* only what this page has and the app does not: the playlist's head and its list of songs */
+      .sh-scroll {
+        overflow-y: auto;
       }
       .sh-wrap {
-        max-width: 720px;
+        max-width: 860px;
         margin: 0 auto;
-        padding: 0 16px;
+        padding: 1rem 16px 1.5rem;
       }
-      .sh-brand {
-        font-weight: 700;
-        letter-spacing: -0.02em;
-        color: var(--bs-body-color);
-        text-decoration: none;
-      }
-      .sh-brand img {
-        width: 28px;
-        height: 28px;
-        border-radius: 22%;
-      }
+      /* the cat of the start screen: with headphones, dancing kittens while music plays (styles.css cat-col/cat-row) */
       .sh-cover {
-        width: 96px;
-        height: 96px;
+        width: 160px;
+        height: 120px;
         flex: none;
-        border-radius: 1rem;
         display: grid;
         place-items: center;
-        font-size: 2.5rem;
-        color: #fff;
-        background: linear-gradient(135deg, #7c3aed, #db2777);
       }
-      h1 {
-        font-weight: 600;
-        letter-spacing: -0.01em;
+      .sh-cat {
+        height: 120px;
+        width: auto;
+      }
+      .sh-cat-dance {
+        width: 160px;
+        aspect-ratio: 320 / 224;
+        background: url("/img/cat-dance-grid.webp") 0 0 / 300% 1300% no-repeat;
+        animation:
+          cat-col calc(0.3s / var(--cat-rate, 1)) steps(3, jump-none) infinite,
+          cat-row calc(3.9s / var(--cat-rate, 1)) steps(13, jump-none) infinite;
+      }
+      @media (max-width: 575.98px) {
+        .sh-cover {
+          width: 112px;
+          height: 96px;
+        }
+        .sh-cat {
+          height: 96px;
+        }
+        .sh-cat-dance {
+          width: 112px;
+        }
+      }
+      .sh-name {
+        font-weight: 700;
+        letter-spacing: -0.02em;
         word-break: break-word;
       }
       .sh-song {
@@ -93,26 +107,29 @@
         align-items: center;
         gap: 0.75rem;
         width: 100%;
-        padding: 0.55rem 0.75rem;
+        padding: 0.5rem 0.9rem;
         border: 0;
-        border-radius: 0.6rem;
+        border-bottom: var(--bs-border-width) solid var(--bs-border-color-translucent);
         background: none;
         color: inherit;
         text-align: left;
       }
-      .sh-song:hover {
+      .sh-song:last-child {
+        border-bottom: 0;
+      }
+      .sh-song:not(:disabled):hover {
         background: var(--bs-tertiary-bg);
+      }
+      .sh-song.playing {
+        background: color-mix(in srgb, var(--bs-primary) 12%, transparent);
+      }
+      .sh-song.playing .title {
+        color: var(--bs-primary);
+        font-weight: 600;
       }
       .sh-song.pending {
         opacity: 0.5;
         cursor: default;
-      }
-      .sh-song.pending:hover {
-        background: none;
-      }
-      .sh-song.playing {
-        background: var(--bs-tertiary-bg);
-        color: var(--sh-accent);
       }
       .sh-song .num {
         width: 1.75rem;
@@ -122,7 +139,7 @@
         font-variant-numeric: tabular-nums;
       }
       .sh-song.playing .num {
-        color: var(--sh-accent);
+        color: var(--bs-primary);
       }
       .sh-song .meta {
         min-width: 0;
@@ -135,80 +152,32 @@
         white-space: nowrap;
         text-overflow: ellipsis;
       }
+      .sh-song .title {
+        font-weight: 500;
+      }
       .sh-song .artist,
       .sh-song .dur {
         font-size: 0.8rem;
         color: var(--bs-secondary-color);
       }
-      .sh-player {
-        position: fixed;
-        inset: auto 0 0 0;
-        background: var(--bs-body-bg);
-        border-top: 1px solid var(--bs-border-color);
-        padding: 0.5rem 0 calc(0.5rem + env(safe-area-inset-bottom));
-      }
-      .sh-player .now {
-        min-width: 0;
-        flex: 1;
-      }
-      .sh-player .now span {
-        display: block;
-        overflow: hidden;
-        white-space: nowrap;
-        text-overflow: ellipsis;
-      }
-      .sh-btn {
-        width: 2.5rem;
-        height: 2.5rem;
-        border-radius: 50%;
-        display: grid;
-        place-items: center;
-        padding: 0;
-        font-size: 1.25rem;
-      }
-      .sh-btn.main {
-        width: 3rem;
-        height: 3rem;
-        font-size: 1.6rem;
-        color: #fff;
-        background: var(--sh-accent);
-        border: 0;
-      }
-      .sh-time {
-        font-size: 0.75rem;
+      .sh-song .dur {
         font-variant-numeric: tabular-nums;
-        color: var(--bs-secondary-color);
-        width: 2.75rem;
-        flex: none;
-      }
-      .sh-seek::-webkit-slider-thumb {
-        background: var(--sh-accent);
-      }
-      .sh-seek::-moz-range-thumb {
-        background: var(--sh-accent);
-      }
-      #shPlayAll {
-        --bs-btn-bg: var(--sh-accent);
-        --bs-btn-border-color: var(--sh-accent);
-        --bs-btn-hover-bg: var(--sh-accent);
-        --bs-btn-hover-border-color: var(--sh-accent);
-        --bs-btn-active-bg: var(--sh-accent);
-      }
-      .min-w-0 {
-        min-width: 0;
       }
     </style>
   </head>
 
-  <body>
-    <div class="sh-wrap">
-      <header class="d-flex align-items-center justify-content-between py-3">
-        <a class="sh-brand d-flex align-items-center gap-2" href="/"
-          ><img src="/img/logo-128.png" alt="" /><span>DLiMusic</span></a
-        >
-      </header>
+  <body class="d-flex flex-column app-body">
+    <nav class="navbar bg-body border-bottom px-3 py-2 flex-nowrap">
+      <a class="navbar-brand fw-bold mb-0 text-truncate" href="/" aria-label="DLiMusic"
+        ><img src="/img/logo-128.png" class="brand-logo" alt="" /><span class="brand-text">DLiMusic</span></a
+      >
+      <a class="btn btn-sm btn-outline-primary ms-auto" href="/"
+        ><i class="bi bi-box-arrow-up-right"></i> Mở DLiMusic</a
+      >
+    </nav>
 
-      <main id="shMain">
+    <main class="flex-grow-1 min-h-0 sh-scroll">
+      <div class="sh-wrap">
         <div class="text-center text-body-secondary py-5" id="shLoading">
           <div class="spinner-border spinner-border-sm me-2" role="status"></div>
           Đang mở playlist…
@@ -222,54 +191,180 @@
 
         <section class="d-none" id="shList">
           <div class="d-flex gap-3 align-items-center mb-3">
-            <div class="sh-cover" aria-hidden="true"><i class="bi bi-music-note-list"></i></div>
+            <div class="sh-cover" aria-hidden="true">
+              <img class="sh-cat" id="shCat" src="/img/cat-headphones.webp" alt="" width="233" height="320" />
+              <div class="sh-cat-dance d-none" id="shCatDance"></div>
+            </div>
             <div class="min-w-0">
               <div class="small text-body-secondary">Playlist được chia sẻ</div>
-              <h1 class="h4 mb-1" id="shName" translate="no"></h1>
+              <h1 class="h3 sh-name mb-1" id="shName" translate="no"></h1>
               <div class="small text-body-secondary" id="shInfo"></div>
+              <button class="btn btn-primary mt-2" type="button" id="shPlayAll">
+                <i class="bi bi-play-fill"></i> Phát tất cả
+              </button>
             </div>
           </div>
-          <button class="btn btn-primary rounded-pill px-4 mb-3" type="button" id="shPlayAll">
-            <i class="bi bi-play-fill"></i> Phát tất cả
-          </button>
-          <div class="d-flex flex-column" id="shSongs" translate="no"></div>
+          <div class="bg-body border rounded-3 overflow-hidden shadow-sm" id="shSongs" translate="no"></div>
         </section>
-      </main>
-    </div>
+      </div>
+    </main>
 
-    <div class="sh-player d-none" id="shPlayer">
-      <div class="sh-wrap">
-        <div class="d-flex align-items-center gap-2">
-          <div class="now" translate="no">
-            <span class="fw-semibold" id="shNowTitle"></span>
-            <span class="small text-body-secondary" id="shNowArtist"></span>
-          </div>
-          <button class="btn sh-btn" type="button" id="shPrev" title="Bài trước" aria-label="Bài trước">
+    <!-- the player: the main page's dock (styles.css), without what needs an account (♥, sleep timer) -->
+    <footer class="player-bar player-dock d-none" id="playerBar">
+      <div class="dock-info">
+        <span class="dock-art" aria-hidden="true"><i class="bi bi-music-note-beamed"></i></span>
+        <span class="dock-text" translate="no">
+          <span class="dock-title" id="npTitle" role="button" tabindex="0" title="Tới bài này trong danh sách"></span>
+          <span class="dock-sub" id="npSub"></span>
+        </span>
+      </div>
+      <div class="dock-center">
+        <div class="dock-controls">
+          <button
+            class="btn btn-sm btn-outline-secondary btn-icon border-0 mode-btn"
+            id="shuffleBtn"
+            title="Phát ngẫu nhiên: tắt"
+            aria-pressed="false"
+          >
+            <i class="bi bi-shuffle"></i>
+          </button>
+          <button class="btn btn-sm btn-outline-secondary btn-icon border-0" id="prevBtn" title="Bài trước (Shift + ←)">
             <i class="bi bi-skip-start-fill"></i>
           </button>
-          <button class="btn sh-btn main" type="button" id="shToggle" title="Phát" aria-label="Phát">
-            <i class="bi bi-play-fill" id="shToggleIcon"></i>
+          <button
+            class="btn btn-sm btn-outline-secondary btn-icon border-0 seek10-btn"
+            id="backBtn"
+            title="Lùi 10 giây (phím ←)"
+            aria-label="Lùi 10 giây"
+          >
+            <i class="bi bi-arrow-counterclockwise"></i><span class="seek10" aria-hidden="true">10</span>
           </button>
-          <button class="btn sh-btn" type="button" id="shNext" title="Bài tiếp" aria-label="Bài tiếp">
+          <button class="btn btn-primary btn-play" id="playBtn" title="Phát / tạm dừng (phím Space)">
+            <i class="bi bi-play-fill"></i>
+          </button>
+          <button
+            class="btn btn-sm btn-outline-secondary btn-icon border-0 seek10-btn"
+            id="fwdBtn"
+            title="Tiến 10 giây (phím →)"
+            aria-label="Tiến 10 giây"
+          >
+            <i class="bi bi-arrow-clockwise"></i><span class="seek10" aria-hidden="true">10</span>
+          </button>
+          <button
+            class="btn btn-sm btn-outline-secondary btn-icon border-0"
+            id="nextBtn"
+            title="Bài tiếp theo (Shift + →)"
+          >
             <i class="bi bi-skip-end-fill"></i>
           </button>
+          <button
+            class="btn btn-sm btn-outline-secondary btn-icon border-0 mode-btn"
+            id="repeatBtn"
+            title="Lặp lại: tắt"
+            aria-pressed="false"
+          >
+            <i class="bi bi-repeat"></i>
+          </button>
         </div>
-        <div class="d-flex align-items-center gap-2 mt-1">
-          <span class="sh-time text-end" id="shCur">0:00</span>
-          <input
-            class="form-range sh-seek flex-grow-1"
-            type="range"
-            min="0"
-            max="1000"
-            value="0"
-            id="shSeek"
-            aria-label="Vị trí trong bài"
-          />
-          <span class="sh-time" id="shDur">0:00</span>
+        <div class="dock-seek">
+          <small class="time" id="curTime">0:00</small>
+          <div class="seek-wrap" id="seekWrap">
+            <input
+              type="range"
+              class="form-range seek"
+              id="seekRange"
+              min="0"
+              max="1000"
+              step="1"
+              value="0"
+              aria-label="Vị trí trong bài"
+            />
+            <span class="seek-tip" id="seekTip" aria-hidden="true"></span>
+          </div>
+          <small class="time" id="durTime">0:00</small>
+        </div>
+      </div>
+      <div class="dock-right">
+        <!-- sleep timer (like YouTube's): pause after some minutes, or when this song ends -->
+        <div class="dropup sleep-wrap">
+          <button
+            class="btn btn-sm btn-outline-secondary border-0 sleep-btn"
+            id="sleepBtn"
+            type="button"
+            data-bs-toggle="dropdown"
+            aria-expanded="false"
+            title="Hẹn giờ ngủ"
+            aria-label="Hẹn giờ ngủ"
+          >
+            <i class="bi bi-alarm"></i><span class="sleep-left d-none" id="sleepLeft"></span>
+          </button>
+          <div class="dropdown-menu dropdown-menu-end sleep-menu">
+            <h6 class="dropdown-header">Hẹn giờ ngủ</h6>
+            <div id="sleepList"></div>
+          </div>
+        </div>
+        <div class="dropup speed-wrap">
+          <button
+            class="btn btn-sm btn-outline-secondary border-0 speed-btn"
+            id="speedBtn"
+            type="button"
+            data-bs-toggle="dropdown"
+            data-bs-auto-close="outside"
+            aria-expanded="false"
+            title="Tốc độ phát"
+          >
+            1x
+          </button>
+          <div class="dropdown-menu dropdown-menu-end speed-menu">
+            <div class="d-flex align-items-center gap-2 px-3 pt-1 pb-2">
+              <span class="speed-val" id="speedVal">1.0x</span>
+              <input
+                type="range"
+                class="form-range"
+                id="speedRange"
+                min="0.5"
+                max="2"
+                step="0.1"
+                value="1"
+                aria-label="Tốc độ phát"
+              />
+            </div>
+            <div class="dropdown-divider"></div>
+            <div id="speedList"></div>
+          </div>
+        </div>
+        <button class="btn btn-sm btn-outline-secondary btn-icon border-0" id="muteBtn" title="Tắt / bật tiếng">
+          <i class="bi bi-volume-up-fill"></i>
+        </button>
+        <input
+          type="range"
+          class="form-range vol"
+          id="volRange"
+          min="0"
+          max="1"
+          step="0.05"
+          value="1"
+          aria-label="Âm lượng"
+        />
+      </div>
+    </footer>
+
+    <!-- ============ toast (like the main page's) ============ -->
+    <div class="toast-container position-fixed start-50 translate-middle-x app-toasts">
+      <div class="toast fun-toast border-0" id="toast" role="status" aria-live="polite" data-kind="success">
+        <div class="d-flex align-items-center gap-2 ps-2">
+          <span class="toast-ico" aria-hidden="true"><i class="bi bi-check-lg" id="toastIcon"></i></span>
+          <div class="toast-body flex-grow-1 ps-1" id="toastBody"></div>
+          <button type="button" class="btn-close me-2 m-auto" data-bs-dismiss="toast" aria-label="Đóng"></button>
         </div>
       </div>
     </div>
 
+    <script
+      src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js"
+      integrity="sha384-FKyoEForCGlyvwx9Hj09JcYn3nv7wiPVlz7YYwJrWVcXK/BmnVDxM+D2scQbITxI"
+      crossorigin="anonymous"
+    ></script>
     <script src="/js/share.js"></script>
   </body>
 </html>

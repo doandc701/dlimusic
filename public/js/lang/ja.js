@@ -555,5 +555,7 @@
     "Dữ liệu bài hát không đúng kích thước": "曲データのサイズが正しくありません",
     "Bài này đang được tải lên, hãy thử lại sau ít phút": "この曲はアップロード中です。数分後にお試しください",
     "Link phát nhạc đã hết hạn": "再生リンクの有効期限が切れました",
+    "Mở DLiMusic": "DLiMusic を開く",
+    "Tới bài này trong danh sách": "リストでこの曲へ移動",
   },
 };

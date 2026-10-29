@@ -532,5 +532,7 @@
     "Dữ liệu bài hát không đúng kích thước": "歌曲数据大小不正确",
     "Bài này đang được tải lên, hãy thử lại sau ít phút": "这首歌仍在上传，请几分钟后再试",
     "Link phát nhạc đã hết hạn": "播放链接已过期",
+    "Mở DLiMusic": "打开 DLiMusic",
+    "Tới bài này trong danh sách": "在列表中定位这首歌",
   },
 };

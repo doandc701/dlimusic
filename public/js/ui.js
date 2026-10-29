@@ -2558,7 +2558,7 @@ function renderShare() {
         ${shareStatus(l)}
         <div class="d-flex justify-content-between align-items-center gap-2 small mt-1">
           <span class="text-body-secondary">${t("{n} bài · hết hạn {date}", { n: l.count, date: shareDate(l.expiresAt) })}</span>
-          <button class="btn btn-link btn-sm p-0 text-danger text-nowrap" type="button" data-share-revoke="${esc(l.code)}">${t("Thu hồi")}</button>
+          <button class="btn btn-sm btn-outline-danger share-revoke text-nowrap" type="button" data-share-revoke="${esc(l.code)}"><i class="bi bi-x-lg"></i> ${t("Thu hồi")}</button>
         </div></div>`,
     )
     .join("");
@@ -2620,7 +2620,8 @@ $("shareLinks").addEventListener("click", async (e) => {
   // a second press confirms: the link stops working for everyone at once (and its upload stops)
   if (!revoke.dataset.sure) {
     revoke.dataset.sure = "1";
-    revoke.textContent = t("Bấm lần nữa để thu hồi");
+    revoke.classList.replace("btn-outline-danger", "btn-danger");
+    revoke.innerHTML = `<i class="bi bi-exclamation-lg"></i> ${t("Bấm lần nữa để thu hồi")}`;
     return;
   }
   revoke.disabled = true;

@@ -2534,6 +2534,7 @@ function renderShare() {
     .join("");
   show($("shareNew"), !busy);
   show($("shareBusy"), !!busy);
+  if (!busy) $("shareCancel").disabled = false;
   if (busy) {
     $("shareBusyText").textContent = busy.total
       ? t("Đang sao chép {done}/{total} bài…", { done: busy.done, total: busy.total })
@@ -2564,7 +2565,10 @@ $("shareCreate").addEventListener("click", async () => {
     if (share.id === id) renderShare();
   }
 });
-$("shareCancel").addEventListener("click", () => api("/api/shares/cancel", { id: share.id }).catch(() => {}));
+$("shareCancel").addEventListener("click", () => {
+  $("shareCancel").disabled = true; // until the copy has stopped (the dialog then shows "Tạo link" again)
+  api("/api/shares/cancel", { id: share.id }).catch(() => {});
+});
 
 $("shareLinks").addEventListener("click", async (e) => {
   const copy = e.target.closest("[data-share-copy]");

@@ -8,9 +8,14 @@
 //   POST share-pending  { code }                    -> { songs: [{ i, ref }] }   (owner; songs not uploaded yet)
 //   GET  share-list                                 -> { shares }         (owner; links still open)
 //   POST share-revoke   { code }                    -> { ok }             (owner; songs removed from R2)
-//   GET  share-open?code=                           -> { name, expiresAt, songs: [{ title, performer, duration, ready }] }
+//   GET  share-open?code=                           -> { name, expiresAt, songs: [{ title, performer, duration, size,
+//                                                         ready, url? }] }   (url: as share-play's, for the songs ready)
 //   GET  share-play?code=&i=                        -> { url, expiresIn } (a signed /api/cloud/share-audio URL, 10 min)
-//   GET  share-audio?code=&i=&exp=&sig=   the song's bytes, one piece per Range request (206)
+//   GET  share-audio?code=&i=&n=&t=&exp=&sig=   the song's bytes, one piece at most per Range request (206)
+//
+// share-audio is what plays, piece after piece: it reads nothing in MongoDB (the signed URL says which song, its size
+// and type) and passes R2's bytes on as they come, so the music starts quickly; the browser may keep a piece for
+// the URL's 10 minutes (seeking back). A revoked link's songs are gone from R2 at once, so its URLs stop too.
 //
 // The link is open as soon as it is made: the owner's browser uploads the songs one after another (in the
 // playlist's order) and the listener plays those already there. Everything goes through this function — the
@@ -134,9 +139,25 @@ export function shareRoutes({ env, db, account, fail, key, fetchFn, now = () => 
     expiresAt: s.expiresAt.getTime(),
   });
 
-  // the audio URL: signed with the server's secret, for one song, for a few minutes
-  const signAudio = (code, i, exp) =>
-    crypto.createHmac("sha256", key).update(`share-audio|${code}|${i}|${exp}`).digest("base64url").slice(0, 32);
+  // the audio URL: signed with the server's secret, for one song (its size and type too), for a few minutes
+  const signAudio = (code, i, size, type, exp) =>
+    crypto
+      .createHmac("sha256", key)
+      .update(`share-audio|${code}|${i}|${size}|${type}|${exp}`)
+      .digest("base64url")
+      .slice(0, 32);
+  function audioUrl(code, i, song) {
+    const exp = Math.floor(now().getTime() / 1000) + PLAY_URL_TTL;
+    const params = new URLSearchParams({
+      code,
+      i: String(i),
+      n: String(song.size),
+      t: song.type,
+      exp: String(exp),
+      sig: signAudio(code, i, song.size, song.type, exp),
+    });
+    return `/api/cloud/share-audio?${params}`;
+  }
 
   const query = (req) => new URL(req.url || "/", "http://x").searchParams;
 
@@ -228,7 +249,15 @@ export function shareRoutes({ env, db, account, fail, key, fetchFn, now = () => 
       return {
         name: s.name,
         expiresAt: s.expiresAt.getTime(),
-        songs: s.songs.map(({ title, performer, duration, ok }) => ({ title, performer, duration, ready: ok })),
+        songs: s.songs.map(({ title, performer, duration, size, ok }, i) => ({
+          title,
+          performer,
+          duration,
+          size,
+          ready: ok,
+          ...(ok && { url: audioUrl(s._id, i, s.songs[i]) }),
+        })),
+        expiresIn: PLAY_URL_TTL,
       };
     },
 
@@ -240,14 +269,7 @@ export function shareRoutes({ env, db, account, fail, key, fetchFn, now = () => 
       const song = Number.isInteger(i) && s.songs[i];
       if (!song) throw fail(404, "Không tìm thấy bài hát");
       if (!song.ok) throw fail(409, "Bài này đang được tải lên, hãy thử lại sau ít phút", "SHARE_PENDING");
-      const exp = Math.floor(now().getTime() / 1000) + PLAY_URL_TTL;
-      const params = new URLSearchParams({
-        code: s._id,
-        i: String(i),
-        exp: String(exp),
-        sig: signAudio(s._id, i, exp),
-      });
-      return { url: `/api/cloud/share-audio?${params}`, expiresIn: PLAY_URL_TTL };
+      return { url: audioUrl(s._id, i, song), expiresIn: PLAY_URL_TTL };
     },
 
     "GET share-audio": async (req) => {
@@ -255,39 +277,41 @@ export function shareRoutes({ env, db, account, fail, key, fetchFn, now = () => 
       const q = query(req);
       const code = q.get("code");
       const i = Number(q.get("i"));
+      const size = Number(q.get("n"));
+      const type = String(q.get("t") || "");
       const exp = Number(q.get("exp"));
       const sig = Buffer.from(String(q.get("sig") || ""));
       const want =
-        isCode(code) && Number.isInteger(i) && Number.isInteger(exp) ? Buffer.from(signAudio(code, i, exp)) : null;
+        isCode(code) && Number.isInteger(i) && Number.isSafeInteger(size) && size > 0 && Number.isInteger(exp)
+          ? Buffer.from(signAudio(code, i, size, type, exp))
+          : null;
       if (!want || sig.length !== want.length || !crypto.timingSafeEqual(sig, want) || exp * 1000 < now().getTime())
         throw fail(403, "Link phát nhạc đã hết hạn", "SHARE_URL_EXPIRED");
-      const s = await open(code);
-      const song = s.songs[i];
-      if (!song?.ok) throw fail(404, "Không tìm thấy bài hát");
       // bytes=a-b, bytes=a- or bytes=-n; answered one piece at most (the player asks again for the rest)
       const m = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range || "bytes=0-");
       let start = m?.[1] ? Number(m[1]) : null;
       let end = m?.[2] ? Number(m[2]) : null;
-      if (start === null) [start, end] = [Math.max(0, song.size - (end ?? 0)), song.size - 1];
-      if (!m || start >= song.size || (end !== null && end < start))
-        return { [RAW]: { status: 416, headers: { "Content-Range": `bytes */${song.size}` }, body: "" } };
+      if (start === null) [start, end] = [Math.max(0, size - (end ?? 0)), size - 1];
+      if (!m || start >= size || (end !== null && end < start))
+        return { [RAW]: { status: 416, headers: { "Content-Range": `bytes */${size}` }, body: "" } };
       const k = Math.floor(start / SHARE_CHUNK);
-      end = Math.min(end ?? Infinity, (k + 1) * SHARE_CHUNK - 1, song.size - 1);
-      const bytes = await storage(() =>
-        bucket.read(pieceKey(s._id, i, k), start - k * SHARE_CHUNK, end - k * SHARE_CHUNK),
+      end = Math.min(end ?? Infinity, (k + 1) * SHARE_CHUNK - 1, size - 1);
+      const body = await storage(() =>
+        bucket.stream(pieceKey(code, i, k), start - k * SHARE_CHUNK, end - k * SHARE_CHUNK),
       );
-      if (!bytes) throw fail(404, "Không tìm thấy bài hát");
+      if (!body) throw fail(404, "Không tìm thấy bài hát", "SHARE_GONE");
       return {
         [RAW]: {
           status: 206,
           headers: {
-            "Content-Type": song.type,
-            "Content-Range": `bytes ${start}-${start + bytes.length - 1}/${song.size}`,
+            "Content-Type": type,
+            "Content-Range": `bytes ${start}-${end}/${size}`,
+            "Content-Length": String(end - start + 1),
             "Accept-Ranges": "bytes",
             "Content-Disposition": "inline",
-            "Cache-Control": "private, no-store",
+            "Cache-Control": "private, max-age=600",
           },
-          body: bytes,
+          body,
         },
       };
     },

@@ -10,6 +10,9 @@
 // start after 3 s, ±10 s, speed and sleep timer (kept / faded like there), the seek bar's colours and time tip,
 // Space / ← / → / Shift+← / Shift+→, the lock screen, a reload going on where it was, the silent bridge
 // between two songs on a locked phone, and the dancing kittens. Only what needs an account (♥, recent) is not here.
+// Like the main page too, the next songs are fetched whole while one plays (3 pieces at a time) and kept in this
+// page: the next one starts at once, and plays on with the screen locked even if the network stalls meanwhile.
+// The list comes with the songs' signed URLs, so a song starts with a single request.
 (() => {
   const $ = (id) => document.getElementById(id);
   const t = window.t || ((s) => s);
@@ -32,6 +35,7 @@
   let repeat = "off"; // off | one | all
   let expiresAt = 0;
   let until = "";
+  let urlTtl = 600; // seconds a song's signed URL lives (share-open's expiresIn)
 
   const esc = (s) =>
     String(s ?? "").replace(
@@ -200,6 +204,103 @@
     play(prev, 0, { reveal: true });
   }
 
+  // ---------- the songs' URLs, and the next songs fetched whole (like the main page's prefetch) ----------
+
+  const PIECE = 3 * 1024 * 1024; // core.js SHARE_CHUNK: one request per piece stored in R2
+  const AHEAD = 2; // songs fetched ahead of the one playing
+  const KEEP = 4; // whole songs kept in this page (the playing one, the next ones, the one before)
+  const PARALLEL = 3; // pieces of a song fetched at a time
+  const wholes = new Map(); // song index -> { url (blob:), job, ctl }
+
+  /** Remember a song's signed URL (from the list or share-play), with when it was given. */
+  function setUrl(i, url) {
+    if (!songs[i] || !url) return;
+    songs[i].url = url;
+    songs[i].urlAt = Date.now();
+  }
+  /** A signed URL for song i still good for a minute at least (asked again otherwise, or when `force`). */
+  async function songUrl(i, force = false) {
+    const s = songs[i];
+    if (!force && s.url && Date.now() - s.urlAt < (urlTtl - 60) * 1000) return s.url;
+    const { url, expiresIn } = await get("share-play", { code, i });
+    urlTtl = expiresIn || urlTtl;
+    setUrl(i, url);
+    return url;
+  }
+
+  /** Song i fetched whole into this page (a blob: URL), its pieces 3 at a time; resolves when there. */
+  function fetchWhole(i) {
+    if (wholes.has(i)) return wholes.get(i).job;
+    const s = songs[i];
+    if (!s?.ready || !s.size) return Promise.resolve();
+    const w = { url: null, ctl: new AbortController() };
+    const piece = async (k, url) => {
+      const from = k * PIECE;
+      const to = Math.min(s.size, from + PIECE) - 1;
+      let res = await fetch(url, { headers: { Range: `bytes=${from}-${to}` }, signal: w.ctl.signal });
+      if (res.status === 403)
+        res = await fetch(await songUrl(i, true), { headers: { Range: `bytes=${from}-${to}` }, signal: w.ctl.signal });
+      if (!res.ok) throw new Error(`piece ${k}: ${res.status}`);
+      return res;
+    };
+    w.job = (async () => {
+      const url = await songUrl(i);
+      const n = Math.ceil(s.size / PIECE);
+      const parts = new Array(n);
+      let type = "";
+      let next = 0;
+      const worker = async () => {
+        while (next < n) {
+          const k = next++;
+          const res = await piece(k, url);
+          type ||= res.headers.get("Content-Type") || "";
+          parts[k] = await res.blob();
+        }
+      };
+      await Promise.all(Array.from({ length: Math.min(PARALLEL, n) }, worker));
+      w.url = URL.createObjectURL(new Blob(parts, { type }));
+    })().catch(() => wholes.get(i) === w && wholes.delete(i)); // streamed when it plays; asked again next time
+    wholes.set(i, w);
+    return w.job;
+  }
+
+  /** The songs after the playing one, in the play order (none with "repeat one"). */
+  function aheadOf(i) {
+    if (repeat === "one") return [];
+    const at = order.indexOf(i);
+    const list = [...order.slice(at + 1), ...(repeat === "all" ? order.slice(0, at) : [])];
+    return list.filter((k) => songs[k].ready).slice(0, AHEAD);
+  }
+
+  /** Only what is wanted now is fetched and kept: the playing song, the next ones (others stop / go). */
+  function keepWholes(i) {
+    const wanted = new Set([i, ...aheadOf(i)]);
+    const kept = [...wholes.keys()].filter((k) => wanted.has(k) || wholes.get(k).url);
+    for (const [k, w] of wholes) {
+      if (wanted.has(k)) continue;
+      if (!w.url) {
+        w.ctl.abort();
+        wholes.delete(k);
+      } else if (kept.length > KEEP && k !== current) {
+        URL.revokeObjectURL(w.url);
+        wholes.delete(k);
+        kept.splice(kept.indexOf(k), 1);
+      }
+    }
+  }
+
+  let prefetchFor = -1;
+  /** While a song plays: the next ones fetched whole, one after the other. */
+  async function prefetch() {
+    if (prefetchFor === current) return; // once per song ("playing" also fires after every buffering pause)
+    const i = (prefetchFor = current);
+    keepWholes(i);
+    for (const k of aheadOf(i)) {
+      if (prefetchFor !== i) return;
+      await fetchWhole(k);
+    }
+  }
+
   // ---------- the player (the dock of the main page) ----------
 
   function renderPlayer() {
@@ -271,8 +372,10 @@
     renderPlayer();
     renderTime();
     if (reveal) requestAnimationFrame(revealPlaying);
+    keepWholes(i);
     try {
-      const { url } = await get("share-play", { code, i });
+      // fetched ahead: from this page, at once; else streamed piece by piece
+      const url = wholes.get(i)?.url || (await songUrl(i, retried));
       if (current !== i) return; // another song was chosen meanwhile
       player.src = url;
       if (at) player.currentTime = at;
@@ -490,6 +593,7 @@
     bridgeTimer = setTimeout(() => bridgeOn(false), 120_000); // a song that never starts: not silence for ever
   }
   player.addEventListener("playing", () => bridgeOn(false));
+  player.addEventListener("playing", () => prefetch());
   player.addEventListener("pause", () => bridgeOn(false));
 
   // ---------- the cat: with headphones, dancing kittens while music plays ----------
@@ -681,7 +785,12 @@
   async function poll() {
     try {
       const data = await get("share-open", { code });
-      data.songs.forEach((s, i) => songs[i] && (songs[i].ready = s.ready));
+      data.songs.forEach((s, i) => {
+        if (!songs[i]) return;
+        songs[i].ready = s.ready;
+        songs[i].size = s.size;
+        if (s.url) setUrl(i, s.url);
+      });
     } catch (err) {
       if (err.code === "SHARE_GONE") return gone(err.message);
     }
@@ -701,6 +810,8 @@
       return gone(err.status === 404 ? null : t("Không mở được playlist, hãy thử lại sau"));
     }
     songs = data.songs;
+    urlTtl = data.expiresIn || urlTtl;
+    songs.forEach((s, i) => s.url && setUrl(i, s.url));
     order = orderFrom(-1);
     expiresAt = data.expiresAt;
     document.title = `${data.name} · DLiMusic`;

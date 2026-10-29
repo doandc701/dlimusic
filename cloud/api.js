@@ -170,11 +170,17 @@ export function createCloudApi({ env, verify, fetchFn, now }) {
         const { status, headers, body: bytes } = result[RAW];
         res.statusCode = status;
         for (const [k, v] of Object.entries(headers)) res.setHeader(k, v);
-        res.setHeader("Content-Length", String(Buffer.byteLength(bytes)));
-        return res.end(bytes);
+        if (typeof bytes?.getReader !== "function") {
+          res.setHeader("Content-Length", String(Buffer.byteLength(bytes)));
+          return res.end(bytes);
+        }
+        // a stream (from R2): passed on as it comes, so the player starts before the whole piece is here
+        for await (const chunk of bytes) res.write(Buffer.from(chunk));
+        return res.end();
       }
       send(200, result);
     } catch (err) {
+      if (res.headersSent) return void res.destroy?.(err); // a song's bytes cut half-way (R2): the player asks again
       const status = err.status || 503; // anything else: the database could not be reached
       send(status, {
         error: err.status ? err.message : "Không kết nối được MongoDB",

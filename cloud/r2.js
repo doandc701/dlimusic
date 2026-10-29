@@ -88,12 +88,12 @@ export function createBucket(config, { fetchFn = (...a) => fetch(...a), now = ()
       const res = await fetchFn(sign("PUT", key, 300), { method: "PUT", body, headers: { "Content-Type": type } });
       if (!res.ok) throw new Error(`R2 PUT ${res.status}`);
     },
-    /** Bytes [start, end] of an object, as a Buffer; null when it is not there. */
-    async read(key, start, end) {
+    /** Bytes [start, end] of an object, as a stream (passed on as they come); null when it is not there. */
+    async stream(key, start, end) {
       const res = await fetchFn(sign("GET", key, 300), { headers: { Range: `bytes=${start}-${end}` } });
       if (res.status === 404) return null;
       if (!res.ok) throw new Error(`R2 GET ${res.status}`);
-      return Buffer.from(await res.arrayBuffer());
+      return res.body;
     },
     /** Remove many objects at once (DeleteObjects, up to 1000 keys a request); missing ones are fine. */
     async removeMany(keys) {

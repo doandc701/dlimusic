@@ -161,7 +161,8 @@ Trong một playlist, bấm <kbd>Chia sẻ</kbd> (nút trên thanh công cụ c�
 
 - Giữ trang DLiMusic mở tới khi tải lên xong (tiến độ hiện trong hộp _Chia sẻ_). Đóng giữa chừng thì lần sau mở app sẽ tự tải tiếp các bài còn thiếu.
 - Nhạc đi qua Vercel function (`/api/cloud/share-put`, mỗi lần một đoạn 3 MB), không đi thẳng từ trình duyệt tới R2: mạng chặn `*.r2.cloudflarestorage.com` (mạng công ty…) vẫn dùng được, và không cần cấu hình CORS. Đổi lại, mỗi bài tốn vài lần gọi function của Vercel, cả lúc tải lên lẫn lúc nghe.
-- Trang nghe không có nút tải. Mỗi bài phát qua `/api/cloud/share-audio` bằng một URL ký số chỉ sống 10 phút, mỗi lần trả tối đa một đoạn 3 MB. Cách này chỉ làm việc tải **khó hơn**, không chặn hẳn được: thứ gì phát được trong trình duyệt thì vẫn ghi lại được.
+- Trang nghe dùng giao diện và trình phát của trang chính (tốc độ, hẹn giờ ngủ, ngẫu nhiên / lặp, phím tắt, màn hình khoá…), trừ ♥ và "Phát gần đây" (cần tài khoản). Như trang chính, trong lúc phát nó tải trước nguyên 2 bài kế tiếp nên chuyển bài là phát ngay.
+- Trang nghe không có nút tải. Mỗi bài phát qua `/api/cloud/share-audio` bằng một URL ký số chỉ sống 10 phút (gửi kèm danh sách bài, không tra MongoDB, dữ liệu từ R2 được chuyển thẳng tới trình duyệt), mỗi lần trả tối đa một đoạn 3 MB. Cách này chỉ làm việc tải **khó hơn**, không chặn hẳn được: thứ gì phát được trong trình duyệt thì vẫn ghi lại được.
 - Link hết hạn hoặc bấm **Thu hồi** thì link ngừng hoạt động ngay, các bài bị xoá khỏi R2 (mỗi tài khoản tối đa 20 link cùng lúc).
 - Cần bật [MongoDB](#lưu-dữ-liệu-lên-mongodb-atlas-tuỳ-chọn): mã thiết bị chứng minh link thuộc tài khoản nào.
 - ⚠️ **Bản quyền:** sao chép nhạc lên máy chủ rồi phát cho người khác là phát tán lại. Chỉ nên chia sẻ cho người quen, có hạn, không thu lợi; gỡ ngay khi chủ bản quyền yêu cầu.

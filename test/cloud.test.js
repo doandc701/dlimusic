@@ -312,8 +312,12 @@ describe("MongoDB storage", () => {
         setHeader(k, v) {
           this.headers[k.toLowerCase()] = v;
         },
+        chunks: [],
+        write(b) {
+          this.chunks.push(Buffer.from(b));
+        },
         end(b) {
-          this.body = b;
+          this.body = this.chunks.length ? Buffer.concat(this.chunks) : b;
         },
       };
       await handle(req, res, action);
@@ -619,6 +623,7 @@ describe("MongoDB storage", () => {
           ],
         );
         assert.equal(open.data.songs[0].ref, undefined, "the listener never sees where a song comes from");
+        assert.equal(open.data.songs[0].url, undefined, "no URL before the song is there");
         assert.equal((await call(api, "GET", "share-play", { query: `?code=${code}&i=1` })).data.code, "SHARE_PENDING");
 
         // pieces: right size only, only the owner
@@ -637,6 +642,9 @@ describe("MongoDB storage", () => {
           open.data.songs.map((x) => x.ready),
           [true, true],
         );
+        // the URLs come with the list: playing needs no other request; they read nothing in MongoDB
+        assert.match(open.data.songs[0].url, /^\/api\/cloud\/share-audio\?.*n=\d+&t=audio%2Fmpeg/);
+        assert.equal(open.data.songs[1].size, 500);
         assert.deepEqual(
           (await call(api, "GET", "share-list", { token })).data.shares.map((x) => [x.count, x.ready]),
           [[2, 2]],
@@ -665,6 +673,9 @@ describe("MongoDB storage", () => {
         assert.equal((await audio(q, `bytes=${long}-`)).status, 416);
         assert.equal((await audio(q.replace(/sig=[^&]+/, "sig=x"))).status, 403, "a forged URL");
         assert.equal((await audio(q.replace(/i=0/, "i=1"))).status, 403, "the signature is for one song");
+        assert.equal((await audio(q.replace(/n=\d+/, "n=99"))).status, 403, "and its size");
+        assert.equal((await audio(q.replace(/t=[^&]+/, "t=text%2Fhtml"))).status, 403, "and its type");
+        assert.equal(r.headers["cache-control"], "private, max-age=600", "the browser may keep a piece (seeking back)");
         clock = new Date(clock.getTime() + 11 * 60_000);
         assert.equal((await audio(q, "bytes=0-")).data.code, "SHARE_URL_EXPIRED", "10 minutes only");
 

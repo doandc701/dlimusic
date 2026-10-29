@@ -2217,11 +2217,17 @@ function inPlaylist(f, scan) {
   return !!p && p.songs.includes(favId(f, scan));
 }
 
+let sharesChecked = false; // links whose upload stopped half-way (tab closed) go on once the playlists are known
+
 async function loadPlaylists() {
   try {
     state.playlists = (await api("/api/playlists")).playlists || [];
   } catch {
     return; // offline: the ones known stay
+  }
+  if (CAPS.share && !sharesChecked) {
+    sharesChecked = true;
+    loadShares().catch(() => (sharesChecked = false));
   }
   afterPlaylistsChanged();
 }
@@ -2479,13 +2485,15 @@ $("plDeleteBtn").addEventListener("click", () => openPlaylist() && deletePlaylis
 $("plShareBtn").addEventListener("click", () => openPlaylist() && openShare(openPlaylist().id));
 
 // ---------- sharing a playlist (browser build): a secret link to a copy of its songs, heard without signing in ----------
-// web/backend.js copies the songs (Telegram -> Cloudflare R2), cloud/share.js keeps the links, /s/<code> plays them.
+// web/backend.js makes the link at once and then sends the songs (Telegram -> /api/cloud -> Cloudflare R2), one
+// after another; cloud/share.js keeps the links, /s/<code> plays the songs already there.
 
 const shareModal = new bootstrap.Modal($("shareModal"));
 const share = {
   id: null, // the playlist in the dialog
-  links: [], // the account's open links { code, playlistId, name, count, expiresAt, link }
-  busy: new Map(), // playlist id -> { done, failed, total } while its songs are copied (goes on when the dialog closes)
+  links: [], // the account's open links { code, playlistId, name, count, ready, expiresAt, link }
+  uploads: new Map(), // link code -> { done, total, failed } while its songs are sent (goes on when the dialog closes)
+  making: null, // the playlist whose link is being made (its songs are read first)
 };
 
 const shareDate = (ms) =>
@@ -2496,6 +2504,13 @@ const shareDate = (ms) =>
     hour: "2-digit",
     minute: "2-digit",
   });
+
+/** The links (and the uploads still going on, which also resume one stopped half-way). */
+async function loadShares() {
+  const r = await api("/api/shares");
+  share.links = r.shares || [];
+  for (const u of r.uploads || []) share.uploads.set(u.code, u);
+}
 
 async function openShare(id) {
   const p = playlistById(id);
@@ -2509,15 +2524,29 @@ async function openShare(id) {
   renderShare();
   shareModal.show();
   try {
-    share.links = (await api("/api/shares")).shares || [];
+    await loadShares();
   } catch (err) {
     $("shareError").textContent = err.message;
   }
   renderShare();
 }
 
+function shareStatus(l) {
+  const u = share.uploads.get(l.code);
+  if (u)
+    return `<div class="d-flex align-items-center gap-2 mt-2">
+        <div class="progress flex-grow-1" role="progressbar" aria-label="${t("Đang tải lên")}" style="height: 6px">
+          <div class="progress-bar" style="width: ${u.total ? (u.done / u.total) * 100 : 0}%"></div>
+        </div>
+        <span class="small text-body-secondary text-nowrap">${t("Đã tải lên {done}/{total} bài", { done: u.done, total: u.total })}</span>
+      </div>
+      <div class="small text-body-secondary mt-1">${t("Người nhận nghe được ngay các bài đã tải lên. Giữ trang này mở tới khi xong.")}</div>`;
+  if (l.ready < l.count)
+    return `<div class="small text-warning-emphasis mt-1">${t("{ready}/{count} bài sẵn sàng, phần còn lại sẽ được tải tiếp", { ready: l.ready, count: l.count })}</div>`;
+  return "";
+}
+
 function renderShare() {
-  const busy = share.busy.get(share.id);
   $("shareLinks").innerHTML = share.links
     .filter((l) => l.playlistId === share.id)
     .map(
@@ -2526,49 +2555,54 @@ function renderShare() {
           <input class="form-control" readonly value="${esc(l.link)}" aria-label="${t("Link chia sẻ")}">
           <button class="btn btn-primary" type="button" data-share-copy="${esc(l.link)}" title="${t("Sao chép link")}"><i class="bi bi-copy"></i></button>
         </div>
+        ${shareStatus(l)}
         <div class="d-flex justify-content-between align-items-center gap-2 small mt-1">
           <span class="text-body-secondary">${t("{n} bài · hết hạn {date}", { n: l.count, date: shareDate(l.expiresAt) })}</span>
           <button class="btn btn-link btn-sm p-0 text-danger text-nowrap" type="button" data-share-revoke="${esc(l.code)}">${t("Thu hồi")}</button>
         </div></div>`,
     )
     .join("");
-  show($("shareNew"), !busy);
-  show($("shareBusy"), !!busy);
-  if (!busy) $("shareCancel").disabled = false;
-  if (busy) {
-    $("shareBusyText").textContent = busy.total
-      ? t("Đang sao chép {done}/{total} bài…", { done: busy.done, total: busy.total })
-      : t("Đang chuẩn bị…");
-    $("shareBar").style.width = `${busy.total ? (busy.done / busy.total) * 100 : 0}%`;
-  }
+  const making = share.making === share.id;
+  show($("shareNew"), !making);
+  show($("shareBusy"), making);
 }
 
 $("shareCreate").addEventListener("click", async () => {
   const id = share.id;
   $("shareError").textContent = "";
-  share.busy.set(id, { done: 0, failed: 0, total: 0 });
+  share.making = id;
   renderShare();
   try {
     const r = await api("/api/shares", { id, days: Number($("shareDays").value) });
     share.links.unshift(r);
-    const left = r.failed + r.skipped; // not music, too big, gone from its chat, or not copied
+    if (!share.uploads.has(r.code)) share.uploads.set(r.code, { done: 0, total: r.count, failed: 0 });
     toast(
-      left ? t("Đã tạo link chia sẻ, {n} bài không chia sẻ được", { n: left }) : t("Đã tạo link chia sẻ"),
-      left ? "warn" : "success",
+      r.skipped
+        ? t("Đã tạo link chia sẻ, {n} bài không chia sẻ được", { n: r.skipped })
+        : t("Đã tạo link, đang tải nhạc lên"),
+      r.skipped ? "warn" : "success",
     );
   } catch (err) {
-    if (err.status === 499) toast(t("Đã huỷ chia sẻ"), "info");
-    else if (share.id === id && $("shareModal").classList.contains("show")) $("shareError").textContent = err.message;
+    if (share.id === id && $("shareModal").classList.contains("show")) $("shareError").textContent = err.message;
     else toast(err.message, "error");
   } finally {
-    share.busy.delete(id);
+    share.making = null;
     if (share.id === id) renderShare();
   }
 });
-$("shareCancel").addEventListener("click", () => {
-  $("shareCancel").disabled = true; // until the copy has stopped (the dialog then shows "Tạo link" again)
-  api("/api/shares/cancel", { id: share.id }).catch(() => {});
-});
+
+/** A "share" event: how the upload of a link goes. */
+function shareProgress(d) {
+  const link = share.links.find((l) => l.code === d.code);
+  if (link) link.ready = Math.max(link.ready || 0, d.done);
+  if (!d.finished) share.uploads.set(d.code, d);
+  else {
+    share.uploads.delete(d.code);
+    if (link && d.done >= d.total) toast(t("Đã tải lên đủ {n} bài của “{name}”", { n: d.total, name: link.name }));
+    else if (link && d.failed) toast(t("{n} bài không tải lên được", { n: d.failed }), "warn");
+  }
+  if ($("shareModal").classList.contains("show")) renderShare();
+}
 
 $("shareLinks").addEventListener("click", async (e) => {
   const copy = e.target.closest("[data-share-copy]");
@@ -2583,16 +2617,18 @@ $("shareLinks").addEventListener("click", async (e) => {
   }
   const revoke = e.target.closest("[data-share-revoke]");
   if (!revoke) return;
-  // a second press confirms: the link stops working for everyone at once
+  // a second press confirms: the link stops working for everyone at once (and its upload stops)
   if (!revoke.dataset.sure) {
     revoke.dataset.sure = "1";
     revoke.textContent = t("Bấm lần nữa để thu hồi");
     return;
   }
   revoke.disabled = true;
+  const code = revoke.dataset.shareRevoke;
   try {
-    await api("/api/shares/revoke", { code: revoke.dataset.shareRevoke });
-    share.links = share.links.filter((l) => l.code !== revoke.dataset.shareRevoke);
+    await api("/api/shares/revoke", { code });
+    share.links = share.links.filter((l) => l.code !== code);
+    share.uploads.delete(code);
     toast(t("Đã thu hồi link"), "info");
   } catch (err) {
     $("shareError").textContent = err.message;
@@ -4927,12 +4963,7 @@ const EVENTS = {
   "history-add": (d) => {
     state.history.unshift(d);
   },
-  share: (d) => {
-    // the copy of a playlist's songs for a link (browser build)
-    if (!share.busy.has(d.playlistId)) return;
-    share.busy.set(d.playlistId, d);
-    if (share.id === d.playlistId) renderShare();
-  },
+  share: (d) => shareProgress(d), // the songs of a shared link being sent (browser build)
   scan: ({ scanId, count }) => {
     // Only the latest scan of this page: an earlier scan (same chat reloaded, other type / chat) or
     // another tab's scan must not make the number jump.

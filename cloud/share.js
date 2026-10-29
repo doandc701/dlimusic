@@ -1,39 +1,49 @@
 // Shared playlists: a copy of a playlist's songs in Cloudflare R2 (cloud/r2.js), listened to through a secret
 // link (/s/<code>) without signing in. Routes of /api/cloud/* (cloud/api.js):
 //
-//   POST share-create  { playlistId, name, days, songs: [{ title, performer, duration, size, type }] }
-//                                                  -> { code, expiresAt }    (owner; songs not uploaded yet)
-//   POST share-upload  { code, i }                 -> { url }                (owner; PUT URL of song i, 15 min)
-//   POST share-done    { code }                    -> { share }              (owner; songs checked in R2, link opens)
-//   GET  share-list                                -> { shares }             (owner; links still open)
-//   POST share-revoke  { code }                    -> { ok }                 (owner; songs removed from R2)
-//   GET  share-open?code=                          -> { name, expiresAt, songs: [{ title, performer, duration }] }
-//   GET  share-play?code=&i=                       -> { url, expiresIn }     (GET URL of song i, 10 min)
+//   POST share-create   { playlistId, name, days, songs: [{ title, performer, duration, size, type, ref }] }
+//                                                   -> { share }          (owner; the link works at once)
+//   POST share-put?code=&i=&k=   piece k of song i (application/octet-stream, SHARE_CHUNK bytes but the last)
+//                                                   -> { ok }             (owner; the last piece makes the song playable)
+//   POST share-pending  { code }                    -> { songs: [{ i, ref }] }   (owner; songs not uploaded yet)
+//   GET  share-list                                 -> { shares }         (owner; links still open)
+//   POST share-revoke   { code }                    -> { ok }             (owner; songs removed from R2)
+//   GET  share-open?code=                           -> { name, expiresAt, songs: [{ title, performer, duration, ready }] }
+//   GET  share-play?code=&i=                        -> { url, expiresIn } (a signed /api/cloud/share-audio URL, 10 min)
+//   GET  share-audio?code=&i=&exp=&sig=   the song's bytes, one piece per Range request (206)
 //
-// The two last ones need no sign-in: knowing the code is the permission. There is no download link: songs
-// are played from short-lived signed URLs only (anyone determined can still record what plays).
+// The link is open as soon as it is made: the owner's browser uploads the songs one after another (in the
+// playlist's order) and the listener plays those already there. Everything goes through this function — the
+// browsers never talk to R2 (some networks block it, and no CORS is needed). Knowing the code is the permission
+// to listen; there is no download button, and the audio URL lives 10 minutes (anyone determined can still record
+// what plays).
 //
 // MongoDB collection "shares": { _id: code, accountId, playlistId, name, songs: [{ title, performer, duration,
-// size, type }], at?: [R2 place of each song], createdAt, expiresAt, ready }. R2 objects: "s/<code>/<i>". Expired links (and uploads never
-// finished) are removed by the next owner request; an R2 lifecycle rule ("s/", 31 days) is the safety net.
+// size, type, ref, ok }], createdAt, expiresAt }. ref: the song's "<chat>|<message>" (only the owner sees it, to
+// upload again later). R2 objects: "s/<code>/<i>/<k>". Expired links are removed by the next owner requests; an R2
+// lifecycle rule ("s/", 31 days) is the safety net.
 
 import crypto from "node:crypto";
 import { r2Config, createBucket } from "./r2.js";
-import { SHARE_DAYS, SHARE_SONGS_MAX, SHARE_FILE_MAX } from "../core.js";
+import { SHARE_DAYS, SHARE_SONGS_MAX, SHARE_FILE_MAX, SHARE_CHUNK, isFavoriteId } from "../core.js";
 
 export const SHARES_PER_ACCOUNT = 20;
-const UPLOAD_URL_TTL = 15 * 60;
+/** Routes whose body is raw bytes, not JSON. */
+export const RAW_BODY = new Set(["share-put"]);
+/** A route's answer that is not JSON: { [RAW]: { status, headers, body } }. */
+export const RAW = Symbol("raw response");
+
 const PLAY_URL_TTL = 10 * 60;
-const UNFINISHED_MS = 24 * 3600_000; // a share never marked done is dropped after a day
-const SWEEP_MAX = 10;
+const SWEEP_MAX = 3;
 
 const isCode = (c) => typeof c === "string" && /^[\w-]{16}$/.test(c);
-const objectKey = (code, i) => `s/${code}/${i}`;
+const pieces = (size) => Math.ceil(size / SHARE_CHUNK);
+const pieceKey = (code, i, k) => `s/${code}/${i}/${k}`;
 const text = (v, max) => (typeof v === "string" ? v.trim().slice(0, max) : "");
 
 /** A song's details as sent by the owner's browser, or null. */
 function cleanSong(s) {
-  if (!s || typeof s !== "object") return null;
+  if (!s || typeof s !== "object" || !isFavoriteId(s.ref)) return null;
   const size = Number(s.size);
   if (!Number.isSafeInteger(size) || size < 1 || size > SHARE_FILE_MAX) return null;
   const duration = Number(s.duration);
@@ -43,6 +53,8 @@ function cleanSong(s) {
     duration: Number.isFinite(duration) && duration > 0 && duration < 86400 ? Math.round(duration) : null,
     size,
     type: typeof s.type === "string" && /^audio\/[\w.+-]{1,60}$/.test(s.type) ? s.type : "audio/mpeg",
+    ref: s.ref,
+    ok: false,
   };
 }
 
@@ -51,8 +63,9 @@ function cleanSong(s) {
  * @param db       () => connected database
  * @param account  async (req) => { acc } of the device token, throws 401
  * @param fail     (status, message, code?) => Error
+ * @param key      32-byte secret (signs the audio URLs)
  */
-export function shareRoutes({ env, db, account, fail, fetchFn, now = () => new Date() }) {
+export function shareRoutes({ env, db, account, fail, key, fetchFn, now = () => new Date() }) {
   const config = r2Config(env);
   const bucket = config && createBucket(config, { fetchFn, now });
   const shares = async () => (await db()).collection("shares");
@@ -70,38 +83,43 @@ export function shareRoutes({ env, db, account, fail, fetchFn, now = () => new D
     }
   };
 
-  /** The owner's share, or 404. */
+  /** The owner's share (open or not), or 404. */
   async function own(acc, code) {
     const s = isCode(code) && (await (await shares()).findOne({ _id: code, accountId: acc }));
     if (!s) throw fail(404, "Không tìm thấy link chia sẻ");
     return s;
   }
 
-  /** Remove a share's songs from R2, then the share (kept, expired, when R2 cannot be reached: tried again later). */
+  /** A link anyone may open: not expired, else 404. */
+  async function open(code) {
+    const s = isCode(code) && (await (await shares()).findOne({ _id: code }));
+    if (!s || s.expiresAt <= now()) throw fail(404, "Link chia sẻ không tồn tại hoặc đã hết hạn", "SHARE_GONE");
+    return s;
+  }
+
+  /** Remove a share's songs from R2, then the share (kept, expired, when R2 fails: tried again by a later sweep). */
   async function remove(s) {
     const col = await shares();
-    const places = s.at || s.songs.map((_, i) => i);
+    const keys = s.songs.flatMap((song, i) =>
+      Array.from({ length: pieces(song.size) }, (_, k) => pieceKey(s._id, i, k)),
+    );
     try {
-      for (let i = 0; i < places.length; i += 10)
-        await Promise.all(places.slice(i, i + 10).map((p) => bucket.remove(objectKey(s._id, p))));
+      await bucket.removeMany(keys);
     } catch (err) {
       console.error("share: R2 delete:", err?.message || err);
-      await col.updateOne({ _id: s._id }, { $set: { expiresAt: new Date(0), ready: false } });
+      await col.updateOne({ _id: s._id }, { $set: { expiresAt: new Date(0) } });
       return false;
     }
     await col.deleteOne({ _id: s._id });
     return true;
   }
 
-  /** Expired links and uploads never finished: a few at a time, on the owners' requests. */
+  /** Expired links: a few at a time, on the owners' requests. */
   async function sweep() {
-    const t = now();
     const old = await (
       await shares()
     )
-      .find({
-        $or: [{ expiresAt: { $lte: t } }, { ready: false, createdAt: { $lte: new Date(t - UNFINISHED_MS) } }],
-      })
+      .find({ expiresAt: { $lte: now() } })
       .limit(SWEEP_MAX)
       .toArray();
     for (const s of old) await remove(s).catch(() => {});
@@ -112,16 +130,13 @@ export function shareRoutes({ env, db, account, fail, fetchFn, now = () => new D
     playlistId: s.playlistId,
     name: s.name,
     count: s.songs.length,
+    ready: s.songs.filter((x) => x.ok).length,
     expiresAt: s.expiresAt.getTime(),
   });
 
-  /** A link anyone may open: ready and not expired, else 404. */
-  async function open(code) {
-    const s = isCode(code) && (await (await shares()).findOne({ _id: code }));
-    if (!s || !s.ready || s.expiresAt <= now())
-      throw fail(404, "Link chia sẻ không tồn tại hoặc đã hết hạn", "SHARE_GONE");
-    return s;
-  }
+  // the audio URL: signed with the server's secret, for one song, for a few minutes
+  const signAudio = (code, i, exp) =>
+    crypto.createHmac("sha256", key).update(`share-audio|${code}|${i}|${exp}`).digest("base64url").slice(0, 32);
 
   const query = (req) => new URL(req.url || "/", "http://x").searchParams;
 
@@ -137,10 +152,10 @@ export function shareRoutes({ env, db, account, fail, fetchFn, now = () => new D
       const playlistId = text(body.playlistId, 24);
       if (!name || !playlistId) throw fail(400, "Playlist không hợp lệ");
       if (!Array.isArray(body.songs) || !body.songs.length || body.songs.length > SHARE_SONGS_MAX)
-        throw fail(400, `Mỗi link chia sẻ tối đa ${SHARE_SONGS_MAX} bài`);
+        throw fail(400, "Playlist không có bài nhạc nào chia sẻ được");
       const songs = body.songs.map(cleanSong);
       if (!songs.every(Boolean)) throw fail(400, "Bài hát không hợp lệ");
-      await storage(sweep);
+      await storage(sweep).catch(() => {});
       const col = await shares();
       if ((await col.countDocuments({ accountId: acc, expiresAt: { $gt: now() } })) >= SHARES_PER_ACCOUNT)
         throw fail(400, `Tối đa ${SHARES_PER_ACCOUNT} link chia sẻ cùng lúc, hãy thu hồi bớt`);
@@ -153,45 +168,35 @@ export function shareRoutes({ env, db, account, fail, fetchFn, now = () => new D
         songs,
         createdAt: t,
         expiresAt: new Date(t.getTime() + days * 86400_000),
-        ready: false,
       };
       await col.insertOne(share);
-      return { code: share._id, expiresAt: share.expiresAt.getTime() };
+      return { share: summary(share) };
     },
 
-    "POST share-upload": async (req, body) => {
+    "POST share-put": async (req, body) => {
+      need();
+      const { acc } = await account(req);
+      const q = query(req);
+      const s = await own(acc, q.get("code"));
+      if (s.expiresAt <= now()) throw fail(404, "Link chia sẻ không tồn tại hoặc đã hết hạn", "SHARE_GONE");
+      const i = Number(q.get("i"));
+      const k = Number(q.get("k"));
+      const song = Number.isInteger(i) && s.songs[i];
+      const n = song ? pieces(song.size) : 0;
+      if (!song || !Number.isInteger(k) || k < 0 || k >= n) throw fail(400, "Bài hát không hợp lệ");
+      const expected = k < n - 1 ? SHARE_CHUNK : song.size - (n - 1) * SHARE_CHUNK;
+      if (body.length !== expected) throw fail(400, "Dữ liệu bài hát không đúng kích thước");
+      await storage(() => bucket.put(pieceKey(s._id, i, k), body, song.type));
+      // pieces of a song come one after another: the last one makes it playable
+      if (k === n - 1) await (await shares()).updateOne({ _id: s._id }, { $set: { [`songs.${i}.ok`]: true } });
+      return { ok: true };
+    },
+
+    "POST share-pending": async (req, body) => {
       need();
       const { acc } = await account(req);
       const s = await own(acc, body.code);
-      const i = Number(body.i);
-      if (s.ready || !Number.isInteger(i) || !s.songs[i]) throw fail(400, "Bài hát không hợp lệ");
-      return { url: bucket.putUrl(objectKey(s._id, i), UPLOAD_URL_TTL) };
-    },
-
-    "POST share-done": async (req, body) => {
-      need();
-      const { acc } = await account(req);
-      const s = await own(acc, body.code);
-      if (s.ready) return { share: summary(s) };
-      // what really reached R2: songs missing or bigger than allowed are left out (and removed)
-      const sizes = await storage(() => Promise.all(s.songs.map((_, i) => bucket.size(objectKey(s._id, i)))));
-      const songs = [];
-      const moves = [];
-      for (const [i, song] of s.songs.entries()) {
-        const size = sizes[i];
-        if (size && size <= SHARE_FILE_MAX) {
-          moves.push([i, songs.length]);
-          songs.push({ ...song, size });
-        } else if (size) await storage(() => bucket.remove(objectKey(s._id, i)));
-      }
-      if (!songs.length) {
-        await remove(s);
-        throw fail(400, "Không bài nào tải lên được");
-      }
-      // R2 cannot rename: songs keep their place, the list remembers where each one is
-      const at = moves.map(([from]) => from);
-      await (await shares()).updateOne({ _id: s._id }, { $set: { songs, at, ready: true } });
-      return { share: summary({ ...s, songs }) };
+      return { songs: s.songs.flatMap((song, i) => (song.ok ? [] : [{ i, ref: song.ref }])) };
     },
 
     "GET share-list": async (req) => {
@@ -201,7 +206,7 @@ export function shareRoutes({ env, db, account, fail, fetchFn, now = () => new D
       const list = await (
         await shares()
       )
-        .find({ accountId: acc, ready: true, expiresAt: { $gt: now() } })
+        .find({ accountId: acc, expiresAt: { $gt: now() } })
         .sort({ createdAt: -1 })
         .toArray();
       return { shares: list.map(summary) };
@@ -212,7 +217,7 @@ export function shareRoutes({ env, db, account, fail, fetchFn, now = () => new D
       const { acc } = await account(req);
       const s = await own(acc, body.code);
       // closed at once; the songs go now, or with a later sweep
-      await (await shares()).updateOne({ _id: s._id }, { $set: { expiresAt: new Date(0), ready: false } });
+      await (await shares()).updateOne({ _id: s._id }, { $set: { expiresAt: new Date(0) } });
       await remove(s);
       return { ok: true };
     },
@@ -223,7 +228,7 @@ export function shareRoutes({ env, db, account, fail, fetchFn, now = () => new D
       return {
         name: s.name,
         expiresAt: s.expiresAt.getTime(),
-        songs: s.songs.map(({ title, performer, duration }) => ({ title, performer, duration })),
+        songs: s.songs.map(({ title, performer, duration, ok }) => ({ title, performer, duration, ready: ok })),
       };
     },
 
@@ -234,12 +239,57 @@ export function shareRoutes({ env, db, account, fail, fetchFn, now = () => new D
       const i = Number(q.get("i"));
       const song = Number.isInteger(i) && s.songs[i];
       if (!song) throw fail(404, "Không tìm thấy bài hát");
-      const url = bucket.getUrl(objectKey(s._id, s.at ? s.at[i] : i), PLAY_URL_TTL, {
-        "response-content-type": song.type,
-        "response-content-disposition": "inline",
-        "response-cache-control": "private, no-store",
+      if (!song.ok) throw fail(409, "Bài này đang được tải lên, hãy thử lại sau ít phút", "SHARE_PENDING");
+      const exp = Math.floor(now().getTime() / 1000) + PLAY_URL_TTL;
+      const params = new URLSearchParams({
+        code: s._id,
+        i: String(i),
+        exp: String(exp),
+        sig: signAudio(s._id, i, exp),
       });
-      return { url, expiresIn: PLAY_URL_TTL };
+      return { url: `/api/cloud/share-audio?${params}`, expiresIn: PLAY_URL_TTL };
+    },
+
+    "GET share-audio": async (req) => {
+      need();
+      const q = query(req);
+      const code = q.get("code");
+      const i = Number(q.get("i"));
+      const exp = Number(q.get("exp"));
+      const sig = Buffer.from(String(q.get("sig") || ""));
+      const want =
+        isCode(code) && Number.isInteger(i) && Number.isInteger(exp) ? Buffer.from(signAudio(code, i, exp)) : null;
+      if (!want || sig.length !== want.length || !crypto.timingSafeEqual(sig, want) || exp * 1000 < now().getTime())
+        throw fail(403, "Link phát nhạc đã hết hạn", "SHARE_URL_EXPIRED");
+      const s = await open(code);
+      const song = s.songs[i];
+      if (!song?.ok) throw fail(404, "Không tìm thấy bài hát");
+      // bytes=a-b, bytes=a- or bytes=-n; answered one piece at most (the player asks again for the rest)
+      const m = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range || "bytes=0-");
+      let start = m?.[1] ? Number(m[1]) : null;
+      let end = m?.[2] ? Number(m[2]) : null;
+      if (start === null) [start, end] = [Math.max(0, song.size - (end ?? 0)), song.size - 1];
+      if (!m || start >= song.size || (end !== null && end < start))
+        return { [RAW]: { status: 416, headers: { "Content-Range": `bytes */${song.size}` }, body: "" } };
+      const k = Math.floor(start / SHARE_CHUNK);
+      end = Math.min(end ?? Infinity, (k + 1) * SHARE_CHUNK - 1, song.size - 1);
+      const bytes = await storage(() =>
+        bucket.read(pieceKey(s._id, i, k), start - k * SHARE_CHUNK, end - k * SHARE_CHUNK),
+      );
+      if (!bytes) throw fail(404, "Không tìm thấy bài hát");
+      return {
+        [RAW]: {
+          status: 206,
+          headers: {
+            "Content-Type": song.type,
+            "Content-Range": `bytes ${start}-${start + bytes.length - 1}/${song.size}`,
+            "Accept-Ranges": "bytes",
+            "Content-Disposition": "inline",
+            "Cache-Control": "private, no-store",
+          },
+          body: bytes,
+        },
+      };
     },
   };
 }

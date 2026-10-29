@@ -50,6 +50,7 @@ import {
   SONG_SEARCHES_MAX,
   SHARE_SONGS_MAX,
   SHARE_FILE_MAX,
+  SHARE_CHUNK,
 } from "../core.js";
 import { createCloudSync, TOKEN_KEY } from "./cloud-sync.js";
 
@@ -475,6 +476,7 @@ function backToChoice() {
 
 function logout() {
   const old = client;
+  stopUploads(); // the songs of shared links: this account's token is about to go
   cloudSync.signOut();
   save(STORE.session, undefined);
   history = []; // this browser may be used by someone else next
@@ -1144,22 +1146,29 @@ async function startServiceWorker() {
 }
 
 // ---------- shared playlists: the songs copied to Cloudflare R2, heard through /s/<code> (cloud/share.js) ----------
-// This browser reads each song from Telegram and PUTs it to a URL signed by /api/cloud; the server only keeps
-// the list. Needs the MongoDB sync (its device token proves the account).
+// The link works as soon as it is made; this browser then reads the songs from Telegram one after another (in the
+// playlist's order) and sends them in pieces to /api/cloud, which stores them in R2 — the browser never talks to
+// R2. Uploads stopped half-way (tab closed) go on the next time the links are listed. Needs the MongoDB sync (its
+// device token proves the account).
 
-const SHARE_PARALLEL = 2;
-const sharing = new Map(); // playlist id -> AbortController, while its songs are copied
+const SHARE_PARALLEL = 3;
+const uploads = new Map(); // link code -> { code, playlistId, ctl, done, total, failed }, while its songs are sent
+let resuming = Promise.resolve(); // links whose upload stopped half-way go on one after another
 
 const shareLink = (code) => `${location.origin}/s/${code}`;
 
-async function cloudShare(method, action, body) {
+function cloudToken() {
   const saved = load(TOKEN_KEY, null);
   if (!saved?.token || saved.account !== auth.me?.id)
     throw httpError(409, "Cần bật đồng bộ đám mây để chia sẻ playlist", { code: "NO_CLOUD" });
+  return saved.token;
+}
+
+async function cloudShare(method, action, body) {
   const res = await fetch(`/api/cloud/${action}`, {
     method,
     cache: "no-store",
-    headers: { ...(body && { "Content-Type": "application/json" }), Authorization: `Bearer ${saved.token}` },
+    headers: { ...(body && { "Content-Type": "application/json" }), Authorization: `Bearer ${cloudToken()}` },
     body: body && JSON.stringify(body),
   });
   const data = await res.json().catch(() => ({}));
@@ -1167,79 +1176,140 @@ async function cloudShare(method, action, body) {
   return data;
 }
 
-/** One song: read whole from Telegram, then PUT to R2 (tried twice). */
-async function uploadSong(code, i, item, type, signal) {
-  const chunks = [];
-  for await (const chunk of telegramRange(item, 0, item.info.size - 1)) {
-    if (signal.aborted) return;
-    chunks.push(chunk);
-  }
-  const body = new Blob(chunks, { type });
+/** Piece k of song i; tried three times when the server or the network fails. */
+async function sharePiece(code, i, k, body, signal) {
   for (let attempt = 1; ; attempt++) {
-    const { url } = await cloudShare("POST", "share-upload", { code, i });
     try {
-      const res = await fetch(url, { method: "PUT", body, headers: { "Content-Type": type }, signal });
+      const res = await fetch(`/api/cloud/share-put?${new URLSearchParams({ code, i, k })}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/octet-stream", Authorization: `Bearer ${cloudToken()}` },
+        body,
+        signal,
+      });
       if (res.ok) return;
-      throw new Error(`R2 PUT ${res.status}`);
+      const data = await res.json().catch(() => ({}));
+      throw httpError(res.status, data.error || `share-put ${res.status}`, { code: data.code });
     } catch (err) {
-      if (signal.aborted || attempt === 2) throw err;
+      if (signal.aborted || (err.status >= 400 && err.status < 500) || attempt === 3) throw err;
+      await new Promise((r) => setTimeout(r, 1500 * attempt));
     }
   }
 }
 
-/** POST /api/shares: a new link for a playlist; progress as "share" events. */
+/** One song: read from Telegram and sent in SHARE_CHUNK pieces, in order (the last one makes it playable). */
+async function shareSong(code, i, item, signal) {
+  let parts = [];
+  let got = 0;
+  let k = 0;
+  const send = async () => {
+    const body = new Blob(parts);
+    parts = [];
+    got = 0;
+    await sharePiece(code, i, k++, body, signal);
+  };
+  for await (let chunk of telegramRange(item, 0, item.info.size - 1)) {
+    if (signal.aborted) return;
+    while (chunk.length) {
+      const take = Math.min(chunk.length, SHARE_CHUNK - got);
+      parts.push(chunk.subarray(0, take));
+      got += take;
+      chunk = chunk.subarray(take);
+      if (got === SHARE_CHUNK) await send();
+    }
+  }
+  if (got) await send();
+}
+
+const emitShare = (u, finished = false) =>
+  emit("share", { code: u.code, playlistId: u.playlistId, done: u.done, total: u.total, failed: u.failed, finished });
+
+/** Send the songs of a link (`jobs`: [{ i, item }]); `done`: how many it already has. */
+async function uploadShare(code, playlistId, jobs, done, total) {
+  if (uploads.has(code)) return;
+  const u = { code, playlistId, ctl: new AbortController(), done, total, failed: 0 };
+  uploads.set(code, u);
+  emitShare(u);
+  let next = 0;
+  const worker = async () => {
+    while (next < jobs.length && !u.ctl.signal.aborted) {
+      const { i, item } = jobs[next++];
+      try {
+        await shareSong(code, i, item, u.ctl.signal);
+        if (u.ctl.signal.aborted) return;
+        u.done++;
+      } catch (err) {
+        if (u.ctl.signal.aborted) return;
+        if (err.code === "SHARE_GONE" || err.status === 404 || err.status === 401) return void u.ctl.abort(); // revoked, expired, signed out
+        console.warn("share: song not uploaded:", err);
+        u.failed++;
+      }
+      emitShare(u);
+    }
+  };
+  try {
+    await Promise.all(Array.from({ length: SHARE_PARALLEL }, worker));
+  } finally {
+    uploads.delete(code);
+    emitShare(u, true);
+  }
+}
+
+function stopUploads(code = null) {
+  for (const u of uploads.values()) if (!code || u.code === code) u.ctl.abort();
+}
+
+/** Links whose songs are not all there (the tab was closed meanwhile): their upload goes on. */
+function resumeShares(list) {
+  for (const s of list) {
+    if (s.ready >= s.count || uploads.has(s.code)) continue;
+    resuming = resuming
+      .then(async () => {
+        if (uploads.has(s.code) || auth.step !== "ready") return;
+        const { songs } = await cloudShare("POST", "share-pending", { code: s.code });
+        if (!songs.length) return;
+        const scan = await favoritesScan(
+          songs.map((x) => x.ref),
+          null,
+          { key: `share:${s.code}`, title: s.name },
+        );
+        scans.delete(scan.key);
+        const byRef = new Map([...scan.items.values()].map((it) => [it.fav, it]));
+        const jobs = songs.filter((x) => byRef.has(x.ref)).map((x) => ({ i: x.i, item: byRef.get(x.ref) }));
+        await uploadShare(s.code, s.playlistId, jobs, s.ready, s.count);
+      })
+      .catch((err) => console.warn("share: upload not resumed:", err));
+  }
+}
+
+/** POST /api/shares: a new link for a playlist, open at once; its songs are then sent ("share" events). */
 async function sharePlaylist(id, days) {
   const p = (load(STORE.playlists, {})[auth.me.id] || []).find((x) => x.id === id);
   if (!p) throw httpError(404, "Không tìm thấy playlist");
-  if (sharing.has(id)) throw httpError(409, "Playlist này đang được chia sẻ");
-  const ctl = new AbortController();
-  sharing.set(id, ctl);
-  let code = null;
-  try {
-    const scan = await favoritesScan(p.songs, ctl.signal, { key: "share", title: p.name });
-    scans.delete(scan.key);
-    // music only (no voice, video…), each small enough
-    const items = [...scan.items.values()]
-      .filter((it) => mediaKind(it.msg) === "audio" && it.info.size > 0 && it.info.size <= SHARE_FILE_MAX)
-      .slice(0, SHARE_SONGS_MAX);
-    if (!items.length) throw httpError(400, "Playlist không có bài nhạc nào chia sẻ được");
-    const songs = items.map((it) => ({
-      title: it.info.title || splitName(it.info.name).base,
-      performer: it.info.performer || null,
-      duration: it.info.duration || null,
-      size: it.info.size,
-      type: it.msg.media.document?.mimeType || "audio/mpeg",
-    }));
-    ({ code } = await cloudShare("POST", "share-create", { playlistId: p.id, name: p.name, days, songs }));
-    let done = 0;
-    let failed = 0;
-    const progress = () => emit("share", { playlistId: id, done, failed, total: items.length });
-    progress();
-    let next = 0;
-    const worker = async () => {
-      while (next < items.length && !ctl.signal.aborted) {
-        const i = next++;
-        try {
-          await uploadSong(code, i, items[i], songs[i].type, ctl.signal);
-        } catch (err) {
-          if (ctl.signal.aborted) return;
-          console.warn("share: song not copied:", err);
-          failed++;
-        }
-        done++;
-        progress();
-      }
-    };
-    await Promise.all(Array.from({ length: SHARE_PARALLEL }, worker));
-    if (ctl.signal.aborted) throw httpError(499, "Đã huỷ chia sẻ", { stopped: true });
-    const { share } = await cloudShare("POST", "share-done", { code });
-    return { ...share, link: shareLink(code), failed, skipped: p.songs.length - items.length };
-  } catch (err) {
-    if (code) cloudShare("POST", "share-revoke", { code }).catch(() => {}); // half a copy is not left behind
-    throw err;
-  } finally {
-    sharing.delete(id);
-  }
+  if ([...uploads.values()].some((u) => u.playlistId === id)) throw httpError(409, "Playlist này đang được chia sẻ");
+  const scan = await favoritesScan(p.songs, null, { key: `share:${id}`, title: p.name });
+  scans.delete(scan.key);
+  // music only (no voice, video…), each small enough
+  const items = [...scan.items.values()]
+    .filter((it) => mediaKind(it.msg) === "audio" && it.info.size > 0 && it.info.size <= SHARE_FILE_MAX)
+    .slice(0, SHARE_SONGS_MAX);
+  if (!items.length) throw httpError(400, "Playlist không có bài nhạc nào chia sẻ được");
+  const songs = items.map((it) => ({
+    title: it.info.title || splitName(it.info.name).base,
+    performer: it.info.performer || null,
+    duration: it.info.duration || null,
+    size: it.info.size,
+    type: it.msg.media.document?.mimeType || "audio/mpeg",
+    ref: it.fav,
+  }));
+  const { share } = await cloudShare("POST", "share-create", { playlistId: p.id, name: p.name, days, songs });
+  uploadShare(
+    share.code,
+    id,
+    items.map((item, i) => ({ i, item })),
+    0,
+    items.length,
+  ).catch((err) => console.warn("share: upload stopped:", err));
+  return { ...share, link: shareLink(share.code), skipped: p.songs.length - items.length };
 }
 
 // ---------- the /api/* router ----------
@@ -1419,22 +1489,21 @@ async function route(method, url, body, signal) {
     }
 
     case "GET /api/shares": {
-      // the links still open, of every playlist of the account
+      // the links still open, of every playlist of the account; an upload stopped half-way goes on
       requireReady();
       const { shares } = await cloudShare("GET", "share-list");
-      return { shares: shares.map((x) => ({ ...x, link: shareLink(x.code) })), sharing: [...sharing.keys()] };
+      resumeShares(shares);
+      const sending = [...uploads.values()].map(({ ctl, ...u }) => u);
+      return { shares: shares.map((x) => ({ ...x, link: shareLink(x.code) })), uploads: sending };
     }
 
     case "POST /api/shares":
       requireReady();
       return sharePlaylist(String(body.id || ""), Number(body.days));
 
-    case "POST /api/shares/cancel":
-      sharing.get(String(body.id || ""))?.abort();
-      return { ok: true };
-
     case "POST /api/shares/revoke":
       requireReady();
+      stopUploads(String(body.code || ""));
       return cloudShare("POST", "share-revoke", { code: body.code });
 
     case "GET /api/favorites/files":

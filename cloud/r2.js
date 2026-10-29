@@ -1,6 +1,5 @@
-// Cloudflare R2 (S3 API) without an SDK: presigned URLs (AWS Signature V4, query string) for the songs of
-// shared playlists. The browser uploads with a PUT URL, the listener plays with a GET URL; the server only
-// signs, checks (HEAD) and removes (DELETE). Node only.
+// Cloudflare R2 (S3 API) without an SDK, for the songs of shared playlists: requests signed with AWS Signature V4
+// (query string), sent from the server only — browsers never reach R2 (some networks block it). Node only.
 //
 // Settings (Vercel environment variables):
 //   R2_ACCOUNT_ID         Cloudflare account id (the <id>.r2.cloudflarestorage.com endpoint)
@@ -68,7 +67,7 @@ export function r2Config(env) {
 }
 
 /**
- * One bucket: signed URLs, plus HEAD / DELETE done from here.
+ * One bucket: put, read (a byte range), remove.
  * @param fetchFn  fetch (injected in tests)
  */
 export function createBucket(config, { fetchFn = (...a) => fetch(...a), now = () => new Date() } = {}) {
@@ -76,7 +75,7 @@ export function createBucket(config, { fetchFn = (...a) => fetch(...a), now = ()
     presign({
       method,
       host: `${config.account}.r2.cloudflarestorage.com`,
-      path: `/${config.bucket}/${key}`,
+      path: key ? `/${config.bucket}/${key}` : `/${config.bucket}`, // "": the bucket itself
       region: "auto",
       accessKeyId: config.accessKeyId,
       secretAccessKey: config.secretAccessKey,
@@ -85,18 +84,37 @@ export function createBucket(config, { fetchFn = (...a) => fetch(...a), now = ()
       now: now(),
     });
   return {
-    putUrl: (key, expires) => sign("PUT", key, expires),
-    getUrl: (key, expires, query) => sign("GET", key, expires, query),
-    /** Size of a stored object, or null when it is not there. */
-    async size(key) {
-      const res = await fetchFn(sign("HEAD", key, 60), { method: "HEAD" });
-      if (res.status === 404) return null;
-      if (!res.ok) throw new Error(`R2 HEAD ${res.status}`);
-      return Number(res.headers.get("content-length")) || 0;
+    async put(key, body, type) {
+      const res = await fetchFn(sign("PUT", key, 300), { method: "PUT", body, headers: { "Content-Type": type } });
+      if (!res.ok) throw new Error(`R2 PUT ${res.status}`);
     },
-    async remove(key) {
-      const res = await fetchFn(sign("DELETE", key, 60), { method: "DELETE" });
-      if (!res.ok && res.status !== 404) throw new Error(`R2 DELETE ${res.status}`);
+    /** Bytes [start, end] of an object, as a Buffer; null when it is not there. */
+    async read(key, start, end) {
+      const res = await fetchFn(sign("GET", key, 300), { headers: { Range: `bytes=${start}-${end}` } });
+      if (res.status === 404) return null;
+      if (!res.ok) throw new Error(`R2 GET ${res.status}`);
+      return Buffer.from(await res.arrayBuffer());
+    },
+    /** Remove many objects at once (DeleteObjects, up to 1000 keys a request); missing ones are fine. */
+    async removeMany(keys) {
+      for (let i = 0; i < keys.length; i += 1000) {
+        const xml =
+          "<Delete><Quiet>true</Quiet>" +
+          keys
+            .slice(i, i + 1000)
+            .map((k) => `<Object><Key>${k.replace(/&/g, "&amp;").replace(/</g, "&lt;")}</Key></Object>`)
+            .join("") +
+          "</Delete>";
+        const res = await fetchFn(sign("POST", "", 300, { delete: "" }), {
+          method: "POST",
+          body: xml,
+          headers: {
+            "Content-Type": "application/xml",
+            "Content-MD5": crypto.createHash("md5").update(xml).digest("base64"),
+          },
+        });
+        if (!res.ok) throw new Error(`R2 DeleteObjects ${res.status}`);
+      }
     },
   };
 }

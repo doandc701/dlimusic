@@ -157,31 +157,21 @@ Trong MongoDB: collection `kv` (mỗi mục một document: `local:<máy>:<file>
 
 ## Chia sẻ playlist bằng link (bản Vercel, tuỳ chọn)
 
-Trong một playlist, bấm <kbd>Chia sẻ</kbd> (nút trên thanh công cụ của playlist, hoặc menu ⋯ ở mỗi playlist) → chọn hạn **1 / 7 / 30 ngày** → **Tạo link**. Trình duyệt đọc từng bài từ Telegram rồi **sao chép lên Cloudflare R2** (chỉ nhạc, mỗi bài tối đa 100 MB, mỗi link tối đa 200 bài). Xong sẽ có link dạng `https://dlimusic.vercel.app/s/<mã>`: ai có link đều nghe được, **không cần đăng nhập**. Đóng hộp thoại trong lúc đang sao chép vẫn được, việc sao chép tiếp tục ở trang.
+Trong một playlist, bấm <kbd>Chia sẻ</kbd> (nút trên thanh công cụ của playlist, hoặc menu ⋯ ở mỗi playlist) → chọn hạn **1 / 7 / 30 ngày** → **Tạo link**. **Link có ngay**, dạng `https://dlimusic.vercel.app/s/<mã>`: ai có link đều nghe được, **không cần đăng nhập**. Sau đó trình duyệt đọc từng bài từ Telegram (theo thứ tự playlist, 3 bài cùng lúc) và gửi lên máy chủ. Người nhận nghe được ngay các bài đã lên; bài chưa lên hiện mờ "Đang tải lên…", và trang tự cập nhật mỗi 15 giây. Chỉ chia sẻ nhạc (không voice/video), mỗi bài tối đa 100 MB, cả playlist (tới 1000 bài).
 
-- Trang nghe không có nút tải. Mỗi bài phát từ một URL ký số chỉ sống 10 phút, URL hết hạn thì trang tự xin URL mới. Cách này chỉ làm việc tải **khó hơn**, không chặn hẳn được: thứ gì phát được trong trình duyệt thì vẫn ghi lại được.
+- Giữ trang DLiMusic mở tới khi tải lên xong (tiến độ hiện trong hộp _Chia sẻ_). Đóng giữa chừng thì lần sau mở app sẽ tự tải tiếp các bài còn thiếu.
+- Nhạc đi qua Vercel function (`/api/cloud/share-put`, mỗi lần một đoạn 3 MB), không đi thẳng từ trình duyệt tới R2: mạng chặn `*.r2.cloudflarestorage.com` (mạng công ty…) vẫn dùng được, và không cần cấu hình CORS. Đổi lại, mỗi bài tốn vài lần gọi function của Vercel, cả lúc tải lên lẫn lúc nghe.
+- Trang nghe không có nút tải. Mỗi bài phát qua `/api/cloud/share-audio` bằng một URL ký số chỉ sống 10 phút, mỗi lần trả tối đa một đoạn 3 MB. Cách này chỉ làm việc tải **khó hơn**, không chặn hẳn được: thứ gì phát được trong trình duyệt thì vẫn ghi lại được.
 - Link hết hạn hoặc bấm **Thu hồi** thì link ngừng hoạt động ngay, các bài bị xoá khỏi R2 (mỗi tài khoản tối đa 20 link cùng lúc).
 - Cần bật [MongoDB](#lưu-dữ-liệu-lên-mongodb-atlas-tuỳ-chọn): mã thiết bị chứng minh link thuộc tài khoản nào.
 - ⚠️ **Bản quyền:** sao chép nhạc lên máy chủ rồi phát cho người khác là phát tán lại. Chỉ nên chia sẻ cho người quen, có hạn, không thu lợi; gỡ ngay khi chủ bản quyền yêu cầu.
 
 Cài đặt (một lần):
 
-1. [Cloudflare](https://dash.cloudflare.com) → **R2** → _Create bucket_ (ví dụ `dlimusic-share`). Gói miễn phí: 10 GB lưu trữ, không tính phí băng thông tải ra.
-2. Bucket → **Settings → CORS policy**: cho trình duyệt PUT bài lên.
-   ```json
-   [
-     {
-       "AllowedOrigins": ["https://dlimusic.vercel.app", "http://127.0.0.1:4173"],
-       "AllowedMethods": ["PUT"],
-       "AllowedHeaders": ["Content-Type"],
-       "MaxAgeSeconds": 3600
-     }
-   ]
-   ```
-   Muốn thử trên bản xem thử của nhánh khác thì thêm domain của bản đó vào `AllowedOrigins`.
-3. Bucket → **Settings → Object lifecycle rules**: _Add rule_, prefix `s/`, xoá object sau **31 ngày**. Đây là lưới an toàn: link sống tối đa 30 ngày, nên bài nào còn sau 31 ngày chắc chắn là rác (bình thường app tự xoá).
-4. **R2 → Manage R2 API Tokens** → _Create API token_, quyền **Object Read & Write**, chỉ cho bucket trên. Giữ lại _Access Key ID_ và _Secret Access Key_.
-5. Vercel → Project → Settings → **Environment Variables**, thêm:
+1. [Cloudflare](https://dash.cloudflare.com) → **Storage & databases → R2 Object Storage** → _Create bucket_ (ví dụ `dlimusic-share`). Gói miễn phí: 10 GB lưu trữ. Để **Public Access: Disabled**.
+2. Bucket → **Settings → Object lifecycle rules**: _Add rule_, prefix `s/`, xoá object sau **31 ngày**. Đây là lưới an toàn: link sống tối đa 30 ngày, nên bài nào còn sau 31 ngày chắc chắn là rác (bình thường app tự xoá).
+3. Trang R2 → **Manage API tokens** → _Create Account API token_, quyền **Object Read & Write**, chỉ cho bucket trên, TTL _Forever_, không lọc IP. Giữ lại _Access Key ID_ và _Secret Access Key_ (secret chỉ hiện một lần).
+4. Vercel → Project → Settings → **Environments** → Production (và Preview) → **Environment Variables**, thêm:
    ```
    R2_ACCOUNT_ID=<Account ID, 32 ký tự, ở trang R2>
    R2_ACCESS_KEY_ID=<Access Key ID>
@@ -190,7 +180,7 @@ Cài đặt (một lần):
    ```
    rồi deploy lại. Chưa cấu hình thì bấm _Tạo link_ sẽ báo "Máy chủ chưa cấu hình kho nhạc chia sẻ". Thử trên máy: ghi các biến này vào `.env` rồi chạy `npm run preview:web`.
 
-Trong MongoDB: collection `shares` (mỗi link một document: tài khoản, tên playlist, danh sách bài, hạn). Trong R2: `s/<mã>/<số thứ tự>`. CSP của trang đã cho phép `https://*.r2.cloudflarestorage.com` (phát nhạc và tải lên).
+Trong MongoDB: collection `shares` (mỗi link một document: tài khoản, tên playlist, danh sách bài và bài nào đã lên, hạn). Trong R2: `s/<mã>/<bài>/<đoạn>`.
 
 ## Bảo mật
 

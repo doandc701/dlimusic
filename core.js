@@ -877,10 +877,12 @@ export const PLAYLISTS_MAX = 200;
 export const PLAYLIST_SONGS_MAX = 1000;
 export const PLAYLIST_NAME_MAX = 80;
 
-// shared playlists (cloud/share.js): a link lives 1, 7 or 30 days, holds up to 200 songs of up to 100 MB each
+// shared playlists (cloud/share.js): a link lives 1, 7 or 30 days, holds a whole playlist, songs of up to 100 MB.
+// Songs go through the Vercel function in pieces (its requests and answers are 4.5 MB at most).
 export const SHARE_DAYS = [1, 7, 30];
-export const SHARE_SONGS_MAX = 200;
+export const SHARE_SONGS_MAX = PLAYLIST_SONGS_MAX;
 export const SHARE_FILE_MAX = 100 * 1024 * 1024;
+export const SHARE_CHUNK = 3 * 1024 * 1024;
 
 /** A new playlist id: no two devices pick the same one. */
 export const newPlaylistId = () =>

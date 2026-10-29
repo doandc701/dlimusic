@@ -17,7 +17,8 @@
 //   POST /api/cloud/logout   { keepSession? }         -> { ok }        (forget the session, revoke the token;
 //                                                                         keepSession: the token only)
 //   GET  /api/cloud/status                            -> { enabled }   (no token needed)
-//   /api/cloud/share-*                                 shared playlists (cloud/share.js)
+//   /api/cloud/share-*                                 shared playlists (cloud/share.js); share-put takes raw
+//                                                      bytes, share-audio answers with them
 
 import {
   openDb,
@@ -35,7 +36,8 @@ import {
   isMongoUri,
 } from "./common.js";
 import { readAccount, joinAccount, checkOps, applyOps } from "./account.js";
-import { shareRoutes } from "./share.js";
+import { SHARE_CHUNK } from "../core.js";
+import { shareRoutes, RAW_BODY, RAW } from "./share.js";
 
 const MAX_BODY = 2 * 1024 * 1024;
 
@@ -139,7 +141,7 @@ export function createCloudApi({ env, verify, fetchFn, now }) {
       return { ok: true };
     },
 
-    ...shareRoutes({ env, db, account, fail, fetchFn, now }),
+    ...shareRoutes({ env, db, account, fail, key, fetchFn, now }),
   };
 
   /** Node (req, res) handler; `action` is the last path segment. */
@@ -156,12 +158,22 @@ export function createCloudApi({ env, verify, fetchFn, now }) {
       if (!route) throw fail(404, "Not found");
       if (action !== "status" && !ready) throw fail(503, "Chưa cấu hình MongoDB trên máy chủ", "CLOUD_OFF");
       let body = {};
-      if (req.method === "POST") {
+      if (req.method === "POST" && RAW_BODY.has(action)) body = await readBytes(req, SHARE_CHUNK);
+      else if (req.method === "POST") {
         if (!/^application\/json\b/i.test(req.headers["content-type"] || ""))
           throw fail(415, "Cần Content-Type: application/json");
         body = await readBody(req);
       }
-      send(200, await route(req, body));
+      const result = await route(req, body);
+      if (result?.[RAW]) {
+        // not JSON: a song's bytes (cloud/share.js)
+        const { status, headers, body: bytes } = result[RAW];
+        res.statusCode = status;
+        for (const [k, v] of Object.entries(headers)) res.setHeader(k, v);
+        res.setHeader("Content-Length", String(Buffer.byteLength(bytes)));
+        return res.end(bytes);
+      }
+      send(200, result);
     } catch (err) {
       const status = err.status || 503; // anything else: the database could not be reached
       send(status, {
@@ -171,6 +183,28 @@ export function createCloudApi({ env, verify, fetchFn, now }) {
       });
     }
   };
+}
+
+/** Raw body (a piece of a song), at most `max` bytes: Vercel gives it as a Buffer; plain Node streams it. */
+async function readBytes(req, max) {
+  let given;
+  try {
+    given = req.body;
+  } catch {
+    given = undefined;
+  }
+  if (Buffer.isBuffer(given)) {
+    if (given.length > max) throw fail(413, "Dữ liệu quá lớn");
+    return given;
+  }
+  let size = 0;
+  const chunks = [];
+  for await (const chunk of req) {
+    size += chunk.length;
+    if (size > max) throw fail(413, "Dữ liệu quá lớn");
+    chunks.push(chunk);
+  }
+  return Buffer.concat(chunks);
 }
 
 /** JSON body: Vercel parses it into req.body; plain Node streams it. */

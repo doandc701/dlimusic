@@ -2269,6 +2269,7 @@ function renderPlGrid() {
       <div class="dropdown pl-menu">
         <button class="btn" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="${t("Tuỳ chọn")}"><i class="bi bi-three-dots"></i></button>
         <ul class="dropdown-menu dropdown-menu-end shadow-sm">
+          ${CAPS.share ? `<li><button class="dropdown-item" type="button" data-pl-share="${esc(p.id)}"><i class="bi bi-share"></i> ${t("Chia sẻ")}</button></li>` : ""}
           <li><button class="dropdown-item" type="button" data-pl-rename="${esc(p.id)}"><i class="bi bi-pencil"></i> ${t("Đổi tên")}</button></li>
           <li><button class="dropdown-item text-danger" type="button" data-pl-delete="${esc(p.id)}"><i class="bi bi-trash3"></i> ${t("Xoá playlist")}</button></li>
         </ul>
@@ -2283,6 +2284,7 @@ $("plGrid").addEventListener("click", (e) => {
   const el = (sel) => e.target.closest(sel);
   if (el("[data-pl-new]")) return void createPlaylist();
   if (el("[data-pl-play]")) return void playPlaylist(el("[data-pl-play]").dataset.plPlay);
+  if (el("[data-pl-share]")) return void openShare(el("[data-pl-share]").dataset.plShare);
   if (el("[data-pl-rename]")) return void renamePlaylist(el("[data-pl-rename]").dataset.plRename);
   if (el("[data-pl-delete]")) return void deletePlaylist(el("[data-pl-delete]").dataset.plDelete);
   if (el(".pl-menu")) return; // the ⋯ button
@@ -2474,6 +2476,126 @@ $("plPlayBtn").addEventListener("click", () => openPlaylist() && playPlaylist(op
 $("plShuffleBtn").addEventListener("click", () => openPlaylist() && playPlaylist(openPlaylist().id, true));
 $("plRenameBtn").addEventListener("click", () => openPlaylist() && renamePlaylist(openPlaylist().id));
 $("plDeleteBtn").addEventListener("click", () => openPlaylist() && deletePlaylist(openPlaylist().id));
+$("plShareBtn").addEventListener("click", () => openPlaylist() && openShare(openPlaylist().id));
+
+// ---------- sharing a playlist (browser build): a secret link to a copy of its songs, heard without signing in ----------
+// web/backend.js copies the songs (Telegram -> Cloudflare R2), cloud/share.js keeps the links, /s/<code> plays them.
+
+const shareModal = new bootstrap.Modal($("shareModal"));
+const share = {
+  id: null, // the playlist in the dialog
+  links: [], // the account's open links { code, playlistId, name, count, expiresAt, link }
+  busy: new Map(), // playlist id -> { done, failed, total } while its songs are copied (goes on when the dialog closes)
+};
+
+const shareDate = (ms) =>
+  new Date(ms).toLocaleString(tdlI18n.locale, {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+
+async function openShare(id) {
+  const p = playlistById(id);
+  if (!p) return;
+  if (!p.songs.length) return toast(t("Playlist chưa có bài nào"), "info");
+  await hideOpenModals();
+  share.id = id;
+  $("shareTitle").innerHTML =
+    `<i class="bi bi-share text-primary"></i> ${esc(t("Chia sẻ “{name}”", { name: p.name }))}`;
+  $("shareError").textContent = "";
+  renderShare();
+  shareModal.show();
+  try {
+    share.links = (await api("/api/shares")).shares || [];
+  } catch (err) {
+    $("shareError").textContent = err.message;
+  }
+  renderShare();
+}
+
+function renderShare() {
+  const busy = share.busy.get(share.id);
+  $("shareLinks").innerHTML = share.links
+    .filter((l) => l.playlistId === share.id)
+    .map(
+      (l) => `<div class="share-link border rounded p-2">
+        <div class="input-group input-group-sm">
+          <input class="form-control" readonly value="${esc(l.link)}" aria-label="${t("Link chia sẻ")}">
+          <button class="btn btn-primary" type="button" data-share-copy="${esc(l.link)}" title="${t("Sao chép link")}"><i class="bi bi-copy"></i></button>
+        </div>
+        <div class="d-flex justify-content-between align-items-center gap-2 small mt-1">
+          <span class="text-body-secondary">${t("{n} bài · hết hạn {date}", { n: l.count, date: shareDate(l.expiresAt) })}</span>
+          <button class="btn btn-link btn-sm p-0 text-danger text-nowrap" type="button" data-share-revoke="${esc(l.code)}">${t("Thu hồi")}</button>
+        </div></div>`,
+    )
+    .join("");
+  show($("shareNew"), !busy);
+  show($("shareBusy"), !!busy);
+  if (busy) {
+    $("shareBusyText").textContent = busy.total
+      ? t("Đang sao chép {done}/{total} bài…", { done: busy.done, total: busy.total })
+      : t("Đang chuẩn bị…");
+    $("shareBar").style.width = `${busy.total ? (busy.done / busy.total) * 100 : 0}%`;
+  }
+}
+
+$("shareCreate").addEventListener("click", async () => {
+  const id = share.id;
+  $("shareError").textContent = "";
+  share.busy.set(id, { done: 0, failed: 0, total: 0 });
+  renderShare();
+  try {
+    const r = await api("/api/shares", { id, days: Number($("shareDays").value) });
+    share.links.unshift(r);
+    const left = r.failed + r.skipped; // not music, too big, gone from its chat, or not copied
+    toast(
+      left ? t("Đã tạo link chia sẻ, {n} bài không chia sẻ được", { n: left }) : t("Đã tạo link chia sẻ"),
+      left ? "warn" : "success",
+    );
+  } catch (err) {
+    if (err.status === 499) toast(t("Đã huỷ chia sẻ"), "info");
+    else if (share.id === id && $("shareModal").classList.contains("show")) $("shareError").textContent = err.message;
+    else toast(err.message, "error");
+  } finally {
+    share.busy.delete(id);
+    if (share.id === id) renderShare();
+  }
+});
+$("shareCancel").addEventListener("click", () => api("/api/shares/cancel", { id: share.id }).catch(() => {}));
+
+$("shareLinks").addEventListener("click", async (e) => {
+  const copy = e.target.closest("[data-share-copy]");
+  if (copy) {
+    try {
+      await navigator.clipboard.writeText(copy.dataset.shareCopy);
+      toast(t("Đã sao chép link"), "success", { oneLine: true });
+    } catch {
+      copy.closest(".share-link").querySelector("input").select(); // no clipboard: selected for Ctrl+C
+    }
+    return;
+  }
+  const revoke = e.target.closest("[data-share-revoke]");
+  if (!revoke) return;
+  // a second press confirms: the link stops working for everyone at once
+  if (!revoke.dataset.sure) {
+    revoke.dataset.sure = "1";
+    revoke.textContent = t("Bấm lần nữa để thu hồi");
+    return;
+  }
+  revoke.disabled = true;
+  try {
+    await api("/api/shares/revoke", { code: revoke.dataset.shareRevoke });
+    share.links = share.links.filter((l) => l.code !== revoke.dataset.shareRevoke);
+    toast(t("Đã thu hồi link"), "info");
+  } catch (err) {
+    $("shareError").textContent = err.message;
+  }
+  renderShare();
+});
+$("shareLinks").addEventListener("focusin", (e) => e.target.matches("input") && e.target.select());
 
 // ---------- adding songs to a playlist: + on a row, or "Thêm vào playlist" for the ticked ones ----------
 
@@ -4801,6 +4923,12 @@ const EVENTS = {
   "history-add": (d) => {
     state.history.unshift(d);
   },
+  share: (d) => {
+    // the copy of a playlist's songs for a link (browser build)
+    if (!share.busy.has(d.playlistId)) return;
+    share.busy.set(d.playlistId, d);
+    if (share.id === d.playlistId) renderShare();
+  },
   scan: ({ scanId, count }) => {
     // Only the latest scan of this page: an earlier scan (same chat reloaded, other type / chat) or
     // another tab's scan must not make the number jump.
@@ -4825,6 +4953,8 @@ function applyCaps() {
   if (!CAPS.openFolder) show($("folderBtn"), false);
   // Choosing where files go only exists on a PC / desktop; phones and tablets use the Downloads folder.
   if (!CAPS.pickFolder) show($("setFolderSection"), false);
+  // a playlist shared through a link: the browser build only
+  show($("plShareBtn"), !!CAPS.share);
 }
 
 applyCaps();

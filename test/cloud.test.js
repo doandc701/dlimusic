@@ -28,7 +28,8 @@ import { createMirror } from "../cloud/mirror.js";
 import { createCloudApi, tcpSession } from "../cloud/api.js";
 import { createCloudSync, createAccountSync } from "../web/cloud-sync.js";
 import { readAccount, joinAccount, applyOps, checkOps } from "../cloud/account.js";
-import { editPlaylists, sortPlaylists } from "../core.js";
+import { editPlaylists, sortPlaylists, SHARE_FILE_MAX } from "../core.js";
+import { presign } from "../cloud/r2.js";
 
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
 const SESSION_A = "1BAAOMTQ5LjE1NC4xNjcuNTEBu" + "A".repeat(320);
@@ -287,11 +288,17 @@ describe("MongoDB storage", () => {
     });
 
     /** Call a handler like Vercel would. */
-    async function call(handle, method, action, { body, token, raw: rawBody, type = "application/json" } = {}) {
+    async function call(
+      handle,
+      method,
+      action,
+      { body, token, raw: rawBody, type = "application/json", query = "" } = {},
+    ) {
       const text = rawBody ?? (body === undefined ? "" : JSON.stringify(body));
       const req = Readable.from(method === "POST" ? [Buffer.from(text)] : []);
       Object.assign(req, {
         method,
+        url: `/api/cloud/${action}${query}`,
         headers: {
           ...(method === "POST" && { "content-type": type }),
           ...(token && { authorization: `Bearer ${token}` }),
@@ -503,6 +510,143 @@ describe("MongoDB storage", () => {
       assert.equal(r.status, 503);
       assert.equal(r.data.code, "CLOUD_DOWN");
       assert.ok(!JSON.stringify(r.data).includes("pw@"), "no connection string in the error");
+    });
+
+    describe("shared playlists (Cloudflare R2)", () => {
+      const R2 = {
+        R2_ACCOUNT_ID: "0123456789abcdef0123456789abcdef",
+        R2_ACCESS_KEY_ID: "key",
+        R2_SECRET_ACCESS_KEY: "secret",
+        R2_BUCKET: "dlimusic",
+      };
+      const objects = new Map(); // "s/<code>/<i>" -> size, what the browser PUT
+      const r2 = async (url, { method }) => {
+        const u = new URL(url);
+        assert.equal(u.host, `${R2.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`);
+        assert.ok(u.searchParams.get("X-Amz-Signature"));
+        const key = decodeURIComponent(u.pathname).replace(/^\/dlimusic\//, "");
+        if (method === "DELETE") {
+          objects.delete(key);
+          return new Response(null, { status: 204 });
+        }
+        if (!objects.has(key)) return new Response(null, { status: 404 });
+        return new Response(null, { status: 200, headers: { "content-length": String(objects.get(key)) } });
+      };
+      let clock = new Date("2026-10-29T00:00:00Z");
+      const h = () =>
+        createCloudApi({ env: { ...env(), MONGODB_DB: "shares", ...R2 }, verify, fetchFn: r2, now: () => clock });
+      const song = (title, size = 1000) => ({ title, performer: "Ca sĩ", duration: 200, size, type: "audio/mpeg" });
+      const keyOf = (url) => decodeURIComponent(new URL(url).pathname).replace(/^\/dlimusic\//, "");
+
+      test("R2 URLs are signed like AWS's own example (Signature V4, query string)", () => {
+        const url = presign({
+          method: "GET",
+          host: "examplebucket.s3.amazonaws.com",
+          path: "/test.txt",
+          region: "us-east-1",
+          accessKeyId: "AKIAIOSFODNN7EXAMPLE",
+          secretAccessKey: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+          expires: 86400,
+          now: new Date("2013-05-24T00:00:00Z"),
+        });
+        assert.match(url, /X-Amz-Signature=aeeed9bbccd4d02ee5c0109b86d86835f995330da4c265957d157751f604d404$/);
+      });
+
+      test("without R2 settings sharing is off; the owner needs a token", async () => {
+        const off = createCloudApi({ env: env(), verify });
+        assert.deepEqual((await call(off, "GET", "share-status")).data, { enabled: false });
+        assert.equal(
+          (await call(off, "GET", "share-open", { query: "?code=abcdefghijklmnop" })).data.code,
+          "SHARE_OFF",
+        );
+        assert.deepEqual((await call(h(), "GET", "share-status")).data, { enabled: true });
+        assert.equal((await call(h(), "POST", "share-create", { body: {} })).status, 401);
+      });
+
+      test("create → upload → done: the link plays the songs that arrived, then expires and is removed", async () => {
+        const api = h();
+        const { token } = (await call(api, "POST", "login", { body: { session: SESSION_A } })).data;
+        const bad = (body) => call(api, "POST", "share-create", { token, body });
+        assert.equal((await bad({ playlistId: "p1", name: "Chill", days: 3, songs: [song("a")] })).status, 400);
+        assert.equal((await bad({ playlistId: "p1", name: "Chill", days: 7, songs: [] })).status, 400);
+        assert.equal(
+          (await bad({ playlistId: "p1", name: "Chill", days: 7, songs: [song("big", SHARE_FILE_MAX + 1)] })).status,
+          400,
+        );
+
+        const created = await bad({
+          playlistId: "p1",
+          name: "Chill",
+          days: 7,
+          songs: [song("a"), song("b"), song("c")],
+        });
+        assert.equal(created.status, 200);
+        const { code } = created.data;
+        assert.match(code, /^[\w-]{16}$/);
+        // not open before it is done
+        assert.equal((await call(api, "GET", "share-open", { query: `?code=${code}` })).status, 404);
+
+        // songs 0 and 2 arrive, 1 never does
+        for (const i of [0, 2]) {
+          const { url } = (await call(api, "POST", "share-upload", { token, body: { code, i } })).data;
+          assert.equal(new URL(url).searchParams.get("X-Amz-Expires"), "900");
+          objects.set(keyOf(url), 500 + i);
+        }
+        const b = (await call(api, "POST", "login", { body: { session: SESSION_B } })).data.token;
+        assert.equal((await call(api, "POST", "share-done", { token: b, body: { code } })).status, 404, "not B's");
+        const done = await call(api, "POST", "share-done", { token, body: { code } });
+        assert.equal(done.data.share.count, 2);
+
+        const open = await call(api, "GET", "share-open", { query: `?code=${code}` });
+        assert.deepEqual(
+          open.data.songs.map((s) => s.title),
+          ["a", "c"],
+        );
+        assert.equal(open.data.songs[0].size, undefined, "nothing more than what is shown");
+        const play = await call(api, "GET", "share-play", { query: `?code=${code}&i=1` });
+        assert.equal(keyOf(play.data.url), `s/${code}/2`, "the second song listed is the third uploaded");
+        assert.equal(new URL(play.data.url).searchParams.get("response-content-disposition"), "inline");
+        assert.equal((await call(api, "GET", "share-play", { query: `?code=${code}&i=2` })).status, 404);
+        assert.equal((await call(api, "GET", "share-list", { token })).data.shares.length, 1);
+        assert.equal((await call(api, "GET", "share-list", { token: b })).data.shares.length, 0);
+
+        // a week later the link is gone, and the next owner request removes its songs
+        clock = new Date(clock.getTime() + 7 * 86400_000 + 1000);
+        assert.equal((await call(api, "GET", "share-open", { query: `?code=${code}` })).data.code, "SHARE_GONE");
+        assert.equal((await call(api, "GET", "share-list", { token })).data.shares.length, 0);
+        assert.equal([...objects.keys()].filter((k) => k.startsWith(`s/${code}/`)).length, 0);
+      });
+
+      test("revoking closes the link at once and removes its songs", async () => {
+        const api = h();
+        const { token } = (await call(api, "POST", "login", { body: { session: SESSION_A } })).data;
+        const { code } = (
+          await call(api, "POST", "share-create", {
+            token,
+            body: { playlistId: "p2", name: "Rock", days: 1, songs: [song("x")] },
+          })
+        ).data;
+        const { url } = (await call(api, "POST", "share-upload", { token, body: { code, i: 0 } })).data;
+        objects.set(keyOf(url), 10);
+        await call(api, "POST", "share-done", { token, body: { code } });
+        assert.equal((await call(api, "GET", "share-open", { query: `?code=${code}` })).status, 200);
+        assert.deepEqual((await call(api, "POST", "share-revoke", { token, body: { code } })).data, { ok: true });
+        assert.equal((await call(api, "GET", "share-open", { query: `?code=${code}` })).status, 404);
+        assert.equal(objects.has(`s/${code}/0`), false);
+      });
+
+      test("nothing uploaded: done fails and the share is dropped", async () => {
+        const api = h();
+        const { token } = (await call(api, "POST", "login", { body: { session: SESSION_A } })).data;
+        const { code } = (
+          await call(api, "POST", "share-create", {
+            token,
+            body: { playlistId: "p3", name: "Jazz", days: 1, songs: [song("y")] },
+          })
+        ).data;
+        assert.equal((await call(api, "POST", "share-done", { token, body: { code } })).status, 400);
+        assert.equal((await call(api, "POST", "share-upload", { token, body: { code, i: 0 } })).status, 404);
+      });
     });
   });
 

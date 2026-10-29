@@ -2727,6 +2727,14 @@ body.pl-drag-on * {
   font-size: 1.2rem;
 }
 
+/* sharing a playlist: one card per open link */
+.share-dialog {
+  max-width: 460px;
+}
+.share-link input {
+  font-size: 0.8rem;
+}
+
 /* a message line that takes no room while it is empty (the playlist picker's name error) */
 .empty-hide:empty {
   display: none;

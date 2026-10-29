@@ -483,6 +483,9 @@
               <button class="btn btn-sm btn-outline-primary btn-icon" id="plShuffleBtn" title="Phát ngẫu nhiên">
                 <i class="bi bi-shuffle"></i>
               </button>
+              <button class="btn btn-sm btn-outline-secondary btn-icon d-none" id="plShareBtn" title="Chia sẻ playlist">
+                <i class="bi bi-share"></i>
+              </button>
               <button class="btn btn-sm btn-outline-secondary btn-icon" id="plRenameBtn" title="Đổi tên playlist">
                 <i class="bi bi-pencil"></i>
               </button>
@@ -828,6 +831,50 @@
             </form>
             <div class="small text-danger px-3 pt-2 empty-hide" id="plPickError" role="alert"></div>
             <div class="list-group list-group-flush" id="plPickList"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ share a playlist (browser build): a secret link, heard without signing in ============ -->
+    <div class="modal fade" id="shareModal" tabindex="-1" aria-labelledby="shareTitle" aria-hidden="true">
+      <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable share-dialog">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title text-truncate" id="shareTitle">
+              <i class="bi bi-share text-primary"></i> Chia sẻ playlist
+            </h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Đóng"></button>
+          </div>
+          <div class="modal-body">
+            <p class="small text-body-secondary mb-3">
+              Ai có link đều nghe được, không cần đăng nhập và không có nút tải. Các bài nhạc được sao chép lên máy chủ
+              tới khi link hết hạn hoặc bị thu hồi.
+            </p>
+            <div class="small text-danger mb-2 empty-hide" id="shareError" role="alert"></div>
+            <div class="d-flex flex-column gap-2 mb-3" id="shareLinks"></div>
+            <div id="shareNew">
+              <label class="form-label fw-semibold small" for="shareDays">Tạo link mới, hết hạn sau</label>
+              <div class="d-flex gap-2">
+                <select class="form-select form-select-sm" id="shareDays">
+                  <option value="1">1 ngày</option>
+                  <option value="7" selected>7 ngày</option>
+                  <option value="30">30 ngày</option>
+                </select>
+                <button class="btn btn-sm btn-primary text-nowrap" type="button" id="shareCreate">
+                  <i class="bi bi-link-45deg"></i> Tạo link
+                </button>
+              </div>
+            </div>
+            <div class="d-none" id="shareBusy">
+              <div class="d-flex justify-content-between small mb-1">
+                <span id="shareBusyText">Đang chuẩn bị…</span>
+                <button class="btn btn-link btn-sm p-0 text-danger" type="button" id="shareCancel">Huỷ</button>
+              </div>
+              <div class="progress" role="progressbar" aria-label="Đang sao chép" style="height: 6px">
+                <div class="progress-bar" id="shareBar" style="width: 0%"></div>
+              </div>
+            </div>
           </div>
         </div>
       </div>

@@ -13,7 +13,7 @@
 
 import { ACCOUNT_NAMES, accountOps, accountEmpty } from "../core.js";
 
-const TOKEN_KEY = "tdl.cloudToken"; // { token, account }
+export const TOKEN_KEY = "tdl.cloudToken"; // { token, account }
 const clone = (v) => (v === undefined ? undefined : JSON.parse(JSON.stringify(v)));
 const same = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 

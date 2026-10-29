@@ -122,6 +122,10 @@ for (const [from, to] of [
   fs.mkdirSync(path.dirname(path.join(OUT, to)), { recursive: true });
   fs.copyFileSync(path.join(ROOT, "shared/assets", from), path.join(OUT, to));
 }
+// the page of a shared playlist (/s/<code>, a rewrite in vercel.json): no inline script either
+const sharePage = fs.readFileSync(path.join(ROOT, "public/share.html"), "utf8");
+if (/<script>/.test(sharePage)) throw new Error("public/share.html must not contain inline scripts");
+fs.writeFileSync(path.join(OUT, "share.html"), sharePage);
 // for search engines: what to crawl, and the page's address
 for (const file of ["robots.txt", "sitemap.xml", "favicon.ico"])
   fs.copyFileSync(path.join(ROOT, "public", file), path.join(OUT, file));

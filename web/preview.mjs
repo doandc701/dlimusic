@@ -52,12 +52,13 @@ const cloud = createCloudApi({ env: cloudEnv, verify: verifyWithTelegram });
 const server = http
   .createServer((req, res) => {
     const url = new URL(req.url, "http://x");
-    const cloudAction = /^\/api\/cloud\/([a-z]+)$/.exec(url.pathname)?.[1];
+    const cloudAction = /^\/api\/cloud\/([a-z-]+)$/.exec(url.pathname)?.[1];
     if (cloudAction) return cloud(req, res, cloudAction);
     let file = path.normalize(path.join(DIST, decodeURIComponent(url.pathname)));
     if (!file.startsWith(DIST)) return res.writeHead(403).end();
     if (url.pathname === "/" || (fs.existsSync(file) && fs.statSync(file).isDirectory()))
       file = path.join(DIST, "index.html");
+    if (/^\/s\/[\w-]+\/?$/.test(url.pathname)) file = path.join(DIST, "share.html"); // vercel.json "rewrites"
     for (const r of rules) if (r.re.test(url.pathname)) for (const h of r.headers) res.setHeader(h.key, h.value);
     if (!fs.existsSync(file)) return res.writeHead(404).end("Not found");
     res.writeHead(200, { "Content-Type": TYPES[path.extname(file)] || "application/octet-stream" });

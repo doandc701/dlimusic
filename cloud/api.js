@@ -17,6 +17,7 @@
 //   POST /api/cloud/logout   { keepSession? }         -> { ok }        (forget the session, revoke the token;
 //                                                                         keepSession: the token only)
 //   GET  /api/cloud/status                            -> { enabled }   (no token needed)
+//   /api/cloud/share-*                                 shared playlists (cloud/share.js)
 
 import {
   openDb,
@@ -34,6 +35,7 @@ import {
   isMongoUri,
 } from "./common.js";
 import { readAccount, joinAccount, checkOps, applyOps } from "./account.js";
+import { shareRoutes } from "./share.js";
 
 const MAX_BODY = 2 * 1024 * 1024;
 
@@ -42,8 +44,9 @@ const fail = (status, error, code) => Object.assign(new Error(error), { status, 
 /**
  * @param env      { MONGODB_URI, MONGODB_DB, TDL_SECRET, TG_API_ID, TG_API_HASH }
  * @param verify   async (session, creds) => account id; asks Telegram (injected in tests)
+ * @param fetchFn  fetch, for Cloudflare R2 (injected in tests)
  */
-export function createCloudApi({ env, verify }) {
+export function createCloudApi({ env, verify, fetchFn, now }) {
   const ready = isMongoUri(env.MONGODB_URI) && String(env.TDL_SECRET || "").length >= 16;
   const key = ready ? keyFromSecret(env.TDL_SECRET) : null;
   const builtin = () => {
@@ -135,6 +138,8 @@ export function createCloudApi({ env, verify }) {
       await revokeToken(d, token);
       return { ok: true };
     },
+
+    ...shareRoutes({ env, db, account, fail, fetchFn, now }),
   };
 
   /** Node (req, res) handler; `action` is the last path segment. */

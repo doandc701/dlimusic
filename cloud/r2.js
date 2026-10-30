@@ -11,6 +11,11 @@ import crypto from "node:crypto";
 
 const hmac = (key, text) => crypto.createHmac("sha256", key).update(text).digest();
 const sha256 = (text) => crypto.createHash("sha256").update(text).digest("hex");
+/** "R2 GET 403 InvalidAccessKeyId": R2's own code with the status (the logs say why, e.g. a revoked token). */
+const r2Error = async (method, res) => {
+  const code = /<Code>([^<]{1,80})<\/Code>/.exec(await res.text().catch(() => ""))?.[1];
+  return new Error(`R2 ${method} ${res.status}${code ? ` ${code}` : ""}`);
+};
 // RFC 3986: encodeURIComponent leaves !'()* alone, S3 wants them escaped
 const enc = (s) => encodeURIComponent(s).replace(/[!'()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
 
@@ -86,19 +91,19 @@ export function createBucket(config, { fetchFn = (...a) => fetch(...a), now = ()
   return {
     async put(key, body, type) {
       const res = await fetchFn(sign("PUT", key, 300), { method: "PUT", body, headers: { "Content-Type": type } });
-      if (!res.ok) throw new Error(`R2 PUT ${res.status}`);
+      if (!res.ok) throw await r2Error("PUT", res);
     },
     /** Bytes [start, end] of an object, as a stream (passed on as they come); null when it is not there. */
     async stream(key, start, end) {
       const res = await fetchFn(sign("GET", key, 300), { headers: { Range: `bytes=${start}-${end}` } });
       if (res.status === 404) return null;
-      if (!res.ok) throw new Error(`R2 GET ${res.status}`);
+      if (!res.ok) throw await r2Error("GET", res);
       return res.body;
     },
     /** Remove one object (a missing one is fine). */
     async remove(key) {
       const res = await fetchFn(sign("DELETE", key, 300), { method: "DELETE" });
-      if (!res.ok && res.status !== 404) throw new Error(`R2 DELETE ${res.status}`);
+      if (!res.ok && res.status !== 404) throw await r2Error("DELETE", res);
     },
     /**
      * Remove many objects (missing ones are fine): DeleteObjects, 1000 keys a request; when R2 does not take it

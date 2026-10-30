@@ -186,7 +186,9 @@ export function shareRoutes({ env, db, account, fail, key, fetchFn, now = () => 
       return await fn();
     } catch (err) {
       if (err.status) throw err;
-      console.error("share: R2:", err?.message || err);
+      // fetch's own failure says why only in its cause (DNS, refused, TLS…)
+      const cause = err?.cause && [err.cause.code, err.cause.message].filter(Boolean).join(" ");
+      console.error("share: R2:", err?.message || err, cause ? `(${cause})` : "");
       throw fail(502, "Không kết nối được kho nhạc chia sẻ", "SHARE_DOWN");
     }
   };

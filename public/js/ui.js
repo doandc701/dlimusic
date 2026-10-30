@@ -2340,6 +2340,7 @@ async function editPlaylist(change) {
 /** The playlists changed (here or on another device): the entry, the grid, the open playlist, the player. */
 function afterPlaylistsChanged(change = null) {
   renderPlEntry();
+  if ($("shareModal").classList.contains("show")) renderShare(); // "Playlist đã thay đổi…" follows
   if (state.chat === PL_HOME) renderPlGrid();
   // the player: a song taken out is skipped (liveOrder), a new order is followed
   const ps = state.playScan;
@@ -2491,9 +2492,11 @@ $("plShareBtn").addEventListener("click", () => openPlaylist() && openShare(open
 const shareModal = new bootstrap.Modal($("shareModal"));
 const share = {
   id: null, // the playlist in the dialog
-  links: [], // the account's open links { code, playlistId, name, count, ready, expiresAt, link }
+  // the account's open links { code, playlistId, name, count, ready, expiresAt, maxExpiresAt, refs, skipped, link }
+  links: [],
   uploads: new Map(), // link code -> { done, total, failed } while its songs are sent (goes on when the dialog closes)
   making: null, // the playlist whose link is being made (its songs are read first)
+  busyCode: null, // the link being synced
 };
 
 const shareDate = (ms) =>
@@ -2531,40 +2534,97 @@ async function openShare(id) {
   renderShare();
 }
 
+/**
+ * How the link stands against its playlist now: songs added since (not counting those that are not shared: not music,
+ * too big, gone), songs taken out, a new order. Nothing: it matches.
+ */
+function shareChanges(l) {
+  const p = playlistById(l.playlistId);
+  if (!p || !l.refs) return null;
+  const inLink = new Set(l.refs);
+  const known = new Set([...l.refs, ...(l.skipped || [])]);
+  const now = new Set(p.songs);
+  const added = p.songs.filter((ref) => !known.has(ref)).length;
+  const removed = l.refs.filter((ref) => !now.has(ref)).length;
+  const order = p.songs.filter((ref) => inLink.has(ref));
+  const kept = l.refs.filter((ref) => now.has(ref));
+  return { added, removed, moved: order.some((ref, i) => ref !== kept[i]) };
+}
+
 function shareStatus(l) {
   const u = share.uploads.get(l.code);
   if (u)
-    return `<div class="d-flex align-items-center gap-2 mt-2">
+    return `<div class="d-flex align-items-center gap-2">
         <div class="progress flex-grow-1" role="progressbar" aria-label="${t("Đang tải lên")}" style="height: 6px">
           <div class="progress-bar" style="width: ${u.total ? (u.done / u.total) * 100 : 0}%"></div>
         </div>
         <span class="small text-body-secondary text-nowrap">${t("Đã tải lên {done}/{total} bài", { done: u.done, total: u.total })}</span>
       </div>
       <div class="small text-body-secondary mt-1">${t("Người nhận nghe được ngay các bài đã tải lên. Giữ trang này mở tới khi xong.")}</div>`;
+  const c = shareChanges(l);
+  const parts = c
+    ? [
+        c.added && t("+{n} bài mới", { n: c.added }),
+        c.removed && t("−{n} bài đã bỏ", { n: c.removed }),
+        c.moved && t("thứ tự đã đổi"),
+      ].filter(Boolean)
+    : [];
+  if (parts.length)
+    return `<div class="small share-note text-warning-emphasis"><i class="bi bi-arrow-repeat"></i> ${t("Playlist đã thay đổi: {what}. Bấm Đồng bộ để cập nhật link.", { what: parts.join(", ") })}</div>`;
   if (l.ready < l.count)
-    return `<div class="small text-warning-emphasis mt-1">${t("{ready}/{count} bài sẵn sàng, phần còn lại sẽ được tải tiếp", { ready: l.ready, count: l.count })}</div>`;
-  return "";
+    return `<div class="small share-note text-warning-emphasis"><i class="bi bi-hourglass-split"></i> ${t("{ready}/{count} bài sẵn sàng, phần còn lại sẽ được tải tiếp", { ready: l.ready, count: l.count })}</div>`;
+  return `<div class="small share-note text-success"><i class="bi bi-check2-circle"></i> ${t("Đã khớp với playlist")}</div>`;
+}
+
+function shareCard(l) {
+  const c = shareChanges(l);
+  const changed = !!c && (c.added || c.removed || c.moved);
+  const busy = share.busyCode === l.code;
+  const atMax = l.maxExpiresAt && l.expiresAt >= l.maxExpiresAt;
+  return `<div class="share-link border rounded-3 p-2 p-sm-3" data-code="${esc(l.code)}">
+    <div class="input-group input-group-sm">
+      <input class="form-control" readonly value="${esc(l.link)}" aria-label="${t("Link chia sẻ")}">
+      <button class="btn btn-primary" type="button" data-share-copy="${esc(l.link)}" title="${t("Sao chép link")}"><i class="bi bi-copy"></i></button>
+    </div>
+    <div class="share-meta small text-body-secondary">
+      <span><i class="bi bi-music-note-list"></i> ${t("{n} bài", { n: l.count })}</span>
+      <span><i class="bi bi-clock"></i> ${t("Hết hạn {date}", { date: shareDate(l.expiresAt) })}</span>
+    </div>
+    ${shareStatus(l)}
+    <div class="share-actions">
+      <div class="d-flex align-items-center gap-2">
+        <button class="btn btn-sm ${changed ? "btn-primary" : "btn-outline-primary"} text-nowrap" type="button" data-share-sync="${esc(l.code)}"
+          title="${t("Tải lên bài mới thêm vào playlist, gỡ bài đã bỏ khỏi playlist")}" ${busy || share.uploads.has(l.code) ? "disabled" : ""}>
+          <i class="bi bi-arrow-repeat${busy ? " spin" : ""}"></i> ${busy ? t("Đang đồng bộ…") : t("Đồng bộ")}</button>
+        <button class="btn btn-sm btn-outline-danger share-revoke text-nowrap ms-auto" type="button" data-share-revoke="${esc(l.code)}"><i class="bi bi-x-lg"></i> ${t("Thu hồi")}</button>
+      </div>
+      <div class="d-flex align-items-center flex-wrap gap-2 mt-2">
+        <span class="small text-body-secondary">${t("Gia hạn thêm")}</span>
+        <div class="input-group input-group-sm w-auto">
+          <select class="form-select" data-share-days aria-label="${t("Gia hạn thêm")}" ${atMax ? "disabled" : ""}>
+            <option value="1">${t("1 ngày")}</option><option value="7" selected>${t("7 ngày")}</option><option value="30">${t("30 ngày")}</option>
+          </select>
+          <button class="btn btn-outline-primary text-nowrap" type="button" data-share-extend="${esc(l.code)}" ${atMax ? "disabled" : ""}>
+            <i class="bi bi-calendar-plus"></i> ${t("Gia hạn")}</button>
+        </div>
+        ${atMax ? `<span class="small text-body-secondary">${t("Đã đạt thời hạn tối đa 90 ngày")}</span>` : ""}
+      </div>
+    </div></div>`;
 }
 
 function renderShare() {
-  $("shareLinks").innerHTML = share.links
-    .filter((l) => l.playlistId === share.id)
-    .map(
-      (l) => `<div class="share-link border rounded p-2">
-        <div class="input-group input-group-sm">
-          <input class="form-control" readonly value="${esc(l.link)}" aria-label="${t("Link chia sẻ")}">
-          <button class="btn btn-primary" type="button" data-share-copy="${esc(l.link)}" title="${t("Sao chép link")}"><i class="bi bi-copy"></i></button>
-        </div>
-        ${shareStatus(l)}
-        <div class="d-flex justify-content-between align-items-center gap-2 small mt-1">
-          <span class="text-body-secondary">${t("{n} bài · hết hạn {date}", { n: l.count, date: shareDate(l.expiresAt) })}</span>
-          <button class="btn btn-sm btn-outline-danger share-revoke text-nowrap" type="button" data-share-revoke="${esc(l.code)}"><i class="bi bi-x-lg"></i> ${t("Thu hồi")}</button>
-        </div></div>`,
-    )
-    .join("");
+  const links = share.links.filter((l) => l.playlistId === share.id);
+  $("shareLinks").innerHTML = links.map(shareCard).join("");
+  // a link already: it is synced / extended, no second one
   const making = share.making === share.id;
-  show($("shareNew"), !making);
+  show($("shareNew"), !making && !links.length);
   show($("shareBusy"), making);
+}
+
+/** The link's details from an answer (sync / extend), in place. */
+function updateShareLink(r) {
+  const i = share.links.findIndex((l) => l.code === r.code);
+  if (i >= 0) share.links[i] = { ...share.links[i], ...r };
 }
 
 $("shareCreate").addEventListener("click", async () => {
@@ -2577,10 +2637,10 @@ $("shareCreate").addEventListener("click", async () => {
     share.links.unshift(r);
     if (!share.uploads.has(r.code)) share.uploads.set(r.code, { done: 0, total: r.count, failed: 0 });
     toast(
-      r.skipped
-        ? t("Đã tạo link chia sẻ, {n} bài không chia sẻ được", { n: r.skipped })
+      r.skippedCount
+        ? t("Đã tạo link chia sẻ, {n} bài không chia sẻ được", { n: r.skippedCount })
         : t("Đã tạo link, đang tải nhạc lên"),
-      r.skipped ? "warn" : "success",
+      r.skippedCount ? "warn" : "success",
     );
   } catch (err) {
     if (share.id === id && $("shareModal").classList.contains("show")) $("shareError").textContent = err.message;
@@ -2594,7 +2654,7 @@ $("shareCreate").addEventListener("click", async () => {
 /** A "share" event: how the upload of a link goes. */
 function shareProgress(d) {
   const link = share.links.find((l) => l.code === d.code);
-  if (link) link.ready = Math.max(link.ready || 0, d.done);
+  if (link) link.ready = d.done;
   if (!d.finished) share.uploads.set(d.code, d);
   else {
     share.uploads.delete(d.code);
@@ -2613,6 +2673,52 @@ $("shareLinks").addEventListener("click", async (e) => {
     } catch {
       copy.closest(".share-link").querySelector("input").select(); // no clipboard: selected for Ctrl+C
     }
+    return;
+  }
+  const sync = e.target.closest("[data-share-sync]");
+  if (sync) {
+    const code = sync.dataset.shareSync;
+    $("shareError").textContent = "";
+    share.busyCode = code;
+    renderShare();
+    try {
+      const r = await api("/api/shares/sync", { code, id: share.id });
+      updateShareLink(r);
+      if (r.uploading && !share.uploads.has(code))
+        share.uploads.set(code, { done: r.ready, total: r.count, failed: 0 });
+      toast(
+        r.added || r.removed
+          ? t("Đã đồng bộ: thêm {added} bài, bỏ {removed} bài", { added: r.added, removed: r.removed })
+          : t("Link đã khớp với playlist"),
+        "success",
+      );
+    } catch (err) {
+      $("shareError").textContent = err.message;
+    } finally {
+      share.busyCode = null;
+      renderShare();
+    }
+    return;
+  }
+  const extend = e.target.closest("[data-share-extend]");
+  if (extend) {
+    const code = extend.dataset.shareExtend;
+    const days = Number(extend.closest(".share-link").querySelector("[data-share-days]").value);
+    $("shareError").textContent = "";
+    extend.disabled = true;
+    try {
+      const r = await api("/api/shares/extend", { code, days });
+      updateShareLink(r);
+      toast(
+        r.capped
+          ? t("Đã gia hạn tới {date} (tối đa 90 ngày)", { date: shareDate(r.expiresAt) })
+          : t("Đã gia hạn tới {date}", { date: shareDate(r.expiresAt) }),
+        "success",
+      );
+    } catch (err) {
+      $("shareError").textContent = err.message;
+    }
+    renderShare();
     return;
   }
   const revoke = e.target.closest("[data-share-revoke]");

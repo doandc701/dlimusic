@@ -20,8 +20,9 @@
   const code =
     /^\/s\/([\w-]{16})\/?$/.exec(location.pathname)?.[1] || new URLSearchParams(location.search).get("code") || "";
   const VOLUME_KEY = "shareVolume"; // this browser's volume on shared pages
-  const PLAYBACK_KEY = "tdl.sharePlayback"; // { code, i, time, at }: a reload goes on where it was
-  const POLL_MS = 15_000;
+  const PLAYBACK_KEY = "tdl.sharePlayback"; // { code, id, time, at }: a reload goes on where it was
+  const POLL_MS = 15_000; // while songs are being uploaded
+  const POLL_IDLE_MS = 60_000; // else: the owner may sync the playlist (songs added, taken out, moved)
 
   // the footer, like the main page's: © the visitor's year, the slogan
   // (only "tap to play": nothing is saved from a shared playlist)
@@ -428,7 +429,7 @@
   const AHEAD = 2; // songs fetched ahead of the one playing
   const KEEP = 4; // whole songs kept in this page (the playing one, the next ones, the one before)
   const PARALLEL = 3; // pieces of a song fetched at a time
-  const wholes = new Map(); // song index -> { url (blob:), job, ctl }
+  const wholes = new Map(); // song id -> { url (blob:), job, ctl } (ids, not places: the owner may sync the list)
 
   /** Remember a song's signed URL (from the list or share-play), with when it was given. */
   function setUrl(i, url) {
@@ -448,8 +449,8 @@
 
   /** Song i fetched whole into this page (a blob: URL), its pieces 3 at a time; resolves when there. */
   function fetchWhole(i) {
-    if (wholes.has(i)) return wholes.get(i).job;
     const s = songs[i];
+    if (wholes.has(s?.id)) return wholes.get(s.id).job;
     if (!s?.ready || !s.size) return Promise.resolve();
     const w = { url: null, ctl: new AbortController() };
     const piece = async (k, url) => {
@@ -477,8 +478,8 @@
       };
       await Promise.all(Array.from({ length: Math.min(PARALLEL, n) }, worker));
       w.url = URL.createObjectURL(new Blob(parts, { type }));
-    })().catch(() => wholes.get(i) === w && wholes.delete(i)); // streamed when it plays; asked again next time
-    wholes.set(i, w);
+    })().catch(() => wholes.get(s.id) === w && wholes.delete(s.id)); // streamed when it plays; asked next time
+    wholes.set(s.id, w);
     return w.job;
   }
 
@@ -492,14 +493,15 @@
 
   /** Only what is wanted now is fetched and kept: the playing song, the next ones (others stop / go). */
   function keepWholes(i) {
-    const wanted = new Set([i, ...aheadOf(i)]);
+    const wanted = new Set([i, ...aheadOf(i)].map((k) => songs[k]?.id));
+    const playing = songs[current]?.id;
     const kept = [...wholes.keys()].filter((k) => wanted.has(k) || wholes.get(k).url);
     for (const [k, w] of wholes) {
       if (wanted.has(k)) continue;
       if (!w.url) {
         w.ctl.abort();
         wholes.delete(k);
-      } else if (kept.length > KEEP && k !== current) {
+      } else if (kept.length > KEEP && k !== playing) {
         URL.revokeObjectURL(w.url);
         wholes.delete(k);
         kept.splice(kept.indexOf(k), 1);
@@ -630,8 +632,8 @@
     keepWholes(i);
     try {
       // fetched ahead: from this page, at once; else streamed piece by piece
-      const url = wholes.get(i)?.url || (await songUrl(i, retried));
-      if (!wholes.get(i)?.url) await swReady;
+      const url = wholes.get(songs[i].id)?.url || (await songUrl(i, retried));
+      if (!wholes.get(songs[i].id)?.url) await swReady;
       if (current !== i) return; // another song was chosen meanwhile
       player.src = url;
       if (at) player.currentTime = at;
@@ -937,7 +939,10 @@
   function savePlayback(force = false) {
     if (current < 0 || (!force && Date.now() - playbackSaved < 2000)) return;
     playbackSaved = Date.now();
-    store(PLAYBACK_KEY, JSON.stringify({ code, i: current, time: player.currentTime || 0, at: Date.now() }));
+    store(
+      PLAYBACK_KEY,
+      JSON.stringify({ code, id: songs[current]?.id, time: player.currentTime || 0, at: Date.now() }),
+    );
   }
   player.addEventListener("timeupdate", () => savePlayback());
   for (const evt of ["play", "pause"]) player.addEventListener(evt, () => savePlayback(true));
@@ -949,8 +954,9 @@
     } catch {
       // not ours
     }
-    if (!saved || saved.code !== code || Date.now() - saved.at > 24 * 3600_000 || !songs[saved.i]?.ready) return;
-    play(saved.i, saved.time, { reveal: true, paused: true }); // ▶ goes on from there (no sound without a tap)
+    const i = songs.findIndex((s) => s.id === saved?.id);
+    if (!saved || saved.code !== code || Date.now() - saved.at > 24 * 3600_000 || !songs[i]?.ready) return;
+    play(i, saved.time, { reveal: true, paused: true }); // ▶ goes on from there (no sound without a tap)
   }
 
   // ---------- events ----------
@@ -1115,16 +1121,22 @@
 
   // ---------- open the link, then follow the upload ----------
 
-  /** The songs uploaded since: playable now (and the one waited for starts). */
+  /**
+   * The list read again: the songs uploaded since are playable (the one waited for starts); a list the owner synced
+   * (songs added, taken out, moved) replaces this one, the song playing goes on (or stops, taken out).
+   */
   async function poll() {
+    if (goneShown) return;
     try {
       const data = await get("share-open", { code });
-      data.songs.forEach((s, i) => {
-        if (!songs[i]) return;
-        songs[i].ready = s.ready;
-        songs[i].size = s.size;
-        if (s.url) setUrl(i, s.url);
-      });
+      const same = data.songs.length === songs.length && data.songs.every((x, i) => x.id === songs[i].id);
+      if (same)
+        data.songs.forEach((x, i) => {
+          songs[i].ready = x.ready;
+          songs[i].size = x.size;
+          if (x.url) setUrl(i, x.url);
+        });
+      else relist(data.songs);
     } catch (err) {
       if (isGone(err)) return gone(err);
     }
@@ -1132,7 +1144,33 @@
     renderList();
     if (current >= 0) renderPlayer();
     if (waiting !== null && songs[waiting]?.ready) play(waiting, 0, { reveal: true });
-    if (songs.some((s) => !s.ready) && Date.now() < expiresAt) setTimeout(poll, POLL_MS);
+    if (Date.now() < expiresAt) setTimeout(poll, songs.some((x) => !x.ready) ? POLL_MS : POLL_IDLE_MS);
+  }
+
+  /** A new list (the owner synced): places found again by the songs' ids. */
+  function relist(list) {
+    const playingId = songs[current]?.id;
+    const waitingId = waiting !== null ? songs[waiting]?.id : undefined;
+    songs = list;
+    songs.forEach((x, i) => x.url && setUrl(i, x.url));
+    current = songs.findIndex((x) => x.id === playingId);
+    if (playingId !== undefined && current < 0) {
+      // the song playing was taken out of the playlist (and its file with it)
+      player.pause();
+      player.removeAttribute("src");
+      show($("playerBar"), false);
+      toast(t("Bài đang phát đã được gỡ khỏi playlist"), "info");
+    }
+    const w = songs.findIndex((x) => x.id === waitingId);
+    waiting = w >= 0 ? w : null;
+    order = orderFrom(current);
+    for (const id of [...wholes.keys()])
+      if (!songs.some((x) => x.id === id)) {
+        const old = wholes.get(id);
+        old.ctl.abort();
+        if (old.url) URL.revokeObjectURL(old.url);
+        wholes.delete(id);
+      }
   }
 
   async function start() {
@@ -1155,7 +1193,7 @@
     renderInfo();
     setSort("default");
     restorePlayback();
-    if (songs.some((s) => !s.ready)) setTimeout(poll, POLL_MS);
+    setTimeout(poll, songs.some((x) => !x.ready) ? POLL_MS : POLL_IDLE_MS);
     watchExpiry();
   }
 

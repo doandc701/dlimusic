@@ -526,6 +526,7 @@ describe("MongoDB storage", () => {
         R2_BUCKET: "dlimusic",
       };
       const objects = new Map(); // R2: key -> Buffer
+      let r2Batch = "ok"; // how R2 answers DeleteObjects: "ok" | "refused" (not through a signed URL) | "partly"
       const keyOf = (url) => decodeURIComponent(new URL(url).pathname).replace(/^\/dlimusic\/?/, "");
       const r2 = async (url, { method = "GET", body, headers = {} } = {}) => {
         const u = new URL(url);
@@ -533,10 +534,21 @@ describe("MongoDB storage", () => {
         assert.ok(u.searchParams.get("X-Amz-Signature"));
         if (method === "POST" && u.searchParams.has("delete")) {
           assert.ok(headers["Content-MD5"]);
-          for (const m of String(body).matchAll(/<Key>([^<]+)<\/Key>/g)) objects.delete(m[1]);
-          return new Response("<DeleteResult/>", { status: 200 });
+          if (r2Batch === "refused") return new Response("NotImplemented", { status: 501 });
+          const keys = [...String(body).matchAll(/<Key>([^<]+)<\/Key>/g)].map((m) => m[1]);
+          // "partly": the first key is reported as not removed (quiet mode lists only those)
+          const failed = r2Batch === "partly" ? keys.slice(0, 1) : [];
+          for (const k of keys) if (!failed.includes(k)) objects.delete(k);
+          return new Response(
+            `<DeleteResult>${failed.map((k) => `<Error><Key>${k}</Key><Code>InternalError</Code></Error>`).join("")}</DeleteResult>`,
+            { status: 200 },
+          );
         }
         const key = keyOf(url);
+        if (method === "DELETE") {
+          objects.delete(key);
+          return new Response(null, { status: 204 });
+        }
         if (method === "PUT") {
           objects.set(key, Buffer.from(body));
           return new Response(null, { status: 200 });
@@ -550,10 +562,10 @@ describe("MongoDB storage", () => {
         createCloudApi({ env: { ...env(), MONGODB_DB: "shares", ...R2 }, verify, fetchFn: r2, now: () => clock });
       const song = (title, size, ref) => ({ title, performer: "Ca sĩ", duration: 200, size, type: "audio/mpeg", ref });
       const bytes = (n, seed) => Buffer.from(Array.from({ length: n }, (_, i) => (i * 7 + seed) % 256));
-      const put = (api, token, code, i, k, body) =>
+      const put = (api, token, code, id, k, body) =>
         call(api, "POST", "share-put", {
           token,
-          query: `?code=${code}&i=${i}&k=${k}`,
+          query: `?code=${code}&id=${id}&k=${k}`,
           raw: body,
           type: "application/octet-stream",
         });
@@ -634,7 +646,7 @@ describe("MongoDB storage", () => {
         assert.equal((await put(api, token, code, 1, 0, b)).status, 200);
         assert.equal((await put(api, token, code, 0, 0, a.subarray(0, SHARE_CHUNK))).status, 200);
         assert.deepEqual((await call(api, "POST", "share-pending", { token, body: { code } })).data.songs, [
-          { i: 0, ref: "1|1" },
+          { id: 0, ref: "1|1" },
         ]);
         assert.equal((await put(api, token, code, 0, 1, a.subarray(SHARE_CHUNK))).status, 200);
         open = await call(api, "GET", "share-open", { query: `?code=${code}` });
@@ -672,7 +684,7 @@ describe("MongoDB storage", () => {
         assert.equal(r.headers["content-range"], `bytes ${long - 5}-${long - 1}/${long}`);
         assert.equal((await audio(q, `bytes=${long}-`)).status, 416);
         assert.equal((await audio(q.replace(/sig=[^&]+/, "sig=x"))).status, 403, "a forged URL");
-        assert.equal((await audio(q.replace(/i=0/, "i=1"))).status, 403, "the signature is for one song");
+        assert.equal((await audio(q.replace(/id=0/, "id=1"))).status, 403, "the signature is for one song");
         assert.equal((await audio(q.replace(/n=\d+/, "n=99"))).status, 403, "and its size");
         assert.equal((await audio(q.replace(/t=[^&]+/, "t=text%2Fhtml"))).status, 403, "and its type");
         assert.equal(r.headers["cache-control"], "private, max-age=600", "the browser may keep a piece (seeking back)");
@@ -696,6 +708,170 @@ describe("MongoDB storage", () => {
           "removed by the sweep: not found",
         );
         assert.equal((await call(api, "GET", "share-open", { query: "?code=nope" })).status, 404);
+      });
+
+      for (const answer of ["refused", "partly"])
+        test(`revoking removes every song from R2 even when DeleteObjects is ${answer}: one DELETE each`, async () => {
+          const api = h();
+          const { token } = (await call(api, "POST", "login", { body: { session: SESSION_A } })).data;
+          const { code } = (
+            await call(api, "POST", "share-create", {
+              token,
+              body: { playlistId: "p9", name: "Pop", days: 1, songs: [song("x", 10, "2|5"), song("y", 10, "2|6")] },
+            })
+          ).data.share;
+          await put(api, token, code, 0, 0, bytes(10, 3));
+          await put(api, token, code, 1, 0, bytes(10, 4));
+          r2Batch = answer;
+          try {
+            assert.deepEqual((await call(api, "POST", "share-revoke", { token, body: { code } })).data, { ok: true });
+          } finally {
+            r2Batch = "ok";
+          }
+          assert.deepEqual(
+            [...objects.keys()].filter((k) => k.startsWith(`s/${code}/`)),
+            [],
+          );
+          assert.equal((await call(api, "GET", "share-open", { query: `?code=${code}` })).data.code, "SHARE_GONE");
+        });
+
+      test("sync: new songs are added (to upload), those taken out leave the link and R2, the rest stay as they are", async () => {
+        const api = h();
+        const { token } = (await call(api, "POST", "login", { body: { session: SESSION_A } })).data;
+        const { code } = (
+          await call(api, "POST", "share-create", {
+            token,
+            body: {
+              playlistId: "s1",
+              name: "Sync",
+              days: 7,
+              songs: [song("a", 10, "3|1"), song("b", 10, "3|2"), song("c", 10, "3|3")],
+              skipped: ["3|9"],
+            },
+          })
+        ).data.share;
+        for (const id of [0, 1, 2]) await put(api, token, code, id, 0, bytes(10, id));
+        let list = (await call(api, "GET", "share-list", { token })).data.shares.find((x) => x.code === code);
+        assert.deepEqual([list.refs, list.skipped], [["3|1", "3|2", "3|3"], ["3|9"]], "what the dialog compares with");
+
+        // the playlist now: c first, a, a new d; b taken out
+        const r = await call(api, "POST", "share-sync", {
+          token,
+          body: { code, songs: [song("c", 10, "3|3"), song("a", 10, "3|1"), song("d", 20, "3|4")], skipped: ["3|9"] },
+        });
+        assert.equal(r.status, 200);
+        assert.deepEqual([r.data.added, r.data.removed], [1, 1]);
+        assert.deepEqual(r.data.pending, [{ id: 3, ref: "3|4" }], "only the new song is uploaded");
+        assert.equal(objects.has(`s/${code}/1/0`), false, "b left R2");
+        assert.equal(objects.has(`s/${code}/0/0`) && objects.has(`s/${code}/2/0`), true, "a and c stayed");
+        let open = (await call(api, "GET", "share-open", { query: `?code=${code}` })).data;
+        assert.deepEqual(
+          open.songs.map((x) => [x.title, x.id, x.ready]),
+          [
+            ["c", 2, true],
+            ["a", 0, true],
+            ["d", 3, false],
+          ],
+          "the playlist's order; the songs keep their place in R2",
+        );
+        // c still plays from where it was
+        const c = await call(api, "GET", "share-audio", {
+          query: open.songs[0].url.slice(open.songs[0].url.indexOf("?")),
+        });
+        assert.ok(bytes(10, 2).equals(c.data));
+        // the new one uploads by its id
+        assert.equal((await put(api, token, code, 3, 0, bytes(20, 3))).status, 200);
+        assert.equal((await put(api, token, code, 1, 0, bytes(10, 1))).data.code, "SHARE_SONG_GONE", "b is gone");
+        open = (await call(api, "GET", "share-open", { query: `?code=${code}` })).data;
+        assert.deepEqual(
+          open.songs.map((x) => x.ready),
+          [true, true, true],
+        );
+        // nothing changed: nothing to do
+        const again = await call(api, "POST", "share-sync", {
+          token,
+          body: { code, songs: [song("c", 10, "3|3"), song("a", 10, "3|1"), song("d", 20, "3|4")] },
+        });
+        assert.deepEqual([again.data.added, again.data.removed, again.data.pending], [0, 0, []]);
+        assert.equal(
+          (await call(api, "POST", "share-sync", { token, body: { code, songs: [] } })).status,
+          400,
+          "an empty playlist does not empty the link",
+        );
+      });
+
+      test("extend: days more from the current end, 90 days after the link was made at most", async () => {
+        const api = h();
+        const { token } = (await call(api, "POST", "login", { body: { session: SESSION_A } })).data;
+        const made = clock.getTime();
+        const { code, expiresAt } = (
+          await call(api, "POST", "share-create", {
+            token,
+            body: { playlistId: "e1", name: "Ext", days: 30, songs: [song("a", 10, "4|1")] },
+          })
+        ).data.share;
+        assert.equal(expiresAt, made + 30 * 86400_000);
+        const extend = (days, t = token) => call(api, "POST", "share-extend", { token: t, body: { code, days } });
+        assert.equal((await extend(3)).status, 400);
+        let r = await extend(7);
+        assert.equal(r.data.share.expiresAt, made + 37 * 86400_000, "added to the current end");
+        assert.equal(r.data.capped, false);
+        const other = (await call(api, "POST", "login", { body: { session: SESSION_B } })).data.token;
+        assert.equal((await extend(7, other)).status, 404, "not B's link");
+        await extend(30);
+        r = await extend(30);
+        assert.equal(r.data.share.expiresAt, made + 90 * 86400_000, "90 days at most");
+        assert.equal(r.data.capped, true);
+        assert.equal((await extend(1)).data.code, "SHARE_MAX");
+        assert.equal(
+          (await call(api, "GET", "share-open", { query: `?code=${code}` })).data.expiresAt,
+          made + 90 * 86400_000,
+        );
+      });
+
+      test("a link made before song ids keeps playing its songs, and gets ids on the owner's next request", async () => {
+        const api = h();
+        const { token } = (await call(api, "POST", "login", { body: { session: SESSION_A } })).data;
+        const { code } = (
+          await call(api, "POST", "share-create", {
+            token,
+            body: { playlistId: "l1", name: "Old", days: 7, songs: [song("a", 10, "5|1"), song("b", 10, "5|2")] },
+          })
+        ).data.share;
+        await put(api, token, code, 0, 0, bytes(10, 7));
+        // as such a link is stored: no ids, no nextId
+        const col = raw.db("shares").collection("shares");
+        const doc = await col.findOne({ _id: code });
+        await col.updateOne(
+          { _id: code },
+          { $set: { songs: doc.songs.map(({ id, ...x }) => x) }, $unset: { nextId: "", skipped: "" } },
+        );
+        let open = (await call(api, "GET", "share-open", { query: `?code=${code}` })).data;
+        assert.deepEqual(
+          open.songs.map((x) => x.id),
+          [0, 1],
+        );
+        const a = await call(api, "GET", "share-audio", {
+          query: open.songs[0].url.slice(open.songs[0].url.indexOf("?")),
+        });
+        assert.ok(bytes(10, 7).equals(a.data), "played from where it was");
+        // an upload sent the old way (i = index) still lands in its place
+        const old = await call(api, "POST", "share-put", {
+          token,
+          query: `?code=${code}&i=1&k=0`,
+          raw: bytes(10, 8),
+          type: "application/octet-stream",
+        });
+        assert.equal(old.status, 200);
+        const now = await col.findOne({ _id: code });
+        assert.deepEqual(
+          now.songs.map((x) => [x.id, x.ok]),
+          [
+            [0, true],
+            [1, true],
+          ],
+        );
+        assert.equal(now.nextId, 2);
       });
 
       test("revoking closes the link at once and removes its songs", async () => {

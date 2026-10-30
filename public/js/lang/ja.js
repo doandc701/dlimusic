@@ -577,5 +577,26 @@
     "Kết nối có vấn đề, hãy thử lại sau ít phút.": "接続に問題があります。数分後にもう一度お試しください。",
     "Link chia sẻ đã bị thu hồi": "共有リンクは取り消されました",
     "Link chia sẻ đã hết hạn": "共有リンクの有効期限が切れました",
+    "+{n} bài mới": "+{n} 曲追加",
+    "−{n} bài đã bỏ": "−{n} 曲削除",
+    "thứ tự đã đổi": "順番を変更",
+    "Playlist đã thay đổi: {what}. Bấm Đồng bộ để cập nhật link.":
+      "プレイリストが変更されました：{what}。「同期」でリンクを更新してください。",
+    "Đã khớp với playlist": "プレイリストと一致",
+    "Hết hạn {date}": "{date} まで",
+    "Tải lên bài mới thêm vào playlist, gỡ bài đã bỏ khỏi playlist":
+      "プレイリストに追加した曲をアップロードし、外した曲を削除します",
+    "Đang đồng bộ…": "同期中…",
+    "Đã đạt thời hạn tối đa 90 ngày": "最長 90 日に達しました",
+    "Gia hạn thêm": "延長",
+    "Gia hạn": "延長",
+    "Đã đồng bộ: thêm {added} bài, bỏ {removed} bài": "同期しました：{added} 曲追加、{removed} 曲削除",
+    "Link đã khớp với playlist": "リンクはプレイリストと一致しています",
+    "Đã gia hạn tới {date} (tối đa 90 ngày)": "{date} まで延長しました（最長 90 日）",
+    "Đã gia hạn tới {date}": "{date} まで延長しました",
+    "Bài này không còn trong link chia sẻ": "この曲は共有リンクにもうありません",
+    "Link đã đạt thời hạn tối đa 90 ngày, hãy tạo link mới":
+      "リンクは最長 90 日に達しました。新しいリンクを作成してください",
+    "Bài đang phát đã được gỡ khỏi playlist": "再生中の曲はプレイリストから外されました",
   },
 };

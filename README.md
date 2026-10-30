@@ -163,14 +163,18 @@ Trong một playlist, bấm <kbd>Chia sẻ</kbd> (nút trên thanh công cụ c�
 - Nhạc đi qua Vercel function (`/api/cloud/share-put`, mỗi lần một đoạn 3 MB), không đi thẳng từ trình duyệt tới R2: mạng chặn `*.r2.cloudflarestorage.com` (mạng công ty…) vẫn dùng được, và không cần cấu hình CORS. Đổi lại, mỗi bài tốn vài lần gọi function của Vercel, cả lúc tải lên lẫn lúc nghe.
 - Trang nghe dùng giao diện và trình phát của trang chính (tốc độ, hẹn giờ ngủ, ngẫu nhiên / lặp, phím tắt, màn hình khoá…), trừ ♥ và "Phát gần đây" (cần tài khoản). Như trang chính, trong lúc phát nó tải trước nguyên 2 bài kế tiếp nên chuyển bài là phát ngay.
 - Trang nghe không có nút tải. Mỗi bài phát qua `/api/cloud/share-audio` bằng một URL ký số chỉ sống 10 phút (gửi kèm danh sách bài, không tra MongoDB, dữ liệu từ R2 được chuyển thẳng tới trình duyệt), mỗi lần trả tối đa một đoạn 3 MB. Cách này chỉ làm việc tải **khó hơn**, không chặn hẳn được: thứ gì phát được trong trình duyệt thì vẫn ghi lại được.
-- Link hết hạn hoặc bấm **Thu hồi** thì link ngừng hoạt động ngay, các bài bị xoá khỏi R2 (mỗi tài khoản tối đa 20 link cùng lúc).
+- Mỗi playlist một link. Khi playlist đã có link, hộp _Chia sẻ_ có:
+  - **Đồng bộ**: bài mới thêm vào playlist được tải lên, bài đã có trên R2 không tải lại, bài đã bỏ khỏi playlist bị gỡ khỏi link và xoá khỏi R2, thứ tự theo playlist. Hộp báo khi playlist đã khác link ("+2 bài mới, −1 bài đã bỏ"). Người đang nghe thấy danh sách mới sau tối đa 1 phút, bài đang phát không bị ngắt.
+  - **Gia hạn thêm** 1 / 7 / 30 ngày (cộng vào hạn hiện tại), tối đa **90 ngày** kể từ lúc tạo link.
+  - **Thu hồi**: link ngừng hoạt động ngay, các bài bị xoá khỏi R2 (xoá hàng loạt; R2 không nhận thì xoá từng file).
+- Link hết hạn: các bài bị xoá khỏi R2 ở lần mở app tiếp theo. Mỗi tài khoản tối đa 20 link cùng lúc.
 - Cần bật [MongoDB](#lưu-dữ-liệu-lên-mongodb-atlas-tuỳ-chọn): mã thiết bị chứng minh link thuộc tài khoản nào.
 - ⚠️ **Bản quyền:** sao chép nhạc lên máy chủ rồi phát cho người khác là phát tán lại. Chỉ nên chia sẻ cho người quen, có hạn, không thu lợi; gỡ ngay khi chủ bản quyền yêu cầu.
 
 Cài đặt (một lần):
 
 1. [Cloudflare](https://dash.cloudflare.com) → **Storage & databases → R2 Object Storage** → _Create bucket_ (ví dụ `dlimusic-share`). Gói miễn phí: 10 GB lưu trữ. Để **Public Access: Disabled**.
-2. Bucket → **Settings → Object lifecycle rules**: _Add rule_, prefix `s/`, xoá object sau **31 ngày**. Đây là lưới an toàn: link sống tối đa 30 ngày, nên bài nào còn sau 31 ngày chắc chắn là rác (bình thường app tự xoá).
+2. Bucket → **Settings → Object lifecycle rules**: _Add rule_, prefix `s/`, xoá object sau **91 ngày**. Đây là lưới an toàn: link sống tối đa 90 ngày (kể cả gia hạn), nên bài nào còn sau 91 ngày chắc chắn là rác (bình thường app tự xoá). Để ít hơn thì bài của link đã gia hạn sẽ bị R2 xoá mất trước khi link hết hạn.
 3. Trang R2 → **Manage API tokens** → _Create Account API token_, quyền **Object Read & Write**, chỉ cho bucket trên, TTL _Forever_, không lọc IP. Giữ lại _Access Key ID_ và _Secret Access Key_ (secret chỉ hiện một lần).
 4. Vercel → Project → Settings → **Environments** → Production (và Preview) → **Environment Variables**, thêm:
    ```
@@ -181,7 +185,7 @@ Cài đặt (một lần):
    ```
    rồi deploy lại. Chưa cấu hình thì bấm _Tạo link_ sẽ báo "Máy chủ chưa cấu hình kho nhạc chia sẻ". Thử trên máy: ghi các biến này vào `.env` rồi chạy `npm run preview:web`.
 
-Trong MongoDB: collection `shares` (mỗi link một document: tài khoản, tên playlist, danh sách bài và bài nào đã lên, hạn). Trong R2: `s/<mã>/<bài>/<đoạn>`.
+Trong MongoDB: collection `shares` (mỗi link một document: tài khoản, tên playlist, danh sách bài và bài nào đã lên, hạn). Trong R2: `s/<mã link>/<mã bài>/<đoạn>` (mã bài cố định, nên đồng bộ không phải tải lại bài cũ).
 
 ## Bảo mật
 

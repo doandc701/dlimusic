@@ -1177,10 +1177,10 @@ async function cloudShare(method, action, body) {
 }
 
 /** Piece k of song i; tried three times when the server or the network fails. */
-async function sharePiece(code, i, k, body, signal) {
+async function sharePiece(code, id, k, body, signal) {
   for (let attempt = 1; ; attempt++) {
     try {
-      const res = await fetch(`/api/cloud/share-put?${new URLSearchParams({ code, i, k })}`, {
+      const res = await fetch(`/api/cloud/share-put?${new URLSearchParams({ code, id, k })}`, {
         method: "POST",
         headers: { "Content-Type": "application/octet-stream", Authorization: `Bearer ${cloudToken()}` },
         body,
@@ -1196,8 +1196,8 @@ async function sharePiece(code, i, k, body, signal) {
   }
 }
 
-/** One song: read from Telegram and sent in SHARE_CHUNK pieces, in order (the last one makes it playable). */
-async function shareSong(code, i, item, signal) {
+/** One song (its id in the link): read from Telegram, sent in SHARE_CHUNK pieces in order (the last one: playable). */
+async function shareSong(code, id, item, signal) {
   let parts = [];
   let got = 0;
   let k = 0;
@@ -1205,7 +1205,7 @@ async function shareSong(code, i, item, signal) {
     const body = new Blob(parts);
     parts = [];
     got = 0;
-    await sharePiece(code, i, k++, body, signal);
+    await sharePiece(code, id, k++, body, signal);
   };
   for await (let chunk of telegramRange(item, 0, item.info.size - 1)) {
     if (signal.aborted) return;
@@ -1223,22 +1223,26 @@ async function shareSong(code, i, item, signal) {
 const emitShare = (u, finished = false) =>
   emit("share", { code: u.code, playlistId: u.playlistId, done: u.done, total: u.total, failed: u.failed, finished });
 
-/** Send the songs of a link (`jobs`: [{ i, item }]); `done`: how many it already has. */
-async function uploadShare(code, playlistId, jobs, done, total) {
-  if (uploads.has(code)) return;
+/** Send the songs of a link (`jobs`: [{ id, item }]); `done`: how many it already has. */
+function uploadShare(code, playlistId, jobs, done, total) {
+  if (uploads.has(code)) return uploads.get(code).job;
   const u = { code, playlistId, ctl: new AbortController(), done, total, failed: 0 };
   uploads.set(code, u);
   emitShare(u);
   let next = 0;
   const worker = async () => {
     while (next < jobs.length && !u.ctl.signal.aborted) {
-      const { i, item } = jobs[next++];
+      const { id, item } = jobs[next++];
       try {
-        await shareSong(code, i, item, u.ctl.signal);
+        await shareSong(code, id, item, u.ctl.signal);
         if (u.ctl.signal.aborted) return;
         u.done++;
       } catch (err) {
         if (u.ctl.signal.aborted) return;
+        if (err.code === "SHARE_SONG_GONE") {
+          u.total--; // taken out of the link meanwhile (a sync): nothing to send
+          continue;
+        }
         if (err.code === "SHARE_GONE" || err.status === 404 || err.status === 401) return void u.ctl.abort(); // revoked, expired, signed out
         console.warn("share: song not uploaded:", err);
         u.failed++;
@@ -1246,16 +1250,35 @@ async function uploadShare(code, playlistId, jobs, done, total) {
       emitShare(u);
     }
   };
-  try {
-    await Promise.all(Array.from({ length: SHARE_PARALLEL }, worker));
-  } finally {
+  u.job = Promise.all(Array.from({ length: SHARE_PARALLEL }, worker)).finally(() => {
     uploads.delete(code);
     emitShare(u, true);
-  }
+  });
+  return u.job;
 }
 
+/** Stop the uploads (of one link); resolves once they have stopped. */
 function stopUploads(code = null) {
-  for (const u of uploads.values()) if (!code || u.code === code) u.ctl.abort();
+  const stopping = [];
+  for (const u of uploads.values())
+    if (!code || u.code === code) {
+      u.ctl.abort();
+      stopping.push(u.job.catch(() => {}));
+    }
+  return Promise.all(stopping);
+}
+
+/** The songs of the link not there yet, read from Telegram: [{ id, item }] (those no longer reachable left out). */
+async function pendingJobs(code, pending, title) {
+  if (!pending.length) return [];
+  const scan = await favoritesScan(
+    pending.map((x) => x.ref),
+    null,
+    { key: `share:${code}`, title },
+  );
+  scans.delete(scan.key);
+  const byRef = new Map([...scan.items.values()].map((it) => [it.fav, it]));
+  return pending.filter((x) => byRef.has(x.ref)).map((x) => ({ id: x.id, item: byRef.get(x.ref) }));
 }
 
 /** Links whose songs are not all there (the tab was closed meanwhile): their upload goes on. */
@@ -1266,29 +1289,20 @@ function resumeShares(list) {
       .then(async () => {
         if (uploads.has(s.code) || auth.step !== "ready") return;
         const { songs } = await cloudShare("POST", "share-pending", { code: s.code });
-        if (!songs.length) return;
-        const scan = await favoritesScan(
-          songs.map((x) => x.ref),
-          null,
-          { key: `share:${s.code}`, title: s.name },
-        );
-        scans.delete(scan.key);
-        const byRef = new Map([...scan.items.values()].map((it) => [it.fav, it]));
-        const jobs = songs.filter((x) => byRef.has(x.ref)).map((x) => ({ i: x.i, item: byRef.get(x.ref) }));
-        await uploadShare(s.code, s.playlistId, jobs, s.ready, s.count);
+        const jobs = await pendingJobs(s.code, songs, s.name);
+        if (jobs.length) await uploadShare(s.code, s.playlistId, jobs, s.ready, s.count);
       })
       .catch((err) => console.warn("share: upload not resumed:", err));
   }
 }
 
-/** POST /api/shares: a new link for a playlist, open at once; its songs are then sent ("share" events). */
-async function sharePlaylist(id, days) {
-  const p = (load(STORE.playlists, {})[auth.me.id] || []).find((x) => x.id === id);
-  if (!p) throw httpError(404, "Không tìm thấy playlist");
-  if ([...uploads.values()].some((u) => u.playlistId === id)) throw httpError(409, "Playlist này đang được chia sẻ");
-  const scan = await favoritesScan(p.songs, null, { key: `share:${id}`, title: p.name });
+/**
+ * What of a playlist is shared, read from Telegram: music only (no voice, video…), each small enough, in its order.
+ * skipped: its other songs (not music, too big, or no longer reachable), so a sync does not count them as new.
+ */
+async function shareItems(p) {
+  const scan = await favoritesScan(p.songs, null, { key: `share:${p.id}`, title: p.name });
   scans.delete(scan.key);
-  // music only (no voice, video…), each small enough
   const items = [...scan.items.values()]
     .filter((it) => mediaKind(it.msg) === "audio" && it.info.size > 0 && it.info.size <= SHARE_FILE_MAX)
     .slice(0, SHARE_SONGS_MAX);
@@ -1301,15 +1315,48 @@ async function sharePlaylist(id, days) {
     type: it.msg.media.document?.mimeType || "audio/mpeg",
     ref: it.fav,
   }));
-  const { share } = await cloudShare("POST", "share-create", { playlistId: p.id, name: p.name, days, songs });
+  const shared = new Set(songs.map((x) => x.ref));
+  return { items, songs, skipped: p.songs.filter((ref) => !shared.has(ref)) };
+}
+
+const ownPlaylist = (id) => {
+  const p = (load(STORE.playlists, {})[auth.me.id] || []).find((x) => x.id === id);
+  if (!p) throw httpError(404, "Không tìm thấy playlist");
+  return p;
+};
+
+/** POST /api/shares: a new link for a playlist, open at once; its songs are then sent ("share" events). */
+async function sharePlaylist(id, days) {
+  const p = ownPlaylist(id);
+  if ([...uploads.values()].some((u) => u.playlistId === id)) throw httpError(409, "Playlist này đang được chia sẻ");
+  const { items, songs, skipped } = await shareItems(p);
+  const { share } = await cloudShare("POST", "share-create", { playlistId: p.id, name: p.name, days, songs, skipped });
   uploadShare(
     share.code,
     id,
-    items.map((item, i) => ({ i, item })),
+    items.map((item, i) => ({ id: i, item })),
     0,
     items.length,
   ).catch((err) => console.warn("share: upload stopped:", err));
-  return { ...share, link: shareLink(share.code), skipped: p.songs.length - items.length };
+  return { ...share, link: shareLink(share.code), skippedCount: p.songs.length - items.length };
+}
+
+/**
+ * POST /api/shares/sync: the link follows its playlist again — the songs added since are uploaded, those taken out
+ * leave it (and R2), the order is the playlist's; the songs already there are not sent again.
+ */
+async function syncShare(code, playlistId) {
+  const p = ownPlaylist(playlistId);
+  await stopUploads(code); // what was being sent goes on below, with the new list
+  const { items, songs, skipped } = await shareItems(p);
+  const r = await cloudShare("POST", "share-sync", { code, songs, skipped });
+  const byRef = new Map(items.map((it) => [it.fav, it]));
+  const jobs = r.pending.filter((x) => byRef.has(x.ref)).map((x) => ({ id: x.id, item: byRef.get(x.ref) }));
+  if (jobs.length)
+    uploadShare(code, playlistId, jobs, r.share.ready, r.share.count).catch((err) =>
+      console.warn("share: upload stopped:", err),
+    );
+  return { ...r.share, link: shareLink(code), added: r.added, removed: r.removed, uploading: jobs.length };
 }
 
 // ---------- the /api/* router ----------
@@ -1505,6 +1552,16 @@ async function route(method, url, body, signal) {
       requireReady();
       stopUploads(String(body.code || ""));
       return cloudShare("POST", "share-revoke", { code: body.code });
+
+    case "POST /api/shares/sync":
+      requireReady();
+      return syncShare(String(body.code || ""), String(body.id || ""));
+
+    case "POST /api/shares/extend": {
+      requireReady();
+      const r = await cloudShare("POST", "share-extend", { code: body.code, days: Number(body.days) });
+      return { ...r.share, link: shareLink(r.share.code), capped: r.capped };
+    }
 
     case "GET /api/favorites/files":
       requireReady();

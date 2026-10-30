@@ -2734,10 +2734,28 @@ body.pl-drag-on * {
 .share-link input {
   font-size: 0.8rem;
 }
-.share-revoke {
-  --bs-btn-padding-y: 0.15rem;
-  --bs-btn-padding-x: 0.6rem;
-  --bs-btn-font-size: 0.8rem;
+/* under the link: how many songs, until when (with icons, on one line while it fits) */
+.share-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1rem;
+  margin: 0.5rem 0 0.35rem;
+}
+.share-meta .bi,
+.share-note .bi {
+  margin-right: 0.2rem;
+}
+/* under a line: sync (left) · revoke (right), then extend */
+.share-actions {
+  margin-top: 0.6rem;
+  padding-top: 0.6rem;
+  border-top: var(--bs-border-width) solid var(--bs-border-color-translucent);
+}
+.share-actions .form-select {
+  width: auto;
+}
+.share-actions .bi.spin {
+  animation: spin 0.9s linear infinite;
 }
 
 /* a message line that takes no room while it is empty (the playlist picker's name error) */

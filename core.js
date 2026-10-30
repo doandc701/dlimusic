@@ -883,6 +883,8 @@ export const SHARE_DAYS = [1, 7, 30];
 export const SHARE_SONGS_MAX = PLAYLIST_SONGS_MAX;
 export const SHARE_FILE_MAX = 100 * 1024 * 1024;
 export const SHARE_CHUNK = 3 * 1024 * 1024;
+// a link may be extended, up to this many days after it was made (the R2 lifecycle rule keeps songs 91 days)
+export const SHARE_MAX_DAYS = 90;
 
 /** A new playlist id: no two devices pick the same one. */
 export const newPlaylistId = () =>

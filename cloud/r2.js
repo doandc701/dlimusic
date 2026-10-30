@@ -95,15 +95,24 @@ export function createBucket(config, { fetchFn = (...a) => fetch(...a), now = ()
       if (!res.ok) throw new Error(`R2 GET ${res.status}`);
       return res.body;
     },
-    /** Remove many objects at once (DeleteObjects, up to 1000 keys a request); missing ones are fine. */
-    async removeMany(keys) {
+    /** Remove one object (a missing one is fine). */
+    async remove(key) {
+      const res = await fetchFn(sign("DELETE", key, 300), { method: "DELETE" });
+      if (!res.ok && res.status !== 404) throw new Error(`R2 DELETE ${res.status}`);
+    },
+    /**
+     * Remove many objects (missing ones are fine): DeleteObjects, 1000 keys a request; when R2 does not take it
+     * through a signed URL, or reports keys it could not remove, those go one DELETE each (16 at a time), within
+     * `budgetMs` (a function's time is short: what is left throws, and is removed by a later call).
+     */
+    async removeMany(keys, { budgetMs = 20_000 } = {}) {
+      const until = Date.now() + budgetMs;
+      const left = [];
       for (let i = 0; i < keys.length; i += 1000) {
+        const batch = keys.slice(i, i + 1000);
         const xml =
           "<Delete><Quiet>true</Quiet>" +
-          keys
-            .slice(i, i + 1000)
-            .map((k) => `<Object><Key>${k.replace(/&/g, "&amp;").replace(/</g, "&lt;")}</Key></Object>`)
-            .join("") +
+          batch.map((k) => `<Object><Key>${k.replace(/&/g, "&amp;").replace(/</g, "&lt;")}</Key></Object>`).join("") +
           "</Delete>";
         const res = await fetchFn(sign("POST", "", 300, { delete: "" }), {
           method: "POST",
@@ -112,8 +121,17 @@ export function createBucket(config, { fetchFn = (...a) => fetch(...a), now = ()
             "Content-Type": "application/xml",
             "Content-MD5": crypto.createHash("md5").update(xml).digest("base64"),
           },
-        });
-        if (!res.ok) throw new Error(`R2 DeleteObjects ${res.status}`);
+        }).catch(() => null);
+        const text = res?.ok ? await res.text() : "";
+        if (!res?.ok) left.push(...batch);
+        // quiet mode lists only the keys that failed
+        else
+          for (const m of text.matchAll(/<Error>[\s\S]*?<Key>([^<]+)<\/Key>/g))
+            left.push(m[1].replace(/&lt;/g, "<").replace(/&amp;/g, "&"));
+      }
+      for (let i = 0; i < left.length; i += 16) {
+        if (Date.now() > until) throw new Error(`R2: ${left.length - i} objects left to remove`);
+        await Promise.all(left.slice(i, i + 16).map((k) => this.remove(k)));
       }
     },
   };

@@ -217,6 +217,7 @@ const state = {
   loadingMore: false, // the next page of the open list is being read (infinite scroll)
   scanCtrl: null, // AbortController of that scan
   scanId: null, // id of that scan, matched against its progress events
+  hidden: new Set(), // songs ("<chat>|<message>") hidden by "Lọc trùng" ③: this visit only, never saved
   keyChat: new Map(), // scan key -> the chat it was opened with (to find what belongs to a hidden chat)
   chat: null, // chat identifier sent to the server
   type: "all",
@@ -1891,6 +1892,9 @@ function openChat(chat) {
   state.selected.clear();
   state.query = "";
   $("fileSearch").value = "";
+  state.dupOnly = false; // another list: all its files
+  $("dupBtn").classList.remove("active");
+  $("dupBtn").setAttribute("aria-pressed", "false");
   renderDialogs();
   if (chat === PL_HOME) return showPlaylists();
   return loadFiles();
@@ -2036,10 +2040,92 @@ function visibleFiles({ withSearch = true } = {}) {
       (!state.scan.fav ||
         (state.favorites.has(f.fav) && // "Bài hát yêu thích": an un-hearted file leaves the list
           (state.favScope === "all" || f.fav.split("|")[0] === state.favScope))) &&
-      (!state.scan.playlist || inPlaylist(f, state.scan)), // a playlist: a song taken out leaves the list
+      (!state.scan.playlist || inPlaylist(f, state.scan)) && // a playlist: a song taken out leaves the list
+      !state.hidden.has(favId(f)), // ③ hidden for this visit
   );
-  return sortFiles(list);
+  return state.dupOnly ? duplicates(sortFiles(list)) : sortFiles(list);
 }
+
+// ---------- "Lọc trùng": the files posted more than once, each group together, then the extra copies ticked ----------
+
+/** The same song posted again: the same size and length (or name, for a file without a length). */
+const dupKey = (f) => `${f.size}|${f.duration ?? norm(f.name)}`;
+
+let dupShade = new Set(); // the rows of every other group, shaded (renderFiles)
+let dupExtra = 0; // the copies but the first of each group: what ② ticks (renderFiles)
+
+/** ① Lọc trùng → ② Chọn bản thừa (once there are copies) → ③ what to do with the ticked ones (once some are). */
+function renderDupSteps() {
+  const two = !!state.dupOnly && dupExtra > 0;
+  const three = two && state.selected.size > 0;
+  show($("dupArrow1"), two);
+  show($("dupPickBtn"), two);
+  $("dupExtra").textContent = dupExtra;
+  show($("dupArrow2"), three);
+  show($("dupHideBtn"), three);
+  const here = hiddenHere().length; // this list's only: another chat's hidden songs are not shown here
+  show($("unhideBtn"), here > 0);
+  $("unhideText").textContent = t("Hiện lại {n} bài đã ẩn", { n: here });
+}
+
+// ③ the ticked songs leave the list and the songs to play, for this visit only (never saved: a reload shows them)
+$("dupHideBtn").addEventListener("click", () => {
+  const files = state.scan ? state.scan.files.filter((f) => state.selected.has(f.id)) : [];
+  for (const f of files) state.hidden.add(favId(f));
+  // done: ① off, the whole list again (without them)
+  state.dupOnly = false;
+  $("dupBtn").classList.remove("active");
+  $("dupBtn").setAttribute("aria-pressed", "false");
+  state.selected.clear();
+  afterHidden();
+  toast(t("Đã ẩn {n} bài khỏi danh sách phát — tải lại trang để hiện lại", { n: files.length }), "info");
+});
+$("unhideBtn").addEventListener("click", () => {
+  for (const k of hiddenHere()) state.hidden.delete(k);
+  afterHidden();
+});
+/** The songs of the open list hidden by ③ (their "<chat>|<message>"). */
+function hiddenHere() {
+  if (!state.scan || !state.hidden.size) return [];
+  return [...new Set(state.scan.files.map((f) => favId(f)))].filter((k) => state.hidden.has(k));
+}
+function afterHidden() {
+  if (state.scan) renderFiles();
+  else updateSelection();
+  updateNavButtons(); // ⏭ follows (liveOrder)
+}
+
+/** Only the files with a twin in `list`, each group together, in the order of its first file. */
+function duplicates(list) {
+  const groups = new Map();
+  for (const f of list) {
+    const k = dupKey(f);
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(f);
+  }
+  return [...groups.values()].filter((g) => g.length > 1).flat();
+}
+
+function setDupOnly(on) {
+  state.dupOnly = on;
+  $("dupBtn").classList.toggle("active", on);
+  $("dupBtn").setAttribute("aria-pressed", String(on));
+  state.selected.clear();
+  if (state.scan) renderFiles();
+}
+$("dupBtn").addEventListener("click", () => setDupOnly(!state.dupOnly));
+
+// every copy but the first of each group (the list's order: by default the newest one stays)
+$("dupPickBtn").addEventListener("click", () => {
+  const seen = new Set();
+  state.selected.clear();
+  for (const f of visibleFiles()) {
+    const k = dupKey(f);
+    if (seen.has(k)) state.selected.add(f.id);
+    else seen.add(k);
+  }
+  renderFiles();
+});
 
 const collator = new Intl.Collator("vi", { numeric: true, sensitivity: "base" });
 const SORTS = {
@@ -2155,6 +2241,43 @@ async function toggleFav(id, scan = state.scan) {
     toast(err.message, "error");
   }
   refreshFavViews(id, scan);
+}
+
+/** ♥ for the ticked files (above the list): all of them, or none when all of them already are. */
+async function favSelected() {
+  const scan = state.scan;
+  const files = scan ? scan.files.filter((f) => state.selected.has(f.id)) : [];
+  if (!files.length) return;
+  const on = !files.every(isFav);
+  const keys = files.map((f) => favId(f, scan)).filter((k) => state.favorites.has(k) !== on);
+  const before = new Set(state.favorites);
+  for (const k of keys) on ? state.favorites.add(k) : state.favorites.delete(k); // instant; undone if saving fails
+  // "Bài hát yêu thích": the un-hearted ones leave the list, and the selection
+  if (scan.fav && !on) for (const f of files) state.selected.delete(f.id);
+  refreshFavList();
+  try {
+    state.favorites = new Set((await api("/api/favorites", { ids: keys, on })).ids);
+    toast(
+      on
+        ? t("Đã thêm {n} bài vào yêu thích", { n: keys.length })
+        : t("Đã bỏ {n} bài khỏi yêu thích", { n: keys.length }),
+      on ? "bye" : "info",
+    );
+  } catch (err) {
+    state.favorites = before;
+    toast(err.message, "error");
+  }
+  refreshFavList();
+}
+$("favSelBtn").addEventListener("click", favSelected);
+
+/** After several hearts changed: the whole open list, the sidebar count, the player, the button above the list. */
+function refreshFavList() {
+  if (state.playScan?.fav) updateNavButtons();
+  if (state.scan) renderFiles();
+  renderFavEntry();
+  renderPlayerFav();
+  updateSelection();
 }
 
 /** After a heart changed: the open list (its row, or all of "Bài hát yêu thích"), the sidebar count, the player. */
@@ -3234,7 +3357,9 @@ function rowHtml(f, num) {
   const sel = state.selected.has(f.id);
   const posted = postedAt(f);
   const file = displayName(f) !== f.name ? `<i class="bi bi-file-earmark-music"></i> ${esc(f.name)}` : "";
-  const cls = [sel && "row-sel", state.playingId === f.id && "playing"].filter(Boolean).join(" ");
+  const cls = [sel && "row-sel", state.playingId === f.id && "playing", dupShade.has(f.id) && "dup-alt"]
+    .filter(Boolean)
+    .join(" ");
   return `<tr class="${cls}" data-id="${f.id}">
     <td class="ps-3"><input class="form-check-input" type="checkbox" ${sel ? "checked" : ""} tabindex="-1"></td>
     <td class="play">${playCell(f)}</td>
@@ -3284,7 +3409,7 @@ function renderFiles() {
   // a list in its own order, nothing hidden by the search: its songs can be dragged to a new place
   $("chatView").classList.toggle(
     "pl-sortable",
-    draggable(state.scan) && state.sort === "default" && !state.query.trim(),
+    draggable(state.scan) && state.sort === "default" && !state.query.trim() && !state.dupOnly,
   );
   const custom = !!savedOrder(state.scan);
   show($("orderResetBtn"), custom && state.sort === "default");
@@ -3296,6 +3421,15 @@ function renderFiles() {
   const more = state.scan.more ? "+" : ""; // more pages to load: the total is not known yet
   const all = `${state.scan.files.length}${more}`;
   $("fileCount").textContent = t("{n}/{total} file", { n: files.length, total: all });
+  // "Lọc trùng": how many groups; every other group shaded, so where one ends shows
+  dupShade = new Set();
+  if (state.dupOnly) {
+    const keys = [...new Set(files.map(dupKey))];
+    const odd = new Set(keys.filter((_, i) => i % 2));
+    for (const f of files) if (odd.has(dupKey(f))) dupShade.add(f.id);
+    $("fileCount").textContent = t("{n} file trùng · {g} nhóm", { n: files.length, g: keys.length });
+    dupExtra = files.length - keys.length;
+  } else dupExtra = 0;
   $("chatSub").textContent =
     files.length === state.scan.files.length
       ? t("{n} file", { n: all })
@@ -3309,9 +3443,11 @@ function renderFiles() {
         ? `<i class="bi bi-music-note-list display-5 text-primary"></i><p class="mt-2 mb-1">${t("Playlist chưa có bài nào")}</p><p class="small">${t('Mở một kênh và bấm <i class="bi bi-plus-lg"></i> ở mỗi bài để thêm vào đây.')}</p>`
         : favEmpty
           ? `<i class="bi bi-heart display-5 fav-empty"></i><p class="mt-2 mb-1">${t("Chưa có bài hát yêu thích")}</p><p class="small">${t('Mở một kênh và bấm <i class="bi bi-heart"></i> ở cuối mỗi dòng để thêm vào đây.')}</p>`
-          : state.scan.files.length
-            ? t("Không có file khớp bộ lọc")
-            : `<i class="bi bi-inbox display-5"></i><p class="mt-2">${t("Kênh không có file loại này")}</p>`,
+          : state.dupOnly && state.scan.files.length
+            ? `<i class="bi bi-check2-circle display-5 text-success"></i><p class="mt-2 mb-1">${t("Không có file trùng")}</p>${state.scan.more ? `<p class="small">${t("Trong {n} file đã tải — kéo xuống cuối để tải thêm và tìm tiếp.", { n: state.scan.files.length })}</p>` : ""}`
+            : state.scan.files.length
+              ? t("Không có file khớp bộ lọc")
+              : `<i class="bi bi-inbox display-5"></i><p class="mt-2">${t("Kênh không có file loại này")}</p>`,
     );
   } else {
     $("filesMsg").innerHTML = "";
@@ -3408,6 +3544,14 @@ function updateSelection() {
     : `<span class="small text-body-secondary hint">${t("<kbd>Shift</kbd> + bấm để chọn liên tiếp")}</span>`;
   $("downloadBtn").disabled = !files.length;
   $("addPlBtn").disabled = !files.some(playable);
+  renderDupSteps();
+  // ♥: "Bỏ yêu thích" when every ticked file already is
+  const allFav = files.length > 0 && files.every(isFav);
+  const favLabel = allFav ? t("Bỏ khỏi yêu thích") : t("Thêm vào yêu thích");
+  $("favSelBtn").disabled = !files.length;
+  $("favSelBtn").title = favLabel;
+  $("favSelBtn").innerHTML =
+    `<i class="bi ${allFav ? "bi-heart-fill" : "bi-heart"}"></i> <span class="d-none d-md-inline">${favLabel}</span>`;
   $("downloadBtn").querySelector("span").textContent = files.length
     ? t("Tải xuống ({n})", { n: files.length })
     : t("Tải xuống");
@@ -3801,15 +3945,12 @@ function playFrom(scan, id) {
  */
 function liveOrder() {
   const scan = state.playScan;
-  if (scan?.playlist) {
-    const byId = new Map(scan.files.map((f) => [f.id, f]));
-    return state.playOrder.filter((id) => id === state.playingId || (byId.has(id) && inPlaylist(byId.get(id), scan)));
-  }
-  if (!scan?.fav) return state.playOrder;
+  if (!scan || (!scan.playlist && !scan.fav && !state.hidden.size)) return state.playOrder;
   const byId = new Map(scan.files.map((f) => [f.id, f]));
-  return state.playOrder.filter(
-    (id) => id === state.playingId || (byId.has(id) && state.favorites.has(favId(byId.get(id), scan))),
-  );
+  const keep = (f) =>
+    !state.hidden.has(favId(f, scan)) && // ③ hidden for this visit
+    (scan.playlist ? inPlaylist(f, scan) : !scan.fav || state.favorites.has(favId(f, scan)));
+  return state.playOrder.filter((id) => id === state.playingId || (byId.has(id) && keep(byId.get(id))));
 }
 
 /** ⏭ is greyed out at the end of the list when nothing repeats. */

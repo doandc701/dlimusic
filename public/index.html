@@ -574,12 +574,52 @@
             >
               <i class="bi bi-arrow-counterclockwise"></i>
             </button>
+            <!-- only the files posted more than once, each group together; then the extra copies can be ticked.
+                 Steps ① ② ③: each shows once the one before has something (ui.js renderDupSteps) -->
+            <div class="dup-steps d-flex align-items-center gap-1">
+              <button
+                class="btn btn-sm btn-outline-secondary text-nowrap"
+                id="dupBtn"
+                type="button"
+                aria-pressed="false"
+                title="Chỉ hiện các file trùng (cùng dung lượng và thời lượng)"
+              >
+                <i class="bi bi-1-circle-fill"></i> <span class="d-none d-md-inline">Lọc trùng</span>
+              </button>
+              <i class="bi bi-chevron-right dup-arrow d-none" id="dupArrow1" aria-hidden="true"></i>
+              <button
+                class="btn btn-sm btn-outline-primary text-nowrap d-none"
+                id="dupPickBtn"
+                type="button"
+                title="Chọn mọi bản trừ bản đầu tiên của mỗi nhóm"
+              >
+                <i class="bi bi-2-circle-fill"></i> <span class="d-none d-md-inline">Chọn bản thừa</span>
+                <span class="badge rounded-pill text-bg-primary" id="dupExtra"></span>
+              </button>
+              <i class="bi bi-chevron-right dup-arrow d-none" id="dupArrow2" aria-hidden="true"></i>
+              <!-- hidden for this visit only: a reload shows them again -->
+              <button
+                class="btn btn-sm btn-outline-danger text-nowrap d-none"
+                id="dupHideBtn"
+                type="button"
+                title="Ẩn các bài đã chọn khỏi danh sách và danh sách phát (tải lại trang để hiện lại)"
+              >
+                <i class="bi bi-3-circle-fill"></i> <span class="d-none d-md-inline">Ẩn khỏi danh sách phát</span>
+              </button>
+              <button class="btn btn-sm btn-link text-nowrap d-none" id="unhideBtn" type="button">
+                <i class="bi bi-eye"></i> <span id="unhideText"></span>
+              </button>
+            </div>
             <!-- right corner, above the list: what is selected + download -->
             <div class="ms-auto d-flex align-items-center gap-2 dl-tools">
               <span id="selInfo" class="small"></span>
               <span class="small text-body-secondary d-none d-sm-inline" id="fileCount"></span>
               <button class="btn btn-sm btn-outline-primary" id="addPlBtn" disabled title="Thêm vào playlist">
                 <i class="bi bi-plus-lg"></i> <span class="d-none d-md-inline">Thêm vào playlist</span>
+              </button>
+              <!-- ♥ the ticked ones: "Bỏ yêu thích" when all of them are already ♥ (ui.js updateSelection) -->
+              <button class="btn btn-sm fav-sel-btn" id="favSelBtn" disabled title="Thêm vào yêu thích">
+                <i class="bi bi-heart"></i> <span class="d-none d-md-inline">Thêm vào yêu thích</span>
               </button>
               <button class="btn btn-sm btn-primary px-3" id="downloadBtn" disabled>
                 <i class="bi bi-download"></i> <span>Tải xuống</span>

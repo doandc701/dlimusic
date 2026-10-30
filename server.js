@@ -1679,15 +1679,20 @@ async function handleApi(req, res, url) {
     }
 
     case "POST /api/favorites": {
-      // { id: "<chat id>|<message id>", on: true|false } adds / removes one favourite
+      // { id: "<chat id>|<message id>", on: true|false } adds / removes one favourite; { ids, on } several
+      // (the ticked ones: the first one ends up first)
       requireReady();
-      const { id, on } = await readJson(req);
-      if (!isFavoriteId(id) || typeof on !== "boolean") return sendJson(res, 400, { error: "Yêu thích không hợp lệ" });
-      const list = (favorites[auth.me.id] ||= []).filter((x) => x !== id);
+      const body = await readJson(req);
+      const { on } = body;
+      const ids = Array.isArray(body.ids) ? [...new Set(body.ids)] : [body.id];
+      if (!ids.length || ids.length > FAVORITES_LIMIT || !ids.every(isFavoriteId) || typeof on !== "boolean")
+        return sendJson(res, 400, { error: "Yêu thích không hợp lệ" });
+      const gone = new Set(ids);
+      const list = (favorites[auth.me.id] ||= []).filter((x) => !gone.has(x));
       if (on) {
-        if (list.length >= FAVORITES_LIMIT)
+        if (list.length + ids.length > FAVORITES_LIMIT)
           return sendJson(res, 400, { error: `Tối đa ${FAVORITES_LIMIT} bài yêu thích` });
-        list.unshift(id); // newest first
+        list.unshift(...ids); // newest first
       }
       if (list.length) favorites[auth.me.id] = list;
       else delete favorites[auth.me.id];

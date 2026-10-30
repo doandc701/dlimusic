@@ -780,6 +780,15 @@ describe("telegram (real account)", () => {
     }
     assert.deepEqual((await post({ id: "42|7", on: false })).data, { ids: ["-1001|5"] });
     assert.deepEqual((await post({ id: "-1001|5", on: false })).data, { ids: [] });
+    // several at once (the ticked files): the first one ends up first, those already there move up
+    await post({ id: "9|9", on: true });
+    assert.deepEqual((await post({ ids: ["1|1", "2|2", "9|9", "1|1"], on: true })).data, {
+      ids: ["1|1", "2|2", "9|9"],
+    });
+    assert.equal((await post({ ids: ["1|1", "bad"], on: true })).status, 400, "one bad id: nothing changes");
+    assert.equal((await post({ ids: [], on: true })).status, 400);
+    assert.deepEqual((await post({ ids: ["1|1", "9|9"], on: false })).data, { ids: ["2|2"] });
+    assert.deepEqual((await post({ ids: ["2|2"], on: false })).data, { ids: [] });
     assert.deepEqual(
       JSON.parse(fs.readFileSync(path.join(TMP, "favorites.json"), "utf8")),
       {},

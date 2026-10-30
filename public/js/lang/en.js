@@ -249,6 +249,22 @@
     "Thêm vào yêu thích": "Add to favourites",
     "Đã thêm “{name}” vào yêu thích": "Added “{name}” to favourites",
     "Đã bỏ “{name}” khỏi yêu thích": "Removed “{name}” from favourites",
+    "Đã thêm {n} bài vào yêu thích": "Added {n} songs to favourites",
+    "Đã bỏ {n} bài khỏi yêu thích": "Removed {n} songs from favourites",
+    "Lọc trùng": "Duplicates",
+    "Chọn bản thừa": "Select extra copies",
+    "Chỉ hiện các file trùng (cùng dung lượng và thời lượng)": "Show only duplicate files (same size and length)",
+    "Chọn mọi bản trừ bản đầu tiên của mỗi nhóm": "Select every copy but the first of each group",
+    "{n} file trùng · {g} nhóm": "{n} duplicate files · {g} groups",
+    "Không có file trùng": "No duplicate files",
+    "Ẩn khỏi danh sách phát": "Hide from the play list",
+    "Ẩn các bài đã chọn khỏi danh sách và danh sách phát (tải lại trang để hiện lại)":
+      "Hide the selected songs from the list and from playback (reload the page to show them again)",
+    "Hiện lại {n} bài đã ẩn": "Show the {n} hidden songs again",
+    "Đã ẩn {n} bài khỏi danh sách phát — tải lại trang để hiện lại":
+      "Hid {n} songs from the play list — reload the page to show them again",
+    "Trong {n} file đã tải — kéo xuống cuối để tải thêm và tìm tiếp.":
+      "Among the {n} files loaded — scroll to the end to load more and keep looking.",
     "Chưa có bài hát yêu thích": "No favourite songs yet",
     'Mở một kênh và bấm <i class="bi bi-heart"></i> ở cuối mỗi dòng để thêm vào đây.':
       'Open a channel and tap <i class="bi bi-heart"></i> at the end of a row to add it here.',

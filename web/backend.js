@@ -1582,13 +1582,17 @@ async function route(method, url, body, signal) {
 
     case "POST /api/favorites": {
       requireReady();
-      const { id, on } = body;
-      if (!isFavoriteId(id) || typeof on !== "boolean") throw httpError(400, "Yêu thích không hợp lệ");
+      // { id, on } one file, { ids, on } several (the ticked ones: the first one ends up first)
+      const { on } = body;
+      const ids = Array.isArray(body.ids) ? [...new Set(body.ids)] : [body.id];
+      if (!ids.length || ids.length > FAVORITES_LIMIT || !ids.every(isFavoriteId) || typeof on !== "boolean")
+        throw httpError(400, "Yêu thích không hợp lệ");
       const all = load(STORE.favorites, {});
-      const list = (all[auth.me.id] || []).filter((x) => x !== id);
+      const gone = new Set(ids);
+      const list = (all[auth.me.id] || []).filter((x) => !gone.has(x));
       if (on) {
-        if (list.length >= FAVORITES_LIMIT) throw httpError(400, `Tối đa ${FAVORITES_LIMIT} bài yêu thích`);
-        list.unshift(id);
+        if (list.length + ids.length > FAVORITES_LIMIT) throw httpError(400, `Tối đa ${FAVORITES_LIMIT} bài yêu thích`);
+        list.unshift(...ids);
       }
       if (list.length) all[auth.me.id] = list;
       else delete all[auth.me.id];

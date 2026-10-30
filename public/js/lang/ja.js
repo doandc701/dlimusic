@@ -249,6 +249,22 @@
     "Thêm vào yêu thích": "お気に入りに追加",
     "Đã thêm “{name}” vào yêu thích": "「{name}」をお気に入りに追加しました",
     "Đã bỏ “{name}” khỏi yêu thích": "「{name}」をお気に入りから削除しました",
+    "Đã thêm {n} bài vào yêu thích": "{n} 曲をお気に入りに追加しました",
+    "Đã bỏ {n} bài khỏi yêu thích": "{n} 曲をお気に入りから削除しました",
+    "Lọc trùng": "重複",
+    "Chọn bản thừa": "余分なコピーを選択",
+    "Chỉ hiện các file trùng (cùng dung lượng và thời lượng)": "重複ファイルのみ表示（同じサイズと長さ）",
+    "Chọn mọi bản trừ bản đầu tiên của mỗi nhóm": "各グループの最初以外をすべて選択",
+    "{n} file trùng · {g} nhóm": "重複ファイル {n} 件 · {g} グループ",
+    "Không có file trùng": "重複ファイルはありません",
+    "Ẩn khỏi danh sách phát": "再生リストから非表示",
+    "Ẩn các bài đã chọn khỏi danh sách và danh sách phát (tải lại trang để hiện lại)":
+      "選択した曲をリストと再生から非表示にします（ページを再読み込みすると元に戻ります）",
+    "Hiện lại {n} bài đã ẩn": "非表示の {n} 曲を再表示",
+    "Đã ẩn {n} bài khỏi danh sách phát — tải lại trang để hiện lại":
+      "{n} 曲を再生リストから非表示にしました — ページを再読み込みすると元に戻ります",
+    "Trong {n} file đã tải — kéo xuống cuối để tải thêm và tìm tiếp.":
+      "読み込んだ {n} 件の中で — 最後までスクロールするとさらに読み込んで探します。",
     "Chưa có bài hát yêu thích": "お気に入りの曲はまだありません",
     'Mở một kênh và bấm <i class="bi bi-heart"></i> ở cuối mỗi dòng để thêm vào đây.':
       'チャンネルを開き、各行の末尾の <i class="bi bi-heart"></i> を押すとここに追加されます。',

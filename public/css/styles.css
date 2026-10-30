@@ -179,6 +179,15 @@ body {
 .file-table input {
   cursor: pointer;
 }
+/* "Lọc trùng" ① → ② → ③: the arrows between the steps */
+.dup-steps .dup-arrow {
+  font-size: 0.7rem;
+  color: var(--bs-secondary-color);
+}
+/* "Lọc trùng": every other group of copies shaded, so where one group ends shows */
+.file-table tr.dup-alt > * {
+  --bs-table-bg-type: var(--bs-tertiary-bg);
+}
 /* theme-aware selected row (table-primary stays light in dark mode) */
 .file-table tr.row-sel > * {
   --bs-table-bg-type: var(--bs-primary-bg-subtle);
@@ -1503,6 +1512,19 @@ body {
 }
 .fav-btn.on {
   color: #ec4899;
+}
+/* ♥ for the ticked files, above the list: the hearts' pink */
+.fav-sel-btn {
+  --bs-btn-color: #ec4899;
+  --bs-btn-border-color: #ec4899;
+  --bs-btn-hover-color: #fff;
+  --bs-btn-hover-bg: #ec4899;
+  --bs-btn-hover-border-color: #ec4899;
+  --bs-btn-active-color: #fff;
+  --bs-btn-active-bg: #db2777;
+  --bs-btn-active-border-color: #db2777;
+  --bs-btn-disabled-color: #ec4899;
+  --bs-btn-disabled-border-color: #ec4899;
 }
 .fav-btn.on .bi {
   animation: heartbeat 0.5s ease-out 1;

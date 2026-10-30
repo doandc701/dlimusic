@@ -243,6 +243,21 @@
     "Thêm vào yêu thích": "加入收藏",
     "Đã thêm “{name}” vào yêu thích": "已将“{name}”加入收藏",
     "Đã bỏ “{name}” khỏi yêu thích": "已取消收藏“{name}”",
+    "Đã thêm {n} bài vào yêu thích": "已将 {n} 首歌曲加入收藏",
+    "Đã bỏ {n} bài khỏi yêu thích": "已取消收藏 {n} 首歌曲",
+    "Lọc trùng": "重复",
+    "Chọn bản thừa": "选择多余副本",
+    "Chỉ hiện các file trùng (cùng dung lượng và thời lượng)": "仅显示重复文件（大小和时长相同）",
+    "Chọn mọi bản trừ bản đầu tiên của mỗi nhóm": "选择每组中除第一个外的所有副本",
+    "{n} file trùng · {g} nhóm": "{n} 个重复文件 · {g} 组",
+    "Không có file trùng": "没有重复文件",
+    "Ẩn khỏi danh sách phát": "从播放列表中隐藏",
+    "Ẩn các bài đã chọn khỏi danh sách và danh sách phát (tải lại trang để hiện lại)":
+      "从列表和播放中隐藏已选歌曲（刷新页面即可恢复）",
+    "Hiện lại {n} bài đã ẩn": "重新显示 {n} 首已隐藏歌曲",
+    "Đã ẩn {n} bài khỏi danh sách phát — tải lại trang để hiện lại": "已从播放列表隐藏 {n} 首歌曲 — 刷新页面即可恢复",
+    "Trong {n} file đã tải — kéo xuống cuối để tải thêm và tìm tiếp.":
+      "在已加载的 {n} 个文件中 — 滚动到底部可加载更多并继续查找。",
     "Chưa có bài hát yêu thích": "还没有收藏的歌曲",
     'Mở một kênh và bấm <i class="bi bi-heart"></i> ở cuối mỗi dòng để thêm vào đây.':
       '打开一个频道，点击每行末尾的 <i class="bi bi-heart"></i> 即可添加到这里。',

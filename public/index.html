@@ -258,7 +258,7 @@
           <div class="d-grid gap-2 d-none" id="loginChoice">
             <button type="button" class="btn btn-outline-primary choice-btn p-3" data-choice="builtin">
               <span class="fw-semibold"><i class="bi bi-lightning-charge-fill"></i> Dùng API có sẵn</span>
-              <span class="small text-body-secondary">Nhanh nhất — chỉ cần số điện thoại và mã OTP.</span>
+              <span class="small text-body-secondary">Nhanh nhất — chỉ cần số điện thoại và mã xác nhận.</span>
             </button>
             <button type="button" class="btn btn-outline-secondary choice-btn p-3" data-choice="own">
               <span class="fw-semibold"><i class="bi bi-key-fill"></i> Tự tạo API ID của bạn</span>
@@ -329,12 +329,7 @@
           <!-- the same size as the search above a list (#fileSearch) -->
           <div class="input-group input-group-sm">
             <span class="input-group-text"><i class="bi bi-search"></i></span>
-            <input
-              type="search"
-              class="form-control"
-              id="dialogSearch"
-              placeholder="Tìm kiếm kênh, bài hát, nghệ sĩ,..."
-            />
+            <input type="search" class="form-control" id="dialogSearch" placeholder="Tìm kênh, bài hát, ca sĩ…" />
           </div>
         </div>
         <a
@@ -480,18 +475,66 @@
               <button class="btn btn-sm btn-primary pl-play" id="plPlayBtn" title="Phát tất cả">
                 <i class="bi bi-play-fill"></i> <span class="d-none d-md-inline">Phát tất cả</span>
               </button>
-              <button class="btn btn-sm btn-outline-primary btn-icon" id="plShuffleBtn" title="Phát ngẫu nhiên">
+              <!-- sm and up: one button each; phones: the play button and ⋯ (a dropdown with the same actions) -->
+              <button
+                class="btn btn-sm btn-outline-primary btn-icon d-none d-sm-inline-flex"
+                id="plShuffleBtn"
+                title="Phát ngẫu nhiên"
+              >
                 <i class="bi bi-shuffle"></i>
               </button>
               <button class="btn btn-sm btn-outline-secondary btn-icon d-none" id="plShareBtn" title="Chia sẻ playlist">
                 <i class="bi bi-share"></i>
               </button>
-              <button class="btn btn-sm btn-outline-secondary btn-icon" id="plRenameBtn" title="Đổi tên playlist">
+              <button
+                class="btn btn-sm btn-outline-secondary btn-icon d-none d-sm-inline-flex"
+                id="plRenameBtn"
+                title="Đổi tên playlist"
+              >
                 <i class="bi bi-pencil"></i>
               </button>
-              <button class="btn btn-sm btn-outline-danger btn-icon" id="plDeleteBtn" title="Xoá playlist">
+              <button
+                class="btn btn-sm btn-outline-danger btn-icon d-none d-sm-inline-flex"
+                id="plDeleteBtn"
+                title="Xoá playlist"
+              >
                 <i class="bi bi-trash3"></i>
               </button>
+              <div class="dropdown d-sm-none">
+                <button
+                  class="btn btn-sm btn-outline-secondary btn-icon"
+                  type="button"
+                  data-bs-toggle="dropdown"
+                  aria-expanded="false"
+                  title="Tuỳ chọn"
+                  aria-label="Tuỳ chọn"
+                >
+                  <i class="bi bi-three-dots"></i>
+                </button>
+                <ul class="dropdown-menu dropdown-menu-end shadow-sm" id="plMoreMenu">
+                  <li>
+                    <button class="dropdown-item" type="button" data-pl-more="shuffle">
+                      <i class="bi bi-shuffle"></i> Phát ngẫu nhiên
+                    </button>
+                  </li>
+                  <li class="d-none" id="plMoreShare">
+                    <button class="dropdown-item" type="button" data-pl-more="share">
+                      <i class="bi bi-share"></i> Chia sẻ playlist
+                    </button>
+                  </li>
+                  <li>
+                    <button class="dropdown-item" type="button" data-pl-more="rename">
+                      <i class="bi bi-pencil"></i> Đổi tên playlist
+                    </button>
+                  </li>
+                  <li><hr class="dropdown-divider" /></li>
+                  <li>
+                    <button class="dropdown-item text-danger" type="button" data-pl-more="delete">
+                      <i class="bi bi-trash3"></i> Xoá playlist
+                    </button>
+                  </li>
+                </ul>
+              </div>
             </div>
             <div class="btn-group btn-group-sm flex-none" role="group">
               <button class="btn btn-outline-secondary btn-icon" id="reloadBtn" title="Quét lại">
@@ -526,8 +569,8 @@
             <button
               class="btn btn-sm btn-outline-secondary btn-icon d-none"
               id="orderResetBtn"
-              title="Bỏ thứ tự đã kéo"
-              aria-label="Bỏ thứ tự đã kéo"
+              title="Về thứ tự gốc"
+              aria-label="Về thứ tự gốc"
             >
               <i class="bi bi-arrow-counterclockwise"></i>
             </button>
@@ -548,7 +591,7 @@
           <div class="fav-bar border-bottom px-3 py-2 align-items-center gap-2" id="favBar">
             <div class="input-group input-group-sm fav-scope">
               <span class="input-group-text"><i class="bi bi-collection-play"></i></span>
-              <select class="form-select" id="favScope" aria-label="Chế độ phát">
+              <select class="form-select" id="favScope" aria-label="Phát từ">
                 <option value="all">Tất cả kênh — theo danh sách</option>
               </select>
             </div>
@@ -848,8 +891,8 @@
           </div>
           <div class="modal-body">
             <p class="small text-body-secondary mb-3">
-              Ai có link đều nghe được, không cần đăng nhập và không có nút tải. Link dùng được ngay, các bài nhạc được
-              tải lên máy chủ dần dần và giữ tới khi link hết hạn hoặc bị thu hồi.
+              Ai có link đều nghe được mà không cần đăng nhập, nhưng không tải về được. Link dùng được ngay; các bài
+              được tải lên dần và giữ đến khi link hết hạn hoặc bị thu hồi.
             </p>
             <div class="small text-danger mb-2 empty-hide" id="shareError" role="alert"></div>
             <div class="d-flex flex-column gap-2 mb-3" id="shareLinks"></div>
@@ -904,7 +947,7 @@
                   <i class="bi bi-x-lg"></i>
                 </button>
               </div>
-              <div class="form-text">Nếu chưa chọn, tool sẽ hỏi thư mục khi bạn bấm tải.</div>
+              <div class="form-text">Nếu chưa chọn, DLiMusic sẽ hỏi thư mục mỗi khi tải.</div>
 
               <div class="form-check form-switch mt-4">
                 <input class="form-check-input" type="checkbox" role="switch" id="setSub" />

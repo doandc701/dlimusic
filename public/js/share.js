@@ -222,7 +222,7 @@
           ? t("Playlist “{name}” đã hết hạn lúc {date}.", { name: err.name, date: dateText(err.expiredAt) })
           : t("Playlist này không còn nghe được nữa."),
       ],
-      SHARE_REVOKED: [t("Link này đã bị thu hồi"), t("Người chia sẻ đã tắt link này.")],
+      SHARE_REVOKED: [t("Link này đã bị thu hồi"), t("Người chia sẻ đã thu hồi link này.")],
       gone: [t("Không tìm thấy link này"), t("Link không đúng, hoặc đã hết hạn từ lâu.")],
       error: [t("Chưa mở được playlist"), t("Kết nối có vấn đề, hãy thử lại sau ít phút.")],
     };
@@ -341,7 +341,7 @@
     const ready = songs.filter((s) => s.ready).length;
     $("chatMembers").textContent =
       ready < songs.length
-        ? t("{ready}/{n} bài đã sẵn sàng, các bài khác đang được tải lên · hết hạn {date}", {
+        ? t("{ready}/{n} bài sẵn sàng, còn lại đang tải lên · hết hạn {date}", {
             ready,
             n: songs.length,
             date: until,

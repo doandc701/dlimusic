@@ -1172,7 +1172,7 @@ async function cloudShare(method, action, body) {
     body: body && JSON.stringify(body),
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw httpError(res.status, data.error || "Chưa chia sẻ được, hãy thử lại sau", { code: data.code });
+  if (!res.ok) throw httpError(res.status, data.error || "Không chia sẻ được, hãy thử lại sau", { code: data.code });
   return data;
 }
 
@@ -1328,7 +1328,8 @@ const ownPlaylist = (id) => {
 /** POST /api/shares: a new link for a playlist, open at once; its songs are then sent ("share" events). */
 async function sharePlaylist(id, days) {
   const p = ownPlaylist(id);
-  if ([...uploads.values()].some((u) => u.playlistId === id)) throw httpError(409, "Playlist này đang được chia sẻ");
+  if ([...uploads.values()].some((u) => u.playlistId === id))
+    throw httpError(409, "Playlist này đang được tải lên, hãy chờ xong rồi thử lại");
   const { items, songs, skipped } = await shareItems(p);
   const { share } = await cloudShare("POST", "share-create", { playlistId: p.id, name: p.name, days, songs, skipped });
   uploadShare(
@@ -1385,7 +1386,8 @@ async function route(method, url, body, signal) {
         emit("auth", auth);
         return { ok: true };
       }
-      if (!pendingInput || pendingInput.kind !== kind) throw httpError(409, "Không chờ thông tin này");
+      if (!pendingInput || pendingInput.kind !== kind)
+        throw httpError(409, "Bước này không cần thông tin đó, hãy tải lại trang");
       const { resolve } = pendingInput;
       pendingInput = null;
       auth.step = "waiting";
@@ -1574,7 +1576,7 @@ async function route(method, url, body, signal) {
       const all = load(STORE.favorites, {});
       const list = (all[auth.me.id] || []).filter((x) => x !== id);
       if (on) {
-        if (list.length >= FAVORITES_LIMIT) throw httpError(400, `Tối đa ${FAVORITES_LIMIT} file yêu thích`);
+        if (list.length >= FAVORITES_LIMIT) throw httpError(400, `Tối đa ${FAVORITES_LIMIT} bài yêu thích`);
         list.unshift(id);
       }
       if (list.length) all[auth.me.id] = list;

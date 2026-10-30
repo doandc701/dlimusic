@@ -216,7 +216,7 @@
   // templates with values that only the server writes: recognised in the page with the values filled in
   const PATTERNS = [
     "Telegram yêu cầu chờ {n}s",
-    "Tối đa {n} file yêu thích",
+    "Tối đa {n} bài yêu thích",
     "Thư mục không tồn tại: {path}",
     "Không phải thư mục: {path}",
     "Không có quyền ghi vào thư mục: {path}",
@@ -224,6 +224,8 @@
     "Bạn thử quá nhiều lần. Telegram yêu cầu đợi {n} phút rồi thử lại.",
     "Bạn thử quá nhiều lần. Telegram yêu cầu đợi {n} giây rồi thử lại.",
     "Telegram từ chối đăng nhập ({code}). Vui lòng thử lại.",
+    "Tối đa {n} link chia sẻ cùng lúc, hãy thu hồi bớt",
+    "Link đã đạt thời hạn tối đa {n} ngày, hãy tạo link mới",
   ];
 
   // Another tab of the app changed the language.

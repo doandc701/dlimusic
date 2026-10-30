@@ -664,7 +664,7 @@ export async function joinChat(client, { chat, invite }) {
   } catch (err) {
     throw telegramError(err);
   }
-  if (entity instanceof Api.User) throw httpErr(400, "Không thể tham gia người dùng hoặc bot, hãy mở để nhắn tin.");
+  if (entity instanceof Api.User) throw httpErr(400, "Không thể tham gia người dùng hoặc bot, hãy mở trực tiếp.");
   if (!(entity instanceof Api.Channel)) {
     // basic groups have no public link: being in it is the only way to see it
     if (entity instanceof Api.Chat && !entity.left)
@@ -721,7 +721,7 @@ export function loginQr(token) {
 // ---------- Telegram sign-in errors in plain Vietnamese ----------
 
 const AUTH_ERRORS = {
-  PHONE_CODE_INVALID: "Mã xác nhận không đúng. Kiểm tra lại mã trong app Telegram rồi nhập lại.",
+  PHONE_CODE_INVALID: "Mã xác nhận không đúng. Kiểm tra lại mã trong ứng dụng Telegram rồi nhập lại.",
   PHONE_CODE_EXPIRED: "Mã xác nhận đã hết hạn. Hãy quay lại bước số điện thoại để nhận mã mới.",
   PHONE_CODE_EMPTY: "Vui lòng nhập mã xác nhận.",
   PHONE_NUMBER_INVALID: "Số điện thoại không hợp lệ. Kiểm tra lại mã quốc gia và số điện thoại.",
@@ -949,7 +949,7 @@ export function editPlaylists(list, change, now = Date.now()) {
       return put({ ...p, songs: p.songs.filter((s) => !songs.includes(s)) });
     case "order":
       // only the same songs, each once (a device that missed a change sends an order without it: kept at the end)
-      if (songs.some((s) => !p.songs.includes(s))) throw new Error("Thứ tự không khớp playlist");
+      if (songs.some((s) => !p.songs.includes(s))) throw new Error("Thứ tự không khớp với playlist");
       return put({ ...p, songs: [...new Set([...songs, ...p.songs])] });
     default:
       throw new Error("Thao tác không hợp lệ");

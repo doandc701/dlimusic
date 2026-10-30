@@ -381,12 +381,12 @@ const LOGIN_STEPS = {
   phone: { title: "Đăng nhập DLiMusic", desc: "Nhập số điện thoại của bạn.", type: "tel", placeholder: "912 345 678" },
   code: {
     title: "Nhập mã xác nhận",
-    desc: "DLiMusic vừa gửi mã vào app Telegram của bạn (không phải SMS).",
+    desc: "DLiMusic vừa gửi mã vào ứng dụng Telegram của bạn (không phải SMS).",
     type: "text",
     placeholder: "12345",
   },
   password: {
-    title: "Mật khẩu 2 lớp",
+    title: "Mật khẩu xác minh 2 bước",
     desc: "Tài khoản bật xác minh 2 bước, nhập mật khẩu.",
     type: "password",
     placeholder: "Mật khẩu",
@@ -1296,7 +1296,7 @@ function renderDialogs() {
       ${state.visibleChats ? t("<strong>{n}</strong>/{total} hội thoại", { n: shown.length, total }) : t("<strong>{n}</strong> hội thoại", { n: total })}</span>
     <span class="ms-auto"></span>${dialogSortMenu()}
     <button class="btn btn-sm chats-bar-btn flex-none" data-chats-edit>
-      <i class="bi bi-sliders"></i> ${state.visibleChats ? t("Chọn lại") : t("Chọn hiển thị")}</button>`
+      <i class="bi bi-sliders"></i> ${state.visibleChats ? t("Chọn lại") : t("Chọn hội thoại")}</button>`
     : "";
   if (!shown.length && state.dialogs.length && !q) {
     $("dialogs").innerHTML = `<div class="text-center text-body-secondary small p-4">
@@ -2484,6 +2484,12 @@ $("plShuffleBtn").addEventListener("click", () => openPlaylist() && playPlaylist
 $("plRenameBtn").addEventListener("click", () => openPlaylist() && renamePlaylist(openPlaylist().id));
 $("plDeleteBtn").addEventListener("click", () => openPlaylist() && deletePlaylist(openPlaylist().id));
 $("plShareBtn").addEventListener("click", () => openPlaylist() && openShare(openPlaylist().id));
+// phones: the same actions from the ⋯ menu
+const PL_MORE = { shuffle: "plShuffleBtn", share: "plShareBtn", rename: "plRenameBtn", delete: "plDeleteBtn" };
+$("plMoreMenu").addEventListener("click", (e) => {
+  const id = PL_MORE[e.target.closest("[data-pl-more]")?.dataset.plMore];
+  if (id) $(id).click();
+});
 
 // ---------- sharing a playlist (browser build): a secret link to a copy of its songs, heard without signing in ----------
 // web/backend.js makes the link at once and then sends the songs (Telegram -> /api/cloud -> Cloudflare R2), one
@@ -2572,7 +2578,7 @@ function shareStatus(l) {
   if (parts.length)
     return `<div class="small share-note text-warning-emphasis"><i class="bi bi-arrow-repeat"></i> ${t("Playlist đã thay đổi: {what}. Bấm Đồng bộ để cập nhật link.", { what: parts.join(", ") })}</div>`;
   if (l.ready < l.count)
-    return `<div class="small share-note text-warning-emphasis"><i class="bi bi-hourglass-split"></i> ${t("{ready}/{count} bài sẵn sàng, phần còn lại sẽ được tải tiếp", { ready: l.ready, count: l.count })}</div>`;
+    return `<div class="small share-note text-warning-emphasis"><i class="bi bi-hourglass-split"></i> ${t("{ready}/{count} bài sẵn sàng, phần còn lại đang được tải lên", { ready: l.ready, count: l.count })}</div>`;
   return `<div class="small share-note text-success"><i class="bi bi-check2-circle"></i> ${t("Đã khớp với playlist")}</div>`;
 }
 
@@ -2639,7 +2645,7 @@ $("shareCreate").addEventListener("click", async () => {
     toast(
       r.skippedCount
         ? t("Đã tạo link chia sẻ, {n} bài không chia sẻ được", { n: r.skippedCount })
-        : t("Đã tạo link, đang tải nhạc lên"),
+        : t("Đã tạo link chia sẻ, đang tải nhạc lên"),
       r.skippedCount ? "warn" : "success",
     );
   } catch (err) {
@@ -3259,7 +3265,7 @@ function updateSelection() {
   const files = state.scan ? state.scan.files.filter((f) => state.selected.has(f.id)) : [];
   const total = files.reduce((s, f) => s + (f.size || 0), 0);
   $("selInfo").innerHTML = files.length
-    ? `<span class="badge text-bg-primary rounded-pill">${files.length}</span> <span class="d-none d-sm-inline">${t("file được chọn")}</span><span class="d-sm-none">${t("bài")}</span>${total ? ` · <strong>${fmt(total)}</strong>` : ""}`
+    ? `<span class="badge text-bg-primary rounded-pill">${files.length}</span> <span class="d-none d-sm-inline">${t("file được chọn")}</span><span class="d-sm-none">${t("bài đã chọn")}</span>${total ? ` · <strong>${fmt(total)}</strong>` : ""}`
     : `<span class="small text-body-secondary hint">${t("<kbd>Shift</kbd> + bấm để chọn liên tiếp")}</span>`;
   $("downloadBtn").disabled = !files.length;
   $("addPlBtn").disabled = !files.some(playable);
@@ -5096,7 +5102,9 @@ function applyCaps() {
   // Choosing where files go only exists on a PC / desktop; phones and tablets use the Downloads folder.
   if (!CAPS.pickFolder) show($("setFolderSection"), false);
   // a playlist shared through a link: the browser build only
-  show($("plShareBtn"), !!CAPS.share);
+  // (sm and up: its own button; phones: in the ⋯ menu)
+  $("plShareBtn").classList.toggle("d-sm-inline-flex", !!CAPS.share);
+  show($("plMoreShare"), !!CAPS.share);
 }
 
 applyCaps();

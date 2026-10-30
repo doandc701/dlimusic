@@ -532,7 +532,7 @@ function listFolder(requested) {
     { label: "Music", icon: "music-note-beamed", path: path.join(home, "Music") },
     { label: "Downloads", icon: "download", path: path.join(home, "Downloads") },
     { label: "Desktop", icon: "display", path: path.join(home, "Desktop") },
-    { label: "Thư mục tool", icon: "folder", path: path.join(ROOT_DIR, "downloads") },
+    { label: "Thư mục DLiMusic", icon: "folder", path: path.join(ROOT_DIR, "downloads") },
   ].filter((s) => isDir(s.path));
 
   return {
@@ -1686,7 +1686,7 @@ async function handleApi(req, res, url) {
       const list = (favorites[auth.me.id] ||= []).filter((x) => x !== id);
       if (on) {
         if (list.length >= FAVORITES_LIMIT)
-          return sendJson(res, 400, { error: `Tối đa ${FAVORITES_LIMIT} file yêu thích` });
+          return sendJson(res, 400, { error: `Tối đa ${FAVORITES_LIMIT} bài yêu thích` });
         list.unshift(id); // newest first
       }
       if (list.length) favorites[auth.me.id] = list;

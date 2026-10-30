@@ -1298,7 +1298,8 @@ function resumeShares(list) {
 
 /**
  * What of a playlist is shared, read from Telegram: music only (no voice, video…), each small enough, in its order.
- * skipped: its other songs (not music, too big, or no longer reachable), so a sync does not count them as new.
+ * skipped: its other songs and why ("kind": not music, "big": over SHARE_FILE_MAX, "gone": no longer reachable,
+ * "many": past SHARE_SONGS_MAX), so a sync does not count them as new and the dialog can say so.
  */
 async function shareItems(p) {
   const scan = await favoritesScan(p.songs, null, { key: `share:${p.id}`, title: p.name });
@@ -1316,7 +1317,17 @@ async function shareItems(p) {
     ref: it.fav,
   }));
   const shared = new Set(songs.map((x) => x.ref));
-  return { items, songs, skipped: p.songs.filter((ref) => !shared.has(ref)) };
+  const byRef = new Map([...scan.items.values()].map((it) => [it.fav, it]));
+  const skipped = p.songs
+    .filter((ref) => !shared.has(ref))
+    .map((ref) => {
+      const it = byRef.get(ref);
+      if (!it) return { ref, why: "gone" };
+      const why =
+        mediaKind(it.msg) !== "audio" || !(it.info.size > 0) ? "kind" : it.info.size > SHARE_FILE_MAX ? "big" : "many";
+      return { ref, why, name: displayName(it.info) };
+    });
+  return { items, songs, skipped };
 }
 
 const ownPlaylist = (id) => {

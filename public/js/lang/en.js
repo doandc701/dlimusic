@@ -610,5 +610,12 @@
     "Tài khoản không khớp": "The account doesn't match",
     "Danh sách bài không hợp lệ": "Invalid song list",
     "Thứ tự không khớp với playlist": "The order doesn't match the playlist",
+    "{n} bài trong playlist không chia sẻ được: {why}": "{n} {n|song|songs} of the playlist not shared: {why}",
+    "quá 500 MB": "over 500 MB",
+    "không phải nhạc": "not music",
+    "không còn mở được": "no longer available",
+    "quá 1000 bài": "past 1,000 songs",
+    "chưa rõ lý do, bấm Đồng bộ để xem": "reason unknown, press Sync to see",
+    "chưa rõ lý do": "reason unknown",
   },
 };

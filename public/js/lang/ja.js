@@ -610,5 +610,12 @@
     "Tài khoản không khớp": "アカウントが一致しません",
     "Danh sách bài không hợp lệ": "曲リストが無効です",
     "Thứ tự không khớp với playlist": "順番がプレイリストと一致しません",
+    "{n} bài trong playlist không chia sẻ được: {why}": "プレイリストの {n} 曲は共有されていません：{why}",
+    "quá 500 MB": "500 MB 超",
+    "không phải nhạc": "音楽ではない",
+    "không còn mở được": "開けなくなった",
+    "quá 1000 bài": "1000 曲超",
+    "chưa rõ lý do, bấm Đồng bộ để xem": "理由不明、「同期」で確認できます",
+    "chưa rõ lý do": "理由不明",
   },
 };

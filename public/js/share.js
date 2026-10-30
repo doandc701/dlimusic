@@ -428,6 +428,7 @@
   const AHEAD = 2; // songs fetched ahead of the one playing
   const KEEP = 4; // whole songs kept in this page (the playing one, the next ones, the one before)
   const PARALLEL = 3; // pieces of a song fetched at a time
+  const WHOLE_MAX = 40 * 1024 * 1024; // like the main page's NEXT_MAX: a longer mix is not held in memory, it streams
   const wholes = new Map(); // song id -> { url (blob:), job, ctl } (ids, not places: the owner may sync the list)
 
   /** Remember a song's signed URL (from the list or share-play), with when it was given. */
@@ -450,7 +451,7 @@
   function fetchWhole(i) {
     const s = songs[i];
     if (wholes.has(s?.id)) return wholes.get(s.id).job;
-    if (!s?.ready || !s.size) return Promise.resolve();
+    if (!s?.ready || !s.size || s.size > WHOLE_MAX) return Promise.resolve();
     const w = { url: null, ctl: new AbortController() };
     const piece = async (k, url) => {
       const from = k * PIECE;

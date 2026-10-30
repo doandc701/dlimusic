@@ -2745,6 +2745,11 @@ body.pl-drag-on * {
 .share-note .bi {
   margin-right: 0.2rem;
 }
+/* the songs left out of a link: their names under a line that opens */
+details.share-note > summary {
+  cursor: pointer;
+  list-style-position: inside;
+}
 /* under a line: sync (left) · revoke (right), then extend */
 .share-actions {
   margin-top: 0.6rem;

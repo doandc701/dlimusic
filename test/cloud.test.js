@@ -754,6 +754,7 @@ describe("MongoDB storage", () => {
         for (const id of [0, 1, 2]) await put(api, token, code, id, 0, bytes(10, id));
         let list = (await call(api, "GET", "share-list", { token })).data.shares.find((x) => x.code === code);
         assert.deepEqual([list.refs, list.skipped], [["3|1", "3|2", "3|3"], ["3|9"]], "what the dialog compares with");
+        assert.deepEqual(list.skippedInfo, [{ ref: "3|9", why: null, name: null }], "a ref alone: no reason known");
 
         // the playlist now: c first, a, a new d; b taken out
         const r = await call(api, "POST", "share-sync", {
@@ -794,6 +795,20 @@ describe("MongoDB storage", () => {
           body: { code, songs: [song("c", 10, "3|3"), song("a", 10, "3|1"), song("d", 20, "3|4")] },
         });
         assert.deepEqual([again.data.added, again.data.removed, again.data.pending], [0, 0, []]);
+        // the reasons the owner's page sends are kept, for the dialog (bad ones dropped)
+        const why = await call(api, "POST", "share-sync", {
+          token,
+          body: {
+            code,
+            songs: [song("c", 10, "3|3"), song("a", 10, "3|1"), song("d", 20, "3|4")],
+            skipped: [{ ref: "3|9", why: "big", name: "Mix 2 giờ" }, { ref: "3|8", why: "nope" }, { ref: "bad" }],
+          },
+        });
+        assert.deepEqual(why.data.share.skippedInfo, [
+          { ref: "3|9", why: "big", name: "Mix 2 giờ" },
+          { ref: "3|8", why: null, name: null },
+        ]);
+        assert.deepEqual(why.data.share.skipped, ["3|9", "3|8"]);
         assert.equal(
           (await call(api, "POST", "share-sync", { token, body: { code, songs: [] } })).status,
           400,

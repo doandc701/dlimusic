@@ -64,7 +64,25 @@ const songId = (song, i) => (Number.isInteger(song.id) ? song.id : i);
 const songKeys = (code, song, i) =>
   Array.from({ length: pieces(song.size) }, (_, k) => pieceKey(code, songId(song, i), k));
 /** The refs of the playlist's songs that are not shared, as sent (at most what a playlist holds). */
-const cleanSkipped = (v) => (Array.isArray(v) ? [...new Set(v.filter(isFavoriteId))].slice(0, SHARE_SONGS_MAX) : []);
+const SKIP_WHY = new Set(["kind", "big", "gone", "many"]);
+/**
+ * The playlist's songs that are not shared, as sent: [{ ref, why, name }] (why: not music, too big, gone, past the
+ * limit); a ref alone (pages loaded before the reasons) is kept without one.
+ */
+const cleanSkipped = (v) => {
+  if (!Array.isArray(v)) return [];
+  const seen = new Set();
+  const out = [];
+  for (const x of v) {
+    const ref = typeof x === "string" ? x : x?.ref;
+    if (!isFavoriteId(ref) || seen.has(ref)) continue;
+    seen.add(ref);
+    out.push({ ref, why: SKIP_WHY.has(x?.why) ? x.why : null, name: text(x?.name, 200) || null });
+  }
+  return out.slice(0, SHARE_SONGS_MAX);
+};
+/** Stored skipped songs (refs alone in links made before the reasons): [{ ref, why, name }]. */
+const skippedOf = (s) => (s.skipped || []).map((x) => (typeof x === "string" ? { ref: x, why: null, name: null } : x));
 const text = (v, max) => (typeof v === "string" ? v.trim().slice(0, max) : "");
 
 /** A song's details as sent by the owner's browser, or null. */
@@ -243,7 +261,8 @@ export function shareRoutes({ env, db, account, fail, key, fetchFn, now = () => 
     expiresAt: s.expiresAt.getTime(),
     maxExpiresAt: maxExpiry(s),
     refs: s.songs.map((x) => x.ref),
-    skipped: s.skipped || [],
+    skipped: skippedOf(s).map((x) => x.ref),
+    skippedInfo: skippedOf(s), // why each one is not shared (null: not known, a link made before the reasons)
   });
 
   // the audio URL: signed with the server's secret, for one song (its size and type too), for a few minutes

@@ -580,5 +580,12 @@
     "Tài khoản không khớp": "账号不匹配",
     "Danh sách bài không hợp lệ": "歌曲列表无效",
     "Thứ tự không khớp với playlist": "顺序与歌单不一致",
+    "{n} bài trong playlist không chia sẻ được: {why}": "歌单中有 {n} 首未分享：{why}",
+    "quá 500 MB": "超过 500 MB",
+    "không phải nhạc": "不是音乐",
+    "không còn mở được": "已无法打开",
+    "quá 1000 bài": "超过 1000 首",
+    "chưa rõ lý do, bấm Đồng bộ để xem": "原因未知，点击“同步”查看",
+    "chưa rõ lý do": "原因未知",
   },
 };

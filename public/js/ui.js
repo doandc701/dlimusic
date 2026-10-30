@@ -2498,7 +2498,8 @@ $("plMoreMenu").addEventListener("click", (e) => {
 const shareModal = new bootstrap.Modal($("shareModal"));
 const share = {
   id: null, // the playlist in the dialog
-  // the account's open links { code, playlistId, name, count, ready, expiresAt, maxExpiresAt, refs, skipped, link }
+  // the account's open links { code, playlistId, name, count, ready, expiresAt, maxExpiresAt, refs, skipped,
+  // skippedInfo: [{ ref, why, name }], link }
   links: [],
   uploads: new Map(), // link code -> { done, total, failed } while its songs are sent (goes on when the dialog closes)
   making: null, // the playlist whose link is being made (its songs are read first)
@@ -2582,6 +2583,32 @@ function shareStatus(l) {
   return `<div class="small share-note text-success"><i class="bi bi-check2-circle"></i> ${t("Đã khớp với playlist")}</div>`;
 }
 
+// why a song of the playlist is not in its link (web/backend.js shareItems)
+const SKIP_WHY = {
+  big: "quá 500 MB",
+  kind: "không phải nhạc",
+  gone: "không còn mở được",
+  many: "quá 1000 bài",
+};
+
+/** The playlist's songs left out of the link, and why (a link made before the reasons: Sync tells). */
+function shareSkipped(l) {
+  const p = playlistById(l.playlistId);
+  const now = new Set(p?.songs || []);
+  const left = (l.skippedInfo || []).filter((x) => now.has(x.ref));
+  if (!left.length) return "";
+  const counts = new Map();
+  for (const x of left) counts.set(x.why, (counts.get(x.why) || 0) + 1);
+  const why = [...counts]
+    .map(([k, n]) => (SKIP_WHY[k] ? `${t(SKIP_WHY[k])} (${n})` : t("chưa rõ lý do, bấm Đồng bộ để xem")))
+    .join(", ");
+  const named = left.filter((x) => x.name);
+  const head = `<i class="bi bi-info-circle"></i> ${t("{n} bài trong playlist không chia sẻ được: {why}", { n: left.length, why })}`;
+  if (!named.length) return `<div class="small share-note text-body-secondary mt-1">${head}</div>`;
+  return `<details class="small share-note text-body-secondary mt-1"><summary>${head}</summary>
+    <ul class="mb-0 mt-1 ps-3">${named.map((x) => `<li><span translate="no">${esc(x.name)}</span> — ${t(SKIP_WHY[x.why] || "chưa rõ lý do")}</li>`).join("")}</ul></details>`;
+}
+
 function shareCard(l) {
   const c = shareChanges(l);
   const changed = !!c && (c.added || c.removed || c.moved);
@@ -2597,6 +2624,7 @@ function shareCard(l) {
       <span><i class="bi bi-clock"></i> ${t("Hết hạn {date}", { date: shareDate(l.expiresAt) })}</span>
     </div>
     ${shareStatus(l)}
+    ${shareSkipped(l)}
     <div class="share-actions">
       <div class="d-flex align-items-center gap-2">
         <button class="btn btn-sm ${changed ? "btn-primary" : "btn-outline-primary"} text-nowrap" type="button" data-share-sync="${esc(l.code)}"

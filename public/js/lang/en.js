@@ -369,6 +369,7 @@
     "Đã lưu cài đặt": "Settings saved",
     "Tìm hội thoại…": "Search chats…",
     "Chọn tất cả": "Select all",
+    Chọn: "Select",
     "Bỏ hết": "Clear all",
     "Bỏ lọc: hiện mọi hội thoại, kể cả hội thoại mới sau này":
       "Remove filter: show every chat, including new ones later",
@@ -524,6 +525,7 @@
     "Tạo link": "Create link",
     "Link chia sẻ": "Share link",
     "Sao chép link": "Copy link",
+    "Mở link trong tab mới": "Open the link in a new tab",
     "{n} bài · hết hạn {date}": "{n} {n|song|songs} · expires {date}",
     "Thu hồi": "Revoke",
     "Bấm lần nữa để thu hồi": "Press again to revoke",

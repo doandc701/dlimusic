@@ -282,8 +282,12 @@
     name: ["name-asc", "name-desc"],
     size: ["size-desc", "size-asc", "dur-desc", "dur-asc"],
   };
-  /** The songs (indexes) in the order shown, not narrowed by the search (the play order follows it). */
-  const sortedSongs = () => songs.map((_, i) => i).sort(SORTS[sort]);
+  /** The songs (indexes) in the order shown, not narrowed by the search (the play order follows it); not the hidden. */
+  const sortedSongs = () =>
+    songs
+      .map((_, i) => i)
+      .filter((i) => !hidden.has(songs[i].id))
+      .sort(SORTS[sort]);
   const matches = (i) => !query || norm(`${songs[i].title} ${songs[i].performer || ""}`).includes(norm(query));
 
   function playCell(i) {
@@ -297,10 +301,11 @@
 
   function rowHtml(i) {
     const s = songs[i];
-    const cls = [i === current && "playing", !s.ready && "pending"].filter(Boolean).join(" ");
+    const sel = selected.has(s.id);
+    const cls = [sel && "row-sel", i === current && "playing", !s.ready && "pending"].filter(Boolean).join(" ");
     const sizeDur = [fmt(s.size), s.duration ? time(s.duration) : ""].filter(Boolean).join(" · ");
     return `<tr class="${cls}" data-i="${i}">
-      <td></td>
+      <td><input class="form-check-input" type="checkbox" data-pick ${sel ? "checked" : ""} tabindex="-1" aria-label="${t("Chọn")}"></td>
       <td class="play">${playCell(i)}</td>
       <td class="text-body-secondary small">${i + 1}</td>
       <td class="text-truncate name-cell"><div class="name-main">${esc(s.title)}</div>
@@ -318,6 +323,82 @@
       ? ""
       : `<div class="text-center text-body-secondary p-5">${t("Không có bài nào khớp")}</div>`;
     $("fileCount").textContent = t("{n}/{total} bài", { n: list.length, total: songs.length });
+    renderPicks();
+  }
+
+  // ---------- songs ticked, then hidden from the list and from what plays (this visit only: never saved) ----------
+
+  const selected = new Set(); // song ids ticked
+  const hidden = new Set(); // song ids hidden: a reload shows them again
+
+  /** The button and its count, the header's box, "Hiện lại". */
+  function renderPicks() {
+    for (const id of selected) if (!songs.some((x) => x.id === id) || hidden.has(id)) selected.delete(id);
+    const n = selected.size;
+    $("hideBtn").disabled = !n;
+    $("hideCount").textContent = n;
+    show($("hideCount"), n > 0);
+    const shown = sortedSongs().filter(matches);
+    const on = shown.filter((i) => selected.has(songs[i].id)).length;
+    $("headCheck").checked = shown.length > 0 && on === shown.length;
+    $("headCheck").indeterminate = on > 0 && on < shown.length;
+    const off = songs.filter((x) => hidden.has(x.id)).length;
+    show($("unhideBtn"), off > 0);
+    $("unhideText").textContent = t("Hiện lại {n} bài đã ẩn", { n: off });
+  }
+
+  function pick(i, on) {
+    on ? selected.add(songs[i].id) : selected.delete(songs[i].id);
+    const row = $("files").querySelector(`tr[data-i="${i}"]`);
+    row?.classList.toggle("row-sel", on);
+    const box = row?.querySelector("[data-pick]");
+    if (box) box.checked = on;
+    renderPicks();
+  }
+
+  /**
+   * The ticked songs leave the list and the play order: what plays next follows the new list; the song playing,
+   * when hidden, gives way to the next one at once.
+   */
+  function hideSelected() {
+    const n = selected.size;
+    if (!n) return;
+    const before = order;
+    for (const id of selected) hidden.add(id);
+    selected.clear();
+    const visible = (k) => songs[k].ready && !hidden.has(songs[k].id);
+    if (waiting !== null && hidden.has(songs[waiting]?.id)) waiting = null;
+    if (current >= 0 && hidden.has(songs[current].id)) {
+      const at = before.indexOf(current);
+      const after = [...before.slice(at + 1), ...(repeat === "off" ? [] : before.slice(0, at))];
+      const next = after.find(visible) ?? -1;
+      order = orderFrom(next);
+      renderList();
+      if (next >= 0) play(next, 0, { reveal: true });
+      else {
+        player.pause();
+        bridgeOn(false);
+        renderPlayer();
+      }
+    } else {
+      order = orderFrom(current);
+      renderList();
+      if (current >= 0) {
+        renderPlayer();
+        keepWholes(current); // the next songs fetched ahead: from the new list
+      }
+    }
+    toast(t("Đã ẩn {n} bài khỏi danh sách phát — tải lại trang để hiện lại", { n }), "info");
+  }
+
+  function unhideAll() {
+    hidden.clear();
+    order = orderFrom(current);
+    renderList();
+    if (current >= 0) {
+      renderPlayer();
+      keepWholes(current);
+    }
   }
 
   function setSort(value) {
@@ -963,6 +1044,10 @@
   // a row (or its ▶): play it; the one playing: pause / go on
   $("files").addEventListener("click", (e) => {
     const row = e.target.closest("tr[data-i]");
+    if (row && e.target.closest("td:first-child")) {
+      const i = Number(row.dataset.i);
+      return pick(i, !selected.has(songs[i].id));
+    }
     if (!row || row.classList.contains("pending")) return;
     const i = Number(row.dataset.i);
     if (i === current && player.getAttribute("src")) return void togglePlay();
@@ -970,6 +1055,15 @@
     play(i);
   });
   $("plPlayBtn").addEventListener("click", startList);
+  $("hideBtn").addEventListener("click", hideSelected);
+  $("unhideBtn").addEventListener("click", unhideAll);
+  // the header's box: every song shown (the search's), or none
+  $("headCheck").addEventListener("click", (e) => {
+    const shown = sortedSongs().filter(matches);
+    const all = e.target.checked;
+    for (const i of shown) all ? selected.add(songs[i].id) : selected.delete(songs[i].id);
+    renderList();
+  });
   $("fileSearch").addEventListener("input", (e) => {
     query = e.target.value;
     renderList();

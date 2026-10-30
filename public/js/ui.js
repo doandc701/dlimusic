@@ -2699,26 +2699,20 @@ async function deletePlaylist(id) {
   if (ok && (await editPlaylist({ op: "delete", id }))) toast(t("Đã xoá playlist “{name}”", { name: p.name }), "info");
 }
 
-/** Open a playlist and play it from its first song (or a random one, shuffle on). */
-async function playPlaylist(id, shuffle = false) {
+/** Open a playlist and play it from its first song. */
+async function playPlaylist(id) {
   if (state.chat !== PL_PREFIX + id || !state.scan?.playlist) await openChat(PL_PREFIX + id);
   if (!state.scan?.playlist) return;
   const songs = visibleFiles({ withSearch: false }).filter(playable);
   if (!songs.length) return toast(t("Playlist chưa có bài nào"), "info");
-  if (shuffle && !state.shuffle) {
-    state.shuffle = true;
-    renderModes();
-  }
-  const first = shuffle ? songs[Math.floor(Math.random() * songs.length)] : songs[0];
-  play(first.id);
+  play(songs[0].id);
 }
 $("plPlayBtn").addEventListener("click", () => openPlaylist() && playPlaylist(openPlaylist().id));
-$("plShuffleBtn").addEventListener("click", () => openPlaylist() && playPlaylist(openPlaylist().id, true));
 $("plRenameBtn").addEventListener("click", () => openPlaylist() && renamePlaylist(openPlaylist().id));
 $("plDeleteBtn").addEventListener("click", () => openPlaylist() && deletePlaylist(openPlaylist().id));
 $("plShareBtn").addEventListener("click", () => openPlaylist() && openShare(openPlaylist().id));
 // phones: the same actions from the ⋯ menu
-const PL_MORE = { shuffle: "plShuffleBtn", share: "plShareBtn", rename: "plRenameBtn", delete: "plDeleteBtn" };
+const PL_MORE = { share: "plShareBtn", rename: "plRenameBtn", delete: "plDeleteBtn" };
 $("plMoreMenu").addEventListener("click", (e) => {
   const id = PL_MORE[e.target.closest("[data-pl-more]")?.dataset.plMore];
   if (id) $(id).click();
@@ -2851,6 +2845,7 @@ function shareCard(l) {
     <div class="input-group input-group-sm">
       <input class="form-control" readonly value="${esc(l.link)}" aria-label="${t("Link chia sẻ")}">
       <button class="btn btn-primary" type="button" data-share-copy="${esc(l.link)}" title="${t("Sao chép link")}"><i class="bi bi-copy"></i></button>
+      <a class="btn btn-outline-primary" href="${esc(l.link)}" target="_blank" rel="noopener noreferrer" title="${t("Mở link trong tab mới")}" aria-label="${t("Mở link trong tab mới")}"><i class="bi bi-box-arrow-up-right"></i></a>
     </div>
     <div class="share-meta small text-body-secondary">
       <span><i class="bi bi-music-note-list"></i> ${t("{n} bài", { n: l.count })}</span>

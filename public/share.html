@@ -56,10 +56,14 @@
     <!-- the app's own look: colours, buttons, the player dock (the same as the main page) -->
     <link rel="stylesheet" href="/css/styles.css" />
     <style>
-      /* the main page's list (styles.css .file-table, same columns), without what needs an account: the first
-         column (tick boxes) and the last one (♥) stay, empty and narrow, so the column rules still apply */
+      /* the main page's list (styles.css .file-table, same columns), without what needs an account: the tick boxes
+         (songs to hide) stay; the last column (♥) stays, empty and narrow, so the column rules still apply */
       .share-view .file-table .col-check,
-      .share-view .file-table td:nth-child(1),
+      .share-view .file-table td:nth-child(1) {
+        width: 40px !important;
+        padding-left: 0.75rem !important;
+        padding-right: 0 !important;
+      }
       .share-view .file-table .col-fav,
       .share-view .file-table td:nth-child(6) {
         width: 8px !important;
@@ -262,14 +266,32 @@
             <option value="dur-asc">Thời lượng ngắn → dài</option>
           </select>
         </div>
-        <span class="ms-auto small text-body-secondary" id="fileCount"></span>
+        <div class="ms-auto d-flex align-items-center gap-2">
+          <!-- the ticked songs leave the list and what plays, for this visit only (a reload shows them again) -->
+          <button
+            class="btn btn-sm btn-outline-danger text-nowrap"
+            id="hideBtn"
+            type="button"
+            disabled
+            title="Ẩn các bài đã chọn khỏi danh sách và danh sách phát (tải lại trang để hiện lại)"
+          >
+            <i class="bi bi-eye-slash"></i> <span class="d-none d-sm-inline">Ẩn khỏi danh sách phát</span>
+            <span class="badge rounded-pill text-bg-danger d-none" id="hideCount"></span>
+          </button>
+          <button class="btn btn-sm btn-link text-nowrap d-none" id="unhideBtn" type="button">
+            <i class="bi bi-eye"></i> <span id="unhideText"></span>
+          </button>
+          <span class="small text-body-secondary text-nowrap" id="fileCount"></span>
+        </div>
       </div>
 
       <div class="flex-grow-1 overflow-auto bg-body" id="filesWrap">
         <table class="table table-hover table-sm align-middle mb-0 file-table d-none" id="filesTable">
           <thead>
             <tr>
-              <th class="col-check"></th>
+              <th class="col-check">
+                <input class="form-check-input" type="checkbox" id="headCheck" tabindex="-1" aria-label="Chọn tất cả" />
+              </th>
               <th class="col-play"></th>
               <th class="col-num text-body-secondary sortable" data-sort="num" title="Sắp theo thứ tự playlist">
                 # <i class="bi sort-ico"></i>

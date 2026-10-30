@@ -33,12 +33,18 @@
 // ids: their index, given on the owner's next request). skipped: the playlist's songs that are not shared (not music,
 // too big), so a sync does not count them as new. R2 objects: "s/<code>/<id>/<k>". Expired links are removed by the
 // next owner requests; an R2 lifecycle rule ("s/", 91 days: a link lives SHARE_MAX_DAYS at most) is the safety net.
+// "shareLocks" { _id: accountId, until, by }: one create / sync at a time; "shareQuota" { _id: "<account>:<day>",
+// bytes, at }: the uploads of a day (removed after 2 days).
 
 import crypto from "node:crypto";
 import { r2Config, createBucket } from "./r2.js";
 import { SHARE_DAYS, SHARE_SONGS_MAX, SHARE_FILE_MAX, SHARE_CHUNK, SHARE_MAX_DAYS, isFavoriteId } from "../core.js";
 
+// An owner is anyone with a Telegram account, and R2 is paid by the GB kept and by the write: what one account may
+// keep shared at once (the songs of all its open links), and send in a day (UTC; a piece may be sent again and again).
 export const SHARES_PER_ACCOUNT = 20;
+export const SHARE_ACCOUNT_BYTES = 20 * 1024 ** 3;
+export const SHARE_DAY_BYTES = 2 * SHARE_ACCOUNT_BYTES;
 /** Routes whose body is raw bytes, not JSON. */
 export const RAW_BODY = new Set(["share-put"]);
 /** A route's answer that is not JSON: { [RAW]: { status, headers, body } }. */
@@ -46,8 +52,11 @@ export const RAW = Symbol("raw response");
 
 const PLAY_URL_TTL = 10 * 60;
 const SWEEP_MAX = 3;
+const LOCK_MS = 15_000; // a create / sync holds the account's links this long at most (a function's time is short)
 
 const isCode = (c) => typeof c === "string" && /^[\w-]{16}$/.test(c);
+const isAudioType = (t) => typeof t === "string" && /^audio\/[\w.+-]{1,60}$/.test(t);
+const bytesOf = (songs) => songs.reduce((n, x) => n + x.size, 0);
 const pieces = (size) => Math.ceil(size / SHARE_CHUNK);
 const pieceKey = (code, id, k) => `s/${code}/${id}/${k}`;
 /** A song's id (a link made before ids: its index). */
@@ -69,7 +78,7 @@ function cleanSong(s) {
     performer: text(s.performer, 300) || null,
     duration: Number.isFinite(duration) && duration > 0 && duration < 86400 ? Math.round(duration) : null,
     size,
-    type: typeof s.type === "string" && /^audio\/[\w.+-]{1,60}$/.test(s.type) ? s.type : "audio/mpeg",
+    type: isAudioType(s.type) ? s.type : "audio/mpeg",
     ref: s.ref,
     ok: false,
   };
@@ -81,11 +90,75 @@ function cleanSong(s) {
  * @param account  async (req) => { acc } of the device token, throws 401
  * @param fail     (status, message, code?) => Error
  * @param key      32-byte secret (signs the audio URLs)
+ * @param limits   { accountBytes, dayBytes } (tests)
  */
-export function shareRoutes({ env, db, account, fail, key, fetchFn, now = () => new Date() }) {
+export function shareRoutes({ env, db, account, fail, key, fetchFn, now = () => new Date(), limits = {} }) {
+  const { accountBytes = SHARE_ACCOUNT_BYTES, dayBytes = SHARE_DAY_BYTES } = limits;
   const config = r2Config(env);
   const bucket = config && createBucket(config, { fetchFn, now });
   const shares = async () => (await db()).collection("shares");
+
+  /**
+   * One create / sync of an account's links at a time: requests sent all at once would each see room under the
+   * limits (links, bytes) and all go in; two syncs of a link would each write their own list.
+   */
+  async function locked(acc, fn) {
+    const col = (await db()).collection("shareLocks");
+    const by = crypto.randomBytes(8).toString("hex");
+    const t = now();
+    try {
+      await col.updateOne(
+        { _id: acc, until: { $lte: t } },
+        { $set: { until: new Date(t.getTime() + LOCK_MS), by } },
+        { upsert: true },
+      );
+    } catch (err) {
+      // held: the upsert finds no free lock and cannot insert a second one
+      if (err?.code === 11000)
+        throw fail(429, "Đang có thay đổi link chia sẻ khác, hãy thử lại sau giây lát", "SHARE_BUSY");
+      throw err;
+    }
+    try {
+      return await fn();
+    } finally {
+      await col.updateOne({ _id: acc, by }, { $set: { until: new Date(0) } }).catch(() => {});
+    }
+  }
+
+  /** The bytes of an account's open links (but `except`'s), against SHARE_ACCOUNT_BYTES. */
+  async function room(acc, wanted, except) {
+    const [used] = await (
+      await shares()
+    )
+      .aggregate([
+        { $match: { accountId: acc, expiresAt: { $gt: now() }, ...(except && { _id: { $ne: except } }) } },
+        { $unwind: "$songs" },
+        { $group: { _id: null, bytes: { $sum: "$songs.size" } } },
+      ])
+      .toArray();
+    if ((used?.bytes || 0) + wanted > accountBytes)
+      throw fail(
+        400,
+        `Các link chia sẻ của bạn chứa tối đa ${Math.round(accountBytes / 1024 ** 3)} GB nhạc, hãy bớt bài hoặc thu hồi link cũ`,
+        "SHARE_QUOTA",
+      );
+  }
+
+  /** `n` bytes counted against the account's uploads of today (UTC); past SHARE_DAY_BYTES: 429 until tomorrow. */
+  async function spend(acc, n) {
+    const t = now();
+    const day = await (
+      await db()
+    )
+      .collection("shareQuota")
+      .findOneAndUpdate(
+        { _id: `${acc}:${t.toISOString().slice(0, 10)}` },
+        { $inc: { bytes: n }, $setOnInsert: { at: t } },
+        { upsert: true, returnDocument: "after" },
+      );
+    if (day.bytes > dayBytes)
+      throw fail(429, "Hôm nay bạn đã tải lên quá nhiều, link sẽ được tải tiếp vào ngày mai", "SHARE_DAY_LIMIT");
+  }
 
   function need() {
     if (!bucket) throw fail(503, "Máy chủ chưa cấu hình kho nhạc chia sẻ", "SHARE_OFF");
@@ -212,23 +285,26 @@ export function shareRoutes({ env, db, account, fail, key, fetchFn, now = () => 
       if (!songs.every(Boolean)) throw fail(400, "Bài hát không hợp lệ");
       songs.forEach((x, i) => (x.id = i));
       await storage(sweep).catch(() => {});
-      const col = await shares();
-      if ((await col.countDocuments({ accountId: acc, expiresAt: { $gt: now() } })) >= SHARES_PER_ACCOUNT)
-        throw fail(400, `Tối đa ${SHARES_PER_ACCOUNT} link chia sẻ cùng lúc, hãy thu hồi bớt`);
-      const t = now();
-      const share = {
-        _id: crypto.randomBytes(12).toString("base64url"),
-        accountId: acc,
-        playlistId,
-        name,
-        songs,
-        nextId: songs.length,
-        skipped: cleanSkipped(body.skipped),
-        createdAt: t,
-        expiresAt: new Date(t.getTime() + days * 86400_000),
-      };
-      await col.insertOne(share);
-      return { share: summary(share) };
+      return locked(acc, async () => {
+        const col = await shares();
+        if ((await col.countDocuments({ accountId: acc, expiresAt: { $gt: now() } })) >= SHARES_PER_ACCOUNT)
+          throw fail(400, `Tối đa ${SHARES_PER_ACCOUNT} link chia sẻ cùng lúc, hãy thu hồi bớt`);
+        await room(acc, bytesOf(songs));
+        const t = now();
+        const share = {
+          _id: crypto.randomBytes(12).toString("base64url"),
+          accountId: acc,
+          playlistId,
+          name,
+          songs,
+          nextId: songs.length,
+          skipped: cleanSkipped(body.skipped),
+          createdAt: t,
+          expiresAt: new Date(t.getTime() + days * 86400_000),
+        };
+        await col.insertOne(share);
+        return { share: summary(share) };
+      });
     },
 
     "POST share-put": async (req, body) => {
@@ -246,6 +322,9 @@ export function shareRoutes({ env, db, account, fail, key, fetchFn, now = () => 
       if (!Number.isInteger(k) || k < 0 || k >= n) throw fail(400, "Bài hát không hợp lệ");
       const expected = k < n - 1 ? SHARE_CHUNK : song.size - (n - 1) * SHARE_CHUNK;
       if (body.length !== expected) throw fail(400, "Dữ liệu bài hát không đúng kích thước");
+      // already playable: not written again (each write is paid; what the listeners hear stays what was shared)
+      if (song.ok) return { ok: true };
+      await spend(acc, body.length);
       await storage(() => bucket.put(pieceKey(s._id, id, k), body, song.type));
       // pieces of a song come one after another: the last one makes it playable (found by id: a sync may have
       // moved it meanwhile)
@@ -266,43 +345,47 @@ export function shareRoutes({ env, db, account, fail, key, fetchFn, now = () => 
     "POST share-sync": async (req, body) => {
       need();
       const { acc } = await account(req);
-      const s = await ownOpen(acc, body.code);
-      if (!Array.isArray(body.songs) || !body.songs.length || body.songs.length > SHARE_SONGS_MAX)
-        throw fail(400, "Playlist không có bài nhạc nào chia sẻ được");
-      const incoming = body.songs.map(cleanSong);
-      if (!incoming.every(Boolean)) throw fail(400, "Bài hát không hợp lệ");
-      const had = new Map(s.songs.map((x) => [x.ref, x]));
-      const seen = new Set();
-      let nextId = s.nextId ?? s.songs.length;
-      const songs = [];
-      let added = 0;
-      for (const x of incoming) {
-        if (seen.has(x.ref)) continue;
-        seen.add(x.ref);
-        const old = had.get(x.ref);
-        // already in the link: kept (uploaded or not), its details refreshed; new: to upload
-        if (old) songs.push({ ...old, title: x.title, performer: x.performer, duration: x.duration ?? old.duration });
-        else {
-          songs.push({ ...x, id: nextId++ });
-          added++;
+      return locked(acc, async () => {
+        const s = await ownOpen(acc, body.code);
+        if (!Array.isArray(body.songs) || !body.songs.length || body.songs.length > SHARE_SONGS_MAX)
+          throw fail(400, "Playlist không có bài nhạc nào chia sẻ được");
+        const incoming = body.songs.map(cleanSong);
+        if (!incoming.every(Boolean)) throw fail(400, "Bài hát không hợp lệ");
+        const had = new Map(s.songs.map((x) => [x.ref, x]));
+        const seen = new Set();
+        let nextId = s.nextId ?? s.songs.length;
+        const songs = [];
+        let added = 0;
+        for (const x of incoming) {
+          if (seen.has(x.ref)) continue;
+          seen.add(x.ref);
+          const old = had.get(x.ref);
+          // already in the link: kept (uploaded or not), its details refreshed; new: to upload
+          if (old) songs.push({ ...old, title: x.title, performer: x.performer, duration: x.duration ?? old.duration });
+          else {
+            songs.push({ ...x, id: nextId++ });
+            added++;
+          }
         }
-      }
-      const gone = s.songs.filter((x) => !seen.has(x.ref));
-      await (
-        await shares()
-      ).updateOne({ _id: s._id }, { $set: { songs, nextId, skipped: cleanSkipped(body.skipped) } });
-      // the songs taken out leave R2 (what fails now is left to the lifecycle rule: the link no longer points at them)
-      if (gone.length)
-        await bucket
-          .removeMany(gone.flatMap((x) => songKeys(s._id, x, x.id)))
-          .catch((err) => console.error("share: R2 delete (sync):", err?.message || err));
-      const share = { ...s, songs, skipped: cleanSkipped(body.skipped) };
-      return {
-        share: summary(share),
-        added,
-        removed: gone.length,
-        pending: songs.flatMap((x) => (x.ok ? [] : [{ id: x.id, ref: x.ref }])),
-      };
+        const gone = s.songs.filter((x) => !seen.has(x.ref));
+        // a link made smaller is fine, even with the account past its bytes (links made before the limit)
+        if (bytesOf(songs) > bytesOf(s.songs)) await room(acc, bytesOf(songs), s._id);
+        await (
+          await shares()
+        ).updateOne({ _id: s._id }, { $set: { songs, nextId, skipped: cleanSkipped(body.skipped) } });
+        // the songs taken out leave R2 (what fails now is left to the lifecycle rule: the link no longer points at them)
+        if (gone.length)
+          await bucket
+            .removeMany(gone.flatMap((x) => songKeys(s._id, x, x.id)))
+            .catch((err) => console.error("share: R2 delete (sync):", err?.message || err));
+        const share = { ...s, songs, skipped: cleanSkipped(body.skipped) };
+        return {
+          share: summary(share),
+          added,
+          removed: gone.length,
+          pending: songs.flatMap((x) => (x.ok ? [] : [{ id: x.id, ref: x.ref }])),
+        };
+      });
     },
 
     "POST share-extend": async (req, body) => {
@@ -383,7 +466,12 @@ export function shareRoutes({ env, db, account, fail, key, fetchFn, now = () => 
       const exp = Number(q.get("exp"));
       const sig = Buffer.from(String(q.get("sig") || ""));
       const want =
-        isCode(code) && Number.isInteger(id) && Number.isSafeInteger(size) && size > 0 && Number.isInteger(exp)
+        isCode(code) &&
+        Number.isInteger(id) &&
+        Number.isSafeInteger(size) &&
+        size > 0 &&
+        isAudioType(type) &&
+        Number.isInteger(exp)
           ? Buffer.from(signAudio(code, id, size, type, exp))
           : null;
       if (!want || sig.length !== want.length || !crypto.timingSafeEqual(sig, want) || exp * 1000 < now().getTime())

@@ -47,8 +47,9 @@ const fail = (status, error, code) => Object.assign(new Error(error), { status, 
  * @param env      { MONGODB_URI, MONGODB_DB, TDL_SECRET, TG_API_ID, TG_API_HASH }
  * @param verify   async (session, creds) => account id; asks Telegram (injected in tests)
  * @param fetchFn  fetch, for Cloudflare R2 (injected in tests)
+ * @param shareLimits  { accountBytes, dayBytes } of shared playlists (tests)
  */
-export function createCloudApi({ env, verify, fetchFn, now }) {
+export function createCloudApi({ env, verify, fetchFn, now, shareLimits }) {
   const ready = isMongoUri(env.MONGODB_URI) && String(env.TDL_SECRET || "").length >= 16;
   const key = ready ? keyFromSecret(env.TDL_SECRET) : null;
   const builtin = () => {
@@ -141,13 +142,15 @@ export function createCloudApi({ env, verify, fetchFn, now }) {
       return { ok: true };
     },
 
-    ...shareRoutes({ env, db, account, fail, key, fetchFn, now }),
+    ...shareRoutes({ env, db, account, fail, key, fetchFn, now, limits: shareLimits }),
   };
 
   /** Node (req, res) handler; `action` is the last path segment. */
   return async function handle(req, res, action) {
     res.setHeader("Cache-Control", "no-store");
     res.setHeader("X-Content-Type-Options", "nosniff");
+    // never a page: the songs' bytes are whatever their owner uploaded, opened straight they must not run
+    res.setHeader("Content-Security-Policy", "sandbox; default-src 'none'");
     const send = (status, data) => {
       res.statusCode = status;
       res.setHeader("Content-Type", "application/json; charset=utf-8");

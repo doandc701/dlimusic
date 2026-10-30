@@ -43,10 +43,15 @@ export async function openDb(uri, { dbName = DEFAULT_DB, timeoutMs = 6000 } = {}
   const db = (await pending).db(dbName);
   if (!indexed.has(`${uri}|${dbName}`)) {
     indexed.add(`${uri}|${dbName}`);
-    await db
-      .collection("tokens")
-      .createIndex({ lastUsedAt: 1 }, { expireAfterSeconds: TOKEN_TTL_DAYS * 86400 })
-      .catch(() => {});
+    await Promise.all(
+      [
+        db.collection("tokens").createIndex({ lastUsedAt: 1 }, { expireAfterSeconds: TOKEN_TTL_DAYS * 86400 }),
+        // shared playlists (cloud/share.js): an owner's links, the sweep of expired ones, uploads of the day
+        db.collection("shares").createIndex({ accountId: 1, expiresAt: 1 }),
+        db.collection("shares").createIndex({ expiresAt: 1 }),
+        db.collection("shareQuota").createIndex({ at: 1 }, { expireAfterSeconds: 2 * 86400 }),
+      ].map((p) => p.catch(() => {})),
+    );
   }
   return db;
 }

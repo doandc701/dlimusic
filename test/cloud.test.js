@@ -26,9 +26,10 @@ import {
 } from "../cloud/common.js";
 import { createMirror } from "../cloud/mirror.js";
 import { createCloudApi, tcpSession } from "../cloud/api.js";
+import { SHARES_PER_ACCOUNT, SHARE_ACCOUNT_BYTES } from "../cloud/share.js";
 import { createCloudSync, createAccountSync } from "../web/cloud-sync.js";
 import { readAccount, joinAccount, applyOps, checkOps } from "../cloud/account.js";
-import { editPlaylists, sortPlaylists, SHARE_FILE_MAX, SHARE_CHUNK } from "../core.js";
+import { editPlaylists, sortPlaylists, SHARE_FILE_MAX, SHARE_CHUNK, SHARE_SONGS_MAX } from "../core.js";
 import { presign } from "../cloud/r2.js";
 
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
@@ -889,6 +890,129 @@ describe("MongoDB storage", () => {
         assert.deepEqual((await call(api, "POST", "share-revoke", { token, body: { code } })).data, { ok: true });
         assert.equal((await call(api, "GET", "share-open", { query: `?code=${code}` })).status, 404);
         assert.equal(objects.has(`s/${code}/0/0`), false);
+      });
+
+      // what someone could try: an owner is anyone with a Telegram account, a listener anyone with the link
+      describe("abuse", () => {
+        const abuse = (extra) =>
+          createCloudApi({
+            env: { ...env(), MONGODB_DB: "abuse", ...R2 },
+            verify,
+            fetchFn: r2,
+            now: () => clock,
+            ...extra,
+          });
+        const many = (n, chat, size = SHARE_FILE_MAX) =>
+          Array.from({ length: n }, (_, i) => song(`s${i}`, size, `${chat}|${i + 1}`));
+        before(() => raw.db("abuse").dropDatabase());
+
+        test("an account cannot park terabytes in R2: its open links hold SHARE_ACCOUNT_BYTES at most", async () => {
+          const api = abuse();
+          const { token } = (await call(api, "POST", "login", { body: { session: SESSION_A } })).data;
+          const create = (songs, id) =>
+            call(api, "POST", "share-create", { token, body: { playlistId: id, name: "X", days: 30, songs } });
+          const fit = Math.floor(SHARE_ACCOUNT_BYTES / SHARE_FILE_MAX);
+          let r = await create(many(SHARE_SONGS_MAX, 1), "q1"); // 1000 × 100 MB
+          assert.equal(r.status, 400);
+          assert.equal(r.data.code, "SHARE_QUOTA");
+          const half = Math.floor(fit / 2);
+          r = await create(many(half, 2), "q2");
+          assert.equal(r.status, 200);
+          const { code } = r.data.share;
+          assert.equal((await create(many(fit - half + 1, 3), "q3")).data.code, "SHARE_QUOTA", "together past it");
+          // a sync may not grow a link past it either, but may make one smaller
+          r = await call(api, "POST", "share-sync", { token, body: { code, songs: many(fit + 1, 2) } });
+          assert.equal(r.data.code, "SHARE_QUOTA");
+          r = await call(api, "POST", "share-sync", { token, body: { code, songs: many(1, 2) } });
+          assert.equal(r.status, 200);
+          assert.equal(r.data.share.count, 1);
+        });
+
+        test("links made all at once do not get past the limits", async () => {
+          const api = abuse();
+          const { token } = (await call(api, "POST", "login", { body: { session: SESSION_B } })).data;
+          const create = (i) =>
+            call(api, "POST", "share-create", {
+              token,
+              body: { playlistId: `r${i}`, name: "R", days: 1, songs: [song("a", 10, `7|${i + 1}`)] },
+            });
+          const burst = await Promise.all(Array.from({ length: SHARES_PER_ACCOUNT + 10 }, (_, i) => create(i)));
+          const made = burst.filter((r) => r.status === 200).length;
+          assert.ok(made >= 1 && made <= SHARES_PER_ACCOUNT, `${made} links`);
+          assert.ok(burst.every((r) => r.status === 200 || r.data.code === "SHARE_BUSY"));
+          // one after another (as the page does): up to the limit, not one more
+          let n = made;
+          while (n < SHARES_PER_ACCOUNT) assert.equal((await create(100 + n++)).status, 200);
+          assert.equal((await create(999)).status, 400);
+          assert.equal((await call(api, "GET", "share-list", { token })).data.shares.length, SHARES_PER_ACCOUNT);
+        });
+
+        test("a song is not written to R2 over and over: once playable it stays, and a day's uploads are capped", async () => {
+          let writes = 0;
+          const counting = (url, opts = {}) => {
+            if (opts.method === "PUT") writes++;
+            return r2(url, opts);
+          };
+          const api = abuse({ fetchFn: counting, shareLimits: { dayBytes: 2 * SHARE_CHUNK } });
+          const { token } = (await call(api, "POST", "login", { body: { session: SESSION_A } })).data;
+          const { code } = (
+            await call(api, "POST", "share-create", {
+              token,
+              body: {
+                playlistId: "w1",
+                name: "W",
+                days: 7,
+                songs: [song("a", 10, "6|1"), song("b", SHARE_CHUNK + 10, "6|2")],
+              },
+            })
+          ).data.share;
+          assert.equal((await put(api, token, code, 0, 0, bytes(10, 1))).status, 200);
+          for (let i = 0; i < 5; i++) assert.equal((await put(api, token, code, 0, 0, bytes(10, 2))).status, 200);
+          assert.equal(writes, 1, "a playable song is not written again");
+          const open = (await call(api, "GET", "share-open", { query: `?code=${code}` })).data;
+          const first = await call(api, "GET", "share-audio", {
+            query: open.songs[0].url.slice(open.songs[0].url.indexOf("?")),
+          });
+          assert.ok(bytes(10, 1).equals(first.data), "what the listener hears is what was sent first");
+          // the first piece of an unfinished song, sent again and again: the day's quota stops it
+          const piece = bytes(SHARE_CHUNK, 3);
+          assert.equal((await put(api, token, code, 1, 0, piece)).status, 200);
+          const r = await put(api, token, code, 1, 0, piece);
+          assert.equal(r.status, 429);
+          assert.equal(r.data.code, "SHARE_DAY_LIMIT");
+          assert.equal(writes, 2);
+          // the next day: it goes on
+          clock = new Date(clock.getTime() + 86400_000);
+          assert.equal((await put(api, token, code, 1, 1, bytes(10, 4))).status, 200);
+        });
+
+        test("nothing the function answers runs as a page, whatever bytes were uploaded", async () => {
+          const api = abuse();
+          const { token } = (await call(api, "POST", "login", { body: { session: SESSION_B } })).data;
+          // B's links of the test before: revoked, room for one
+          for (const l of (await call(api, "GET", "share-list", { token })).data.shares)
+            await call(api, "POST", "share-revoke", { token, body: { code: l.code } });
+          const html = Buffer.from("<script>alert(document.cookie)</script>");
+          const { code } = (
+            await call(api, "POST", "share-create", {
+              token,
+              body: {
+                playlistId: "x1",
+                name: "<img src=x onerror=alert(1)>",
+                days: 1,
+                songs: [song("x", html.length, "4|1")],
+              },
+            })
+          ).data.share;
+          await put(api, token, code, 0, 0, html);
+          const open = await call(api, "GET", "share-open", { query: `?code=${code}` });
+          assert.match(open.headers["content-security-policy"], /sandbox/);
+          const url = open.data.songs[0].url;
+          const a = await call(api, "GET", "share-audio", { query: url.slice(url.indexOf("?")) });
+          assert.equal(a.status, 206);
+          assert.equal(a.headers["content-type"], "audio/mpeg");
+          assert.match(a.headers["content-security-policy"], /sandbox/);
+        });
       });
     });
   });

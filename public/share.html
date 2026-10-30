@@ -143,6 +143,13 @@
   </head>
 
   <body class="d-flex flex-column app-body">
+    <!-- page load: the main page's splash (styles.css .boot-splash); the name is complete once the playlist is read -->
+    <div class="boot-splash" id="bootSplash" role="status" aria-label="Đang tải DLiMusic">
+      <img src="/img/logo-320.webp" class="boot-logo" alt="" />
+      <div class="boot-word" id="bootWord" aria-hidden="true">
+        <span>D</span><span>L</span><span>i</span><span>M</span><span>u</span><span>s</span><span>i</span><span>c</span>
+      </div>
+    </div>
     <nav class="navbar bg-body border-bottom px-3 py-2 flex-nowrap">
       <a class="navbar-brand fw-bold mb-0 text-truncate" href="#" id="homeLink" aria-label="DLiMusic — về trang đầu"
         ><img src="/img/logo-128.png" class="brand-logo" alt="" /><span class="brand-text">DLiMusic</span></a

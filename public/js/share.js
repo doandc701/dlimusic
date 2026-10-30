@@ -165,6 +165,44 @@
     return data;
   }
 
+  // ---------- page load splash (the main page's, ui.js): "DLiMusic" comes in letter by letter ----------
+  // The letters come in more and more slowly, the last one is kept back: the name is complete once the playlist is
+  // read (or the page says why it cannot be), then the rest come in quickly and the splash fades.
+  const splash = (() => {
+    const el = $("bootSplash");
+    const letters = [...$("bootWord").children];
+    let shown = 0;
+    let timer = null;
+    let finished = false;
+    const reveal = () => letters[shown++]?.classList.add("in");
+    const creep = () => {
+      if (shown >= letters.length - 1) return;
+      reveal();
+      timer = setTimeout(creep, 140 * 1.3 ** shown);
+    };
+    timer = setTimeout(creep, 100);
+    setTimeout(() => self.finish(), 20_000); // still waiting after that: the page shows where it is
+    const self = {
+      finish() {
+        if (finished) return;
+        finished = true;
+        clearTimeout(timer);
+        const rest = () => {
+          if (shown < letters.length) {
+            reveal();
+            return void (timer = setTimeout(rest, 70));
+          }
+          setTimeout(() => {
+            el.classList.add("gone");
+            setTimeout(() => el.remove(), 400);
+          }, 350);
+        };
+        rest();
+      },
+    };
+    return self;
+  })();
+
   // ---------- the link can no longer be heard: a page of its own (the headphones cat asleep) ----------
 
   const GONE_CODES = new Set(["SHARE_GONE", "SHARE_EXPIRED", "SHARE_REVOKED"]);
@@ -581,6 +619,13 @@
     renderList();
     renderPlayer();
     showStart(i, at);
+    mediaSession(); // the lock screen shows the new song at once (its bar at its start, below)
+    if (navigator.mediaSession?.setPositionState && songs[i].duration)
+      try {
+        navigator.mediaSession.setPositionState({ duration: songs[i].duration, playbackRate: 1, position: at || 0 });
+      } catch {
+        // not taken: told again once the song loads
+      }
     if (reveal) requestAnimationFrame(revealPlaying);
     keepWholes(i);
     try {
@@ -619,6 +664,26 @@
   }
 
   // Lock screen / headphones / notification: title, playlist, ⏮ ⏭ ±10 s.
+  /**
+   * The lock screen's bar: where the song is and how long it is. Told again on every change (a new song, play /
+   * pause, a seek, the speed), else it kept the song before's (the next one started at a stuck "0:00").
+   * The length the list knows stands in until the player knows it.
+   */
+  function positionState() {
+    if (!navigator.mediaSession?.setPositionState || current < 0) return;
+    const dur = duration();
+    try {
+      if (!dur) return void navigator.mediaSession.setPositionState(); // not known yet: cleared, not the song before's
+      navigator.mediaSession.setPositionState({
+        duration: dur,
+        playbackRate: player.playbackRate || 1,
+        position: Math.min(Math.max(0, player.currentTime || 0), dur),
+      });
+    } catch {
+      // a browser without it, or numbers it does not take
+    }
+  }
+
   function mediaSession() {
     const s = songs[current];
     if (!("mediaSession" in navigator) || !s) return;
@@ -634,15 +699,22 @@
       // MediaMetadata not supported
     }
   }
+  // iPhones / iPads show ±10 s on the lock screen instead of ⏮ ⏭ when a page handles both: there the songs
+  // come first (the seek bar still seeks); elsewhere (Android, desktop media keys) both are there
+  const IOS =
+    /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
   if ("mediaSession" in navigator) {
     const handlers = {
       play: () => player.play().catch(() => {}),
       pause: () => player.pause(),
       previoustrack: () => playPrev(),
       nexttrack: () => playNext(),
-      seekbackward: () => seek(-10),
-      seekforward: () => seek(10),
-      seekto: (d) => (player.currentTime = d.seekTime),
+      seekbackward: IOS ? null : () => seek(-10),
+      seekforward: IOS ? null : () => seek(10),
+      seekto: (d) => {
+        player.currentTime = d.seekTime;
+        positionState();
+      },
     };
     for (const [action, fn] of Object.entries(handlers)) {
       try {
@@ -890,6 +962,12 @@
       setHomeCat(evt === "play");
     });
   player.addEventListener("timeupdate", renderTime);
+  for (const evt of ["loadedmetadata", "durationchange", "playing", "pause", "seeked", "ratechange"])
+    player.addEventListener(evt, positionState);
+  for (const evt of ["play", "pause"])
+    player.addEventListener(evt, () => {
+      if ("mediaSession" in navigator) navigator.mediaSession.playbackState = evt === "play" ? "playing" : "paused";
+    });
   player.addEventListener("durationchange", renderTime);
   player.addEventListener("seeked", renderTime);
   player.addEventListener("progress", paintSeek);
@@ -1058,13 +1136,14 @@
   }
 
   async function start() {
-    if (!/^[\w-]{16}$/.test(code)) return gone();
+    if (!/^[\w-]{16}$/.test(code)) return (gone(), splash.finish());
     let data;
     try {
       data = await get("share-open", { code });
     } catch (err) {
-      return gone(err);
+      return (gone(err), splash.finish());
     }
+    splash.finish();
     songs = data.songs;
     urlTtl = data.expiresIn || urlTtl;
     songs.forEach((s, i) => s.url && setUrl(i, s.url));

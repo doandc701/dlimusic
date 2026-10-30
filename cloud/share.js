@@ -95,10 +95,18 @@ export function shareRoutes({ env, db, account, fail, key, fetchFn, now = () => 
     return s;
   }
 
-  /** A link anyone may open: not expired, else 404. */
+  /**
+   * A link anyone may open, else why not (the page tells the listener): 410 SHARE_EXPIRED (with the playlist's name
+   * and when, until the next sweep removes it), 410 SHARE_REVOKED, 404 SHARE_GONE (never was, or removed since).
+   */
   async function open(code) {
     const s = isCode(code) && (await (await shares()).findOne({ _id: code }));
-    if (!s || s.expiresAt <= now()) throw fail(404, "Link chia sẻ không tồn tại hoặc đã hết hạn", "SHARE_GONE");
+    if (!s) throw fail(404, "Link chia sẻ không tồn tại hoặc đã hết hạn", "SHARE_GONE");
+    if (s.expiresAt.getTime() === 0) throw fail(410, "Link chia sẻ đã bị thu hồi", "SHARE_REVOKED");
+    if (s.expiresAt <= now())
+      throw Object.assign(fail(410, "Link chia sẻ đã hết hạn", "SHARE_EXPIRED"), {
+        data: { name: s.name, expiredAt: s.expiresAt.getTime() },
+      });
     return s;
   }
 

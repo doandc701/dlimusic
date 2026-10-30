@@ -681,10 +681,21 @@ describe("MongoDB storage", () => {
 
         // a week later the link is gone, and the next owner request removes its songs
         clock = new Date(clock.getTime() + 7 * 86400_000);
-        assert.equal((await call(api, "GET", "share-open", { query: `?code=${code}` })).data.code, "SHARE_GONE");
+        const expired = await call(api, "GET", "share-open", { query: `?code=${code}` });
+        assert.equal(expired.status, 410);
+        assert.equal(expired.data.code, "SHARE_EXPIRED");
+        assert.equal(expired.data.name, "Chill", "the page says which playlist it was");
+        assert.equal(expired.data.expiredAt, new Date("2026-10-29T00:00:00Z").getTime() + 7 * 86400_000);
+        assert.equal(expired.data.songs, undefined, "and nothing more");
         assert.equal((await put(api, token, code, 1, 0, b)).status, 404, "nothing more is uploaded");
         assert.equal((await call(api, "GET", "share-list", { token })).data.shares.length, 0);
         assert.equal([...objects.keys()].filter((k) => k.startsWith(`s/${code}/`)).length, 0);
+        assert.equal(
+          (await call(api, "GET", "share-open", { query: `?code=${code}` })).data.code,
+          "SHARE_GONE",
+          "removed by the sweep: not found",
+        );
+        assert.equal((await call(api, "GET", "share-open", { query: "?code=nope" })).status, 404);
       });
 
       test("revoking closes the link at once and removes its songs", async () => {

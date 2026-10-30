@@ -185,6 +185,7 @@ export function createCloudApi({ env, verify, fetchFn, now }) {
       send(status, {
         error: err.status ? err.message : "Không kết nối được MongoDB",
         ...(err.code && { code: err.code }),
+        ...(err.status && err.data), // what the page shows with it (an expired link: its name and when)
         ...(!err.status && { code: "CLOUD_DOWN" }),
       });
     }

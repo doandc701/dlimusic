@@ -5,6 +5,8 @@
 // the page that holds the Telegram connection (web/backend.js -> serveStream):
 //   /api/media?key=&id=          play / preview, with Range support so the player can seek
 //   /__dl?key=&id=&job=&c=       a download into the browser's Downloads folder (attachment)
+// and, for the page of a shared playlist (public/js/share.js):
+//   /api/cloud/share-audio?…     the range the player asks for, whole, from the function's pieces (see shareAudio)
 
 const providers = new Map(); // page client id -> MessagePort to that page
 const waiting = [];
@@ -44,6 +46,7 @@ self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
   if (url.origin !== self.location.origin) return;
   if (url.pathname === "/api/media") event.respondWith(serve(event, url, false));
+  else if (url.pathname === "/api/cloud/share-audio") event.respondWith(shareAudio(event.request, url));
   else if (url.pathname === "/__dl") event.respondWith(serve(event, url, true));
 });
 
@@ -164,4 +167,68 @@ async function serve(event, url, download) {
     { highWaterMark: 1 }, // pull only as fast as the player / download consumes
   );
   return new Response(body, { status: meta.status, headers });
+}
+
+// ---------- a shared playlist's song: the whole range asked, from the function's pieces ----------
+// /api/cloud/share-audio answers one piece at most (the function's answers are 4.5 MB at most): Chrome asks again
+// for the rest, but Safari takes the first piece for the whole song and stops there (a 30 s song ended at 17 s).
+// Here the player gets what it asked for, the pieces fetched one after another as it reads them.
+
+const SHARE_PIECE = 3 * 1024 * 1024; // core.js SHARE_CHUNK
+
+async function shareAudio(request, url) {
+  const size = Number(url.searchParams.get("n"));
+  if (!(size > 0)) return fetch(request);
+  const m = /^bytes=(\d*)-(\d*)$/.exec(request.headers.get("range") || "");
+  let start = 0;
+  let end = size - 1;
+  if (m && m[1] === "") start = Math.max(0, size - Number(m[2]));
+  else if (m) {
+    start = Number(m[1]);
+    if (m[2] !== "") end = Math.min(Number(m[2]), size - 1);
+  }
+  if (start >= size || end < start)
+    return new Response("", { status: 416, headers: { ...SAFE_HEADERS, "Content-Range": `bytes */${size}` } });
+  const pieceEnd = (at) => Math.min(end, (Math.floor(at / SHARE_PIECE) + 1) * SHARE_PIECE - 1);
+  const get = (from) => fetch(url.href, { headers: { Range: `bytes=${from}-${pieceEnd(from)}` } });
+  // within one piece (the page's own prefetch, Safari's first "bytes=0-1"): as it is
+  if (m && pieceEnd(start) === end) return get(start);
+  const first = await get(start);
+  if (!first.ok || !first.body) return first; // an expired URL (403): the page asks for a new one
+  let at = start;
+  let reader = first.body.getReader();
+  const body = new ReadableStream(
+    {
+      async pull(controller) {
+        for (;;) {
+          if (!reader) {
+            if (at > end) return controller.close();
+            const res = await get(at).catch(() => null);
+            if (!res?.ok || !res.body) return controller.error(new Error(`share-audio ${res?.status}`));
+            reader = res.body.getReader();
+          }
+          const { done, value } = await reader.read();
+          if (done) {
+            reader = null;
+            continue;
+          }
+          at += value.length;
+          controller.enqueue(value);
+          return;
+        }
+      },
+      cancel() {
+        reader?.cancel().catch(() => {});
+      },
+    },
+    { highWaterMark: 1 }, // fetched only as fast as the player reads
+  );
+  const headers = {
+    ...SAFE_HEADERS,
+    "Content-Type": safeType(url.searchParams.get("t")),
+    "Accept-Ranges": "bytes",
+    "Content-Length": String(end - start + 1),
+  };
+  if (m) headers["Content-Range"] = `bytes ${start}-${end}/${size}`;
+  return new Response(body, { status: m ? 206 : 200, headers });
 }

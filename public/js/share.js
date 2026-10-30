@@ -30,8 +30,7 @@
   for (const el of document.querySelectorAll(".app-slogan")) el.textContent = t(SLOGAN);
   for (const el of document.querySelectorAll(".copy-year")) el.textContent = new Date().getFullYear();
 
-  const player = new Audio();
-  player.preload = "auto";
+  const player = $("player"); // in the page, like the main page's (index.html)
   let songs = [];
   let current = -1;
   let order = []; // the play order (song indexes): the list's, or shuffled from the song playing
@@ -621,13 +620,7 @@
     renderList();
     renderPlayer();
     showStart(i, at);
-    mediaSession(); // the lock screen shows the new song at once (its bar at its start, below)
-    if (navigator.mediaSession?.setPositionState && songs[i].duration)
-      try {
-        navigator.mediaSession.setPositionState({ duration: songs[i].duration, playbackRate: 1, position: at || 0 });
-      } catch {
-        // not taken: told again once the song loads
-      }
+    mediaSession(); // the lock screen shows the new song at once
     if (reveal) requestAnimationFrame(revealPlaying);
     keepWholes(i);
     try {
@@ -665,27 +658,9 @@
     if (first !== undefined) play(first, 0, { reveal: true });
   }
 
-  // Lock screen / headphones / notification: title, playlist, ⏮ ⏭ ±10 s.
-  /**
-   * The lock screen's bar: where the song is and how long it is. Told again on every change (a new song, play /
-   * pause, a seek, the speed), else it kept the song before's (the next one started at a stuck "0:00").
-   * The length the list knows stands in until the player knows it.
-   */
-  function positionState() {
-    if (!navigator.mediaSession?.setPositionState || current < 0) return;
-    const dur = duration();
-    try {
-      if (!dur) return void navigator.mediaSession.setPositionState(); // not known yet: cleared, not the song before's
-      navigator.mediaSession.setPositionState({
-        duration: dur,
-        playbackRate: player.playbackRate || 1,
-        position: Math.min(Math.max(0, player.currentTime || 0), dur),
-      });
-    } catch {
-      // a browser without it, or numbers it does not take
-    }
-  }
-
+  // Lock screen / headphones / notification: title, playlist, ⏮ ⏭ ±10 s — as the main page does (ui.js): the bar
+  // there is the <audio> element's own (where it is, how long), never told by the page. Telling it (setPositionState,
+  // playbackState) made iPhones keep what was told: the bar stood still until the next pause / play.
   function mediaSession() {
     const s = songs[current];
     if (!("mediaSession" in navigator) || !s) return;
@@ -701,22 +676,12 @@
       // MediaMetadata not supported
     }
   }
-  // iPhones / iPads show ±10 s on the lock screen instead of ⏮ ⏭ when a page handles both: there the songs
-  // come first (the seek bar still seeks); elsewhere (Android, desktop media keys) both are there
-  const IOS =
-    /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
   if ("mediaSession" in navigator) {
     const handlers = {
-      play: () => player.play().catch(() => {}),
-      pause: () => player.pause(),
       previoustrack: () => playPrev(),
       nexttrack: () => playNext(),
-      seekbackward: IOS ? null : () => seek(-10),
-      seekforward: IOS ? null : () => seek(10),
-      seekto: (d) => {
-        player.currentTime = d.seekTime;
-        positionState();
-      },
+      seekbackward: () => seek(-10),
+      seekforward: () => seek(10),
     };
     for (const [action, fn] of Object.entries(handlers)) {
       try {
@@ -968,12 +933,6 @@
       setHomeCat(evt === "play");
     });
   player.addEventListener("timeupdate", renderTime);
-  for (const evt of ["loadedmetadata", "durationchange", "playing", "pause", "seeked", "ratechange"])
-    player.addEventListener(evt, positionState);
-  for (const evt of ["play", "pause"])
-    player.addEventListener(evt, () => {
-      if ("mediaSession" in navigator) navigator.mediaSession.playbackState = evt === "play" ? "playing" : "paused";
-    });
   player.addEventListener("durationchange", renderTime);
   player.addEventListener("seeked", renderTime);
   player.addEventListener("progress", paintSeek);

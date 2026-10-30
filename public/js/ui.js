@@ -2281,9 +2281,119 @@ function renderPlGrid() {
         </ul>
       </div>
       <div class="pl-name">${esc(p.name)}</div>
-      <div class="pl-sub">${t("{n} bài", { n: p.songs.length })}</div></div>`,
+      <div class="pl-sub">${t("{n} bài", { n: p.songs.length })}${plSizeText(p)}</div></div>`,
       )
       .join("");
+  fillPlSizes();
+}
+
+// ---------- the size of a playlist: its songs' sizes, kept in this browser (a playlist holds only their ids) ----------
+// Filled from every list shown (a chat, the favourites, a playlist); a playlist with songs not known yet is read in
+// the background, one at a time, once per change of it.
+
+const SIZES_MAX = 20000; // songs kept (the oldest go first)
+const songSizes = (() => {
+  let acct = null;
+  let map = new Map();
+  let timer = null;
+  const key = () => `songSizes:${acct}`;
+  // ids of private chats' messages are the account's own: one cache per account
+  const cache = () => {
+    const id = state.auth?.me?.id || "";
+    if (id !== acct) {
+      acct = id;
+      try {
+        map = new Map(Object.entries(JSON.parse(localStorage.getItem(key()) || "{}")));
+      } catch {
+        map = new Map();
+      }
+    }
+    return map;
+  };
+  const save = () => {
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      try {
+        localStorage.setItem(key(), JSON.stringify(Object.fromEntries([...map].slice(-SIZES_MAX))));
+      } catch {
+        // full or blocked: known for this visit only
+      }
+    }, 1000);
+  };
+  return {
+    get: (ref) => cache().get(ref),
+    /** true when it changed */
+    set(ref, size) {
+      const m = cache();
+      if (m.get(ref) === size) return false;
+      m.delete(ref);
+      m.set(ref, size);
+      save();
+      return true;
+    },
+  };
+})();
+
+/** A playlist's size in bytes, or null while a song's is not known. */
+function plSize(p) {
+  let n = 0;
+  for (const ref of p.songs) {
+    const size = songSizes.get(ref);
+    if (size === undefined) return null;
+    n += size;
+  }
+  return n;
+}
+
+/** The sizes of the songs of a list (only those not seen yet); a playlist's songs gone from Telegram count 0. */
+function rememberSizes(scan) {
+  if (!scan?.files) return;
+  const songsOnly = !scan.fav && !scan.playlist && !scan.recent; // a chat: its photos, videos… are not kept
+  let changed = false;
+  for (let i = scan.sizedUpTo || 0; i < scan.files.length; i++) {
+    const f = scan.files[i];
+    if (f.size && (!songsOnly || f.kind === "audio")) changed = songSizes.set(favId(f, scan), f.size) || changed;
+  }
+  scan.sizedUpTo = scan.files.length;
+  if (scan.playlist && !scan.sizedMissing) {
+    scan.sizedMissing = true;
+    const found = new Set(scan.files.map((f) => f.fav));
+    for (const ref of playlistById(scan.playlist)?.songs || [])
+      if (!found.has(ref)) changed = songSizes.set(ref, 0) || changed;
+  }
+  if (changed && state.chat === PL_HOME) renderPlGrid();
+}
+
+const SIZING_RETRY_MS = 30_000;
+const sizing = { tried: new Set(), busy: false, retry: null };
+async function fillPlSizes() {
+  // the grid is drawn from what was known before Telegram is connected: read once signed in
+  if (sizing.busy || state.auth?.step !== "ready") return;
+  const p = state.playlists.find((x) => plSize(x) === null && !sizing.tried.has(`${x.id}:${x.up}`));
+  if (!p) return;
+  const key = `${p.id}:${p.up}`;
+  sizing.busy = true;
+  sizing.tried.add(key);
+  let failed = false;
+  try {
+    rememberSizes(await api(`/api/playlists/files?id=${encodeURIComponent(p.id)}`));
+  } catch {
+    failed = true; // offline, Telegram busy (flood wait): tried again a little later
+    sizing.tried.delete(key);
+  } finally {
+    sizing.busy = false;
+  }
+  clearTimeout(sizing.retry);
+  if (failed) sizing.retry = setTimeout(() => state.chat === PL_HOME && renderPlGrid(), SIZING_RETRY_MS);
+  else if (state.chat === PL_HOME) renderPlGrid(); // the next one
+}
+
+/** " · 85.3 MB" under a playlist's cover; " · …" while its songs' sizes are being read. */
+function plSizeText(p) {
+  if (!p.songs.length) return "";
+  const size = plSize(p);
+  if (size === null) return state.auth?.step === "ready" ? " · …" : "";
+  return size ? ` · ${fmt(size)}` : "";
 }
 
 $("plGrid").addEventListener("click", (e) => {
@@ -3169,6 +3279,7 @@ function renderFiles() {
   // a row being dragged: drawn when it is dropped (a page read meanwhile would take the row from under the finger,
   // and the drop with it: the list scrolled on and on)
   if (drag) return void (drag.later = true);
+  rememberSizes(state.scan);
   renderFavScope();
   // a list in its own order, nothing hidden by the search: its songs can be dragged to a new place
   $("chatView").classList.toggle(

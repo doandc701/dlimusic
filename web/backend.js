@@ -1553,7 +1553,7 @@ async function route(method, url, body, signal) {
       requireReady();
       const { shares } = await cloudShare("GET", "share-list");
       resumeShares(shares);
-      const sending = [...uploads.values()].map(({ ctl, ...u }) => u);
+      const sending = [...uploads.values()].map(({ ctl, job, ...u }) => u); // only what can be sent (no Promise)
       return { shares: shares.map((x) => ({ ...x, link: shareLink(x.code) })), uploads: sending };
     }
 

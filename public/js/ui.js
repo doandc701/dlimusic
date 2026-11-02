@@ -1981,6 +1981,10 @@ async function loadFiles({ fresh = false } = {}) {
   setMessage(`<div class="spinner-border text-primary"></div><p class="mt-2" id="scanMsg">${t("Đang quét kênh…")}</p>`);
   $("fileCount").textContent = "";
   state.scan = null;
+  // the list before's paging goes with it: its "Đã tải hết 561 file" stayed under the new scan's spinner, and a page
+  // still loading when the chat changed left "Đang tải thêm…" for good (no page of any list was read after)
+  state.loadingMore = false;
+  renderMore();
   updateSelection();
   try {
     state.scanId = `${PAGE_ID}-${token}`; // progress events carry it: only this scan's count is shown

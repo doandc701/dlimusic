@@ -30,6 +30,7 @@ import {
   sanitize,
   fileInfo,
   mediaKind,
+  postStats,
   displayName,
   resolveTarget,
   safeMediaType,
@@ -959,6 +960,7 @@ function describeScan(scan, ids = null) {
       duration: item.info.duration || null,
       size: item.info.size,
       date: item.msg.date,
+      ...postStats(item.msg),
       downloaded: !!localCopy(scan, item, fromHistory),
     })),
   };

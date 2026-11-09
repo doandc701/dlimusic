@@ -3352,9 +3352,33 @@ function postedAt(f) {
   return `<span class="posted" title="${esc(t("Ngày đăng lên kênh"))}"><i class="bi bi-clock"></i> ${day} ${hm}</span>`;
 }
 
+/** A count written as Telegram writes it: 6022 in full, then 12.3K, 1.2M. */
+function tgCount(n) {
+  const short = (v, unit) => `${(Math.floor(v * 10) / 10).toFixed(1).replace(/\.0$/, "")}${unit}`;
+  return n >= 1e6 ? short(n / 1e6, "M") : n >= 1e4 ? short(n / 1e3, "K") : String(n);
+}
+
+/**
+ * What Telegram shows under a channel post, on a line of its own: each reaction with its count (a Premium custom
+ * emoji, a picture, as a generic one), then the views. A group's messages have none: no line.
+ */
+function postStatsHtml(f) {
+  const reactions = (f.reactions || []).map((r) =>
+    r.emoji === "custom"
+      ? `<span class="post-reaction" title="${esc(t("Biểu tượng cảm xúc riêng"))}"><i class="bi bi-emoji-smile"></i> ${tgCount(r.count)}</span>`
+      : // Telegram sends "❤" as text: with U+FE0F it is drawn as the red heart Telegram shows (harmless on the others)
+        `<span class="post-reaction"><span class="emoji">${esc(r.emoji.includes("️") ? r.emoji : `${r.emoji}️`)}</span> ${tgCount(r.count)}</span>`,
+  );
+  const views = Number.isFinite(f.views)
+    ? `<span class="post-views" title="${esc(t("Lượt xem"))}: ${f.views.toLocaleString(tdlI18n.locale)}"><i class="bi bi-eye"></i> ${tgCount(f.views)}</span>`
+    : "";
+  return reactions.length || views ? `<div class="post-stats" translate="no">${reactions.join("")}${views}</div>` : "";
+}
+
 function rowHtml(f, num) {
   const sel = state.selected.has(f.id);
   const posted = postedAt(f);
+  const stats = postStatsHtml(f);
   const file = displayName(f) !== f.name ? `<i class="bi bi-file-earmark-music"></i> ${esc(f.name)}` : "";
   const cls = [sel && "row-sel", state.playingId === f.id && "playing", dupShade.has(f.id) && "dup-alt"]
     .filter(Boolean)
@@ -3367,7 +3391,8 @@ function rowHtml(f, num) {
       ${file ? `<div class="small text-body-secondary text-truncate name-file">${file}</div>` : ""}
       ${posted ? `<div class="small text-body-secondary text-truncate name-file name-posted">${posted}</div>` : ""}
       ${f.chat ? `<div class="small text-truncate fav-chat"><i class="bi bi-megaphone"></i> ${esc(f.chat)}</div>` : ""}
-      <div class="m-meta small text-body-secondary"><span class="m-size">${[fmt(f.size), fmtDur(f.duration)].filter(Boolean).join(" · ")}</span><span class="state-m">${stateCell(f)}</span></div></td>
+      <div class="m-meta small text-body-secondary"><span class="m-size">${[fmt(f.size), fmtDur(f.duration)].filter(Boolean).join(" · ")}</span><span class="state-m">${stateCell(f)}</span></div>
+      ${stats}</td>
     <td class="text-end text-body-secondary small">${fmt(f.size)}${f.duration ? `<div>${fmtDur(f.duration)}</div>` : ""}</td>
     <td class="fav">${plButtons(f, favCell(f))}</td></tr>`;
 }

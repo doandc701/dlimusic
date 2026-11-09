@@ -19,6 +19,7 @@ import {
   safeMediaType,
   fileInfo,
   mediaKind,
+  postStats,
   displayName,
   splitName,
   dialogType,
@@ -666,6 +667,7 @@ async function describeScan(scan, ids = null) {
       duration: item.info.duration || null,
       size: item.info.size,
       date: item.msg.date,
+      ...postStats(item.msg),
       downloaded:
         inBrowserDownloads.has(item.msg.id) || !!(await localFile(await indexFor(item.chatTitle ?? scan.title), item)),
     });

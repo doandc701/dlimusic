@@ -153,6 +153,29 @@ export function mediaKind(msg) {
   return "document";
 }
 
+/**
+ * What Telegram shows under a channel post: its reactions, each with its count, in Telegram's order
+ * ([{ emoji, count }]; a Premium custom emoji is a picture: "custom"; paid stars: "⭐"), and its views.
+ * Only what the message has (a group's or a person's messages have none): {} then.
+ */
+export function postStats(msg) {
+  const out = {};
+  if (Number.isFinite(msg?.views)) out.views = msg.views;
+  const reactions = (msg?.reactions?.results || [])
+    .filter((r) => r.count > 0)
+    .map((r) => ({
+      emoji:
+        r.reaction instanceof Api.ReactionEmoji
+          ? r.reaction.emoticon
+          : r.reaction instanceof Api.ReactionPaid
+            ? "⭐"
+            : "custom",
+      count: r.count,
+    }));
+  if (reactions.length) out.reactions = reactions;
+  return out;
+}
+
 export function dialogType(d) {
   return d.isChannel && !d.isGroup ? "channel" : d.isGroup ? "group" : "user";
 }

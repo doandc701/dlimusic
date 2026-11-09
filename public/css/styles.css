@@ -533,6 +533,43 @@ body {
     max-width: 100%;
     order: 1;
   }
+  /* the reactions: the last line, under the size (here beside the file name) and the date */
+  .file-table td.name-cell .post-stats {
+    flex: 1 1 100%;
+    order: 2;
+  }
+}
+/* the last line of a row's name cell (under the date and the size), as Telegram shows under a channel post: its
+   reactions (each with its count), then views */
+.post-stats {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem 0.75rem;
+  margin-top: 0.3rem;
+  font-size: 0.75rem;
+  line-height: 1.3;
+  font-variant-numeric: tabular-nums;
+}
+.post-reaction {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  color: var(--bs-emphasis-color);
+  font-weight: 600;
+}
+.post-reaction .emoji {
+  font-size: 0.85rem;
+}
+.post-views {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  margin-left: 0.35rem;
+  color: var(--bs-secondary-color);
+}
+.post-stats > .post-views:first-child {
+  margin-left: 0;
 }
 /* ---------- Playful palette: each group of buttons gets its own colour (--c) ---------- */
 :root,

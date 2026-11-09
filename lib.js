@@ -18,6 +18,7 @@ export {
   MIME_EXT,
   fileInfo,
   mediaKind,
+  postStats,
   dialogType,
   resolveChat,
   entityTitle,

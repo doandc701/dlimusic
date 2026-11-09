@@ -12,6 +12,7 @@ import {
   formatBytes,
   fileInfo,
   mediaKind,
+  postStats,
   resolveTarget,
   claimTarget,
   FILTERS,
@@ -190,6 +191,38 @@ describe("fileInfo", () => {
     assert.equal(fileInfo(sticker), null);
     assert.equal(fileInfo(new Api.Message({ id: 8, message: "hello" })), null);
     assert.equal(fileInfo(new Api.Message({ id: 9, media: new Api.MessageMediaGeo({}) })), null);
+  });
+});
+
+describe("postStats", () => {
+  test("a channel post: its reactions one by one, in Telegram's order, and its views; a group's message: nothing", () => {
+    const count = (reaction, n) => new Api.ReactionCount({ reaction, count: n });
+    const post = new Api.Message({
+      id: 1,
+      views: 6022,
+      forwards: 12,
+      reactions: new Api.MessageReactions({
+        results: [
+          count(new Api.ReactionEmoji({ emoticon: "❤" }), 39),
+          count(new Api.ReactionEmoji({ emoticon: "🤝" }), 16),
+          count(new Api.ReactionEmoji({ emoticon: "🔥" }), 1),
+          count(new Api.ReactionCustomEmoji({ documentId: 5n }), 2),
+          count(new Api.ReactionPaid(), 3),
+        ],
+      }),
+    });
+    assert.deepEqual(postStats(post), {
+      views: 6022,
+      reactions: [
+        { emoji: "❤", count: 39 },
+        { emoji: "🤝", count: 16 },
+        { emoji: "🔥", count: 1 },
+        { emoji: "custom", count: 2 },
+        { emoji: "⭐", count: 3 },
+      ],
+    });
+    assert.deepEqual(postStats(new Api.Message({ id: 2, views: 5 })), { views: 5 }, "no reactions yet");
+    assert.deepEqual(postStats(new Api.Message({ id: 3 })), {}, "a group's message");
   });
 });
 

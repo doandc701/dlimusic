@@ -635,5 +635,7 @@
     "quá 1000 bài": "past 1,000 songs",
     "chưa rõ lý do, bấm Đồng bộ để xem": "reason unknown, press Sync to see",
     "chưa rõ lý do": "reason unknown",
+    "Lượt xem": "Views",
+    "Biểu tượng cảm xúc riêng": "Custom emoji",
   },
 };

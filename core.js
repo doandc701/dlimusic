@@ -176,6 +176,82 @@ export function postStats(msg) {
   return out;
 }
 
+// ---------- what changes on Telegram while a list is open (web/backend.js, the app's telegram/live.ts) ----------
+
+/** A chat's id as the lists keep it (the bare number, no "-100"), from a Peer. */
+const peerRawId = (peer) => String(peer?.channelId ?? peer?.chatId ?? peer?.userId ?? "");
+
+/**
+ * One update Telegram pushed, as what a list needs, or null when it is nothing for the lists:
+ *   { op: "new" | "edit", chat, msg }        a post sent / changed (a message with a file or not)
+ *   { op: "delete", chat, ids }              chat null: a group's or a person's (Telegram does not say which)
+ *   { op: "reactions", chat, id, reactions } the post's MessageReactions as they are now
+ *   { op: "views", chat, id, views }
+ *   { op: "chats" }                          a chat joined, left or renamed: the list of chats changed
+ * chat: the bare id (core.js lists: "<chat>|<message>").
+ */
+export function readUpdate(u) {
+  if (u instanceof Api.UpdateNewChannelMessage || u instanceof Api.UpdateNewMessage)
+    return u.message instanceof Api.Message ? { op: "new", chat: peerRawId(u.message.peerId), msg: u.message } : null;
+  if (u instanceof Api.UpdateEditChannelMessage || u instanceof Api.UpdateEditMessage)
+    return u.message instanceof Api.Message ? { op: "edit", chat: peerRawId(u.message.peerId), msg: u.message } : null;
+  if (u instanceof Api.UpdateDeleteChannelMessages) return { op: "delete", chat: String(u.channelId), ids: u.messages };
+  if (u instanceof Api.UpdateDeleteMessages) return { op: "delete", chat: null, ids: u.messages };
+  if (u instanceof Api.UpdateMessageReactions)
+    return { op: "reactions", chat: peerRawId(u.peer), id: u.msgId, reactions: u.reactions };
+  if (u instanceof Api.UpdateChannelMessageViews)
+    return { op: "views", chat: String(u.channelId), id: u.id, views: u.views };
+  if (u instanceof Api.UpdateChannel) return { op: "chats" };
+  return null;
+}
+
+/**
+ * Whether a new post belongs in a list of this type (all | music | video | photo | document | voice), the way
+ * Telegram's search filters (FILTERS) sort them: a file of that kind.
+ */
+export function fitsType(type, msg) {
+  if (!fileInfo(msg)) return false;
+  const kind = mediaKind(msg);
+  if (type === "all") return true;
+  if (type === "music") return kind === "audio";
+  if (type === "photo") return kind === "photo";
+  if (type === "document") return kind === "document";
+  return kind === type; // video, voice
+}
+
+/**
+ * The views and reactions of some posts of one chat, as they are now (Telegram does not push views, and pushes
+ * reactions only for what its own apps show): Map<message id, { views?, reactions? }> (reactions: MessageReactions,
+ * empty when the post has none any more). The views are only read: `increment: false`, no view is added.
+ */
+export async function fetchPostStats(client, peer, ids) {
+  const out = new Map();
+  const get = (id) => out.get(id) ?? out.set(id, {}).get(id);
+  for (let i = 0; i < ids.length; i += 100) {
+    const part = ids.slice(i, i + 100);
+    try {
+      const r = await client.invoke(new Api.messages.GetMessagesViews({ peer, id: part, increment: false }));
+      r.views.forEach((v, k) => Number.isFinite(v.views) && (get(part[k]).views = v.views));
+    } catch {
+      // not a channel: no views
+    }
+    try {
+      const r = await client.invoke(new Api.messages.GetMessagesReactions({ peer, id: part }));
+      const told = new Set();
+      for (const u of r.updates || [])
+        if (u instanceof Api.UpdateMessageReactions) {
+          get(u.msgId).reactions = u.reactions;
+          told.add(u.msgId);
+        }
+      // a post with no reaction left is not in the answer: none now
+      for (const id of part) if (!told.has(id)) get(id).reactions = new Api.MessageReactions({ results: [] });
+    } catch {
+      // reactions not available in this chat
+    }
+  }
+  return out;
+}
+
 export function dialogType(d) {
   return d.isChannel && !d.isGroup ? "channel" : d.isGroup ? "group" : "user";
 }

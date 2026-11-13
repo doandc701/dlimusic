@@ -18,6 +18,9 @@ import {
   sanitize,
   safeMediaType,
   fileInfo,
+  readUpdate,
+  fitsType,
+  fetchPostStats,
   mediaKind,
   postStats,
   displayName,
@@ -91,6 +94,7 @@ const caps = {
   openFolder: false,
   serviceWorker: "serviceWorker" in navigator,
   share: true, // a playlist shared through a link (/s/<code>), see "shared playlists" below
+  live: true, // what changes on Telegram reaches the open list, see "live" below
 };
 
 const httpError = (status, message, extra = {}) => Object.assign(new Error(message), { status, ...extra });
@@ -409,6 +413,7 @@ async function startAuth({ keepStep = false, error = null } = {}, run = authRun)
   // MongoDB copy first (so the lists show the synced data), but never keep the user waiting long
   await Promise.race([cloudSync.sync(auth.me.id), new Promise((r) => setTimeout(r, 8000))]);
   if (run !== authRun) return;
+  client.addEventHandler(onUpdate); // what changes on Telegram from now on (see "live")
   auth.step = "ready";
   auth.qr = null;
   auth.floodUntil = 0;
@@ -1373,6 +1378,88 @@ async function syncShare(code, playlistId) {
   return { ...r.share, link: shareLink(code), added: r.added, removed: r.removed, uploading: jobs.length };
 }
 
+// ---------- live: what changes on Telegram while a list is open (core.js readUpdate, fetchPostStats) ----------
+// New posts join the lists of their chat (of their kind), edited / deleted ones follow, and the reactions and views
+// Telegram pushes are taken in: the page hears it as "live" events. Views are not pushed: the page asks for those of
+// the posts it shows now and then (GET /api/post-stats).
+
+let chatsSoon = null;
+
+/** A list of one chat: that chat's bare id; null: a list of several chats (favourites, playlist, search…). */
+const listChat = (scan) => (scan.entity ? String(scan.entity.id) : null);
+
+function onUpdate(u) {
+  const c = readUpdate(u);
+  if (!c || auth.step !== "ready") return;
+  if (c.op === "chats") {
+    // joined, left, renamed: the chat list read again (once for a burst)
+    clearTimeout(chatsSoon);
+    chatsSoon = setTimeout(() => emit("live", { op: "chats" }), 1500);
+    return;
+  }
+  for (const scan of scans.values()) liveScan(scan, c).catch((err) => console.warn("live:", err));
+}
+
+/** One change applied to one list, then told to the page with the files as they are now. */
+async function liveScan(scan, c) {
+  const own = listChat(scan);
+  if (c.op === "new") {
+    if (own !== c.chat || scan.search || scan.items.has(c.msg.id) || !fitsType(scan.type, c.msg)) return;
+    scan.items.set(c.msg.id, { msg: c.msg, info: fileInfo(c.msg) });
+    return emit("live", { key: scan.key, op: "new", files: (await describeScan(scan, [c.msg.id])).files });
+  }
+  // the list's ids of the post(s): a chat's list by message id, the others by "<chat>|<message>"
+  const hits = [];
+  for (const msgId of c.ids ?? [c.id ?? c.msg.id]) {
+    if (own !== null) {
+      // a deletion that does not say its chat is a group's or a person's: not a channel's list
+      const mine = c.chat === null ? !(scan.entity instanceof Api.Channel) : own === c.chat;
+      if (mine && scan.items.has(msgId)) hits.push(msgId);
+    } else if (c.chat !== null) for (const [k, it] of scan.items) if (it.fav === `${c.chat}|${msgId}`) hits.push(k);
+  }
+  if (!hits.length) return;
+  if (c.op === "delete") {
+    for (const k of hits) scan.items.delete(k);
+    return emit("live", { key: scan.key, op: "delete", ids: hits });
+  }
+  for (const k of hits) {
+    const item = scan.items.get(k);
+    if (c.op === "edit") Object.assign(item, { msg: c.msg, info: fileInfo(c.msg) ?? item.info });
+    else if (c.op === "reactions") item.msg.reactions = c.reactions;
+    else if (c.op === "views") item.msg.views = c.views;
+  }
+  emit("live", { key: scan.key, op: "update", files: (await describeScan(scan, hits)).files });
+}
+
+/** GET /api/post-stats: the reactions and views of these files of a list, asked of Telegram now. */
+async function postStatsOf(scan, ids) {
+  const byChat = new Map(); // bare chat id -> [list id, item]…
+  for (const id of ids) {
+    const item = scan.items.get(id);
+    const peer = item?.msg.peerId;
+    if (!peer) continue;
+    const chat = String(peer.channelId ?? peer.chatId ?? peer.userId);
+    if (!byChat.has(chat)) byChat.set(chat, []);
+    byChat.get(chat).push([id, item]);
+  }
+  for (const list of byChat.values()) {
+    const peer = scan.entity ?? (await client.getInputEntity(list[0][1].msg.peerId));
+    const stats = await fetchPostStats(
+      client,
+      peer,
+      list.map(([, it]) => it.msg.id),
+    );
+    for (const [, it] of list) Object.assign(it.msg, stats.get(it.msg.id));
+  }
+  const files = (
+    await describeScan(
+      scan,
+      [...byChat.values()].flat().map(([id]) => id),
+    )
+  ).files;
+  return { files: files.map(({ id, views, reactions }) => ({ id, views, reactions })) };
+}
+
 // ---------- the /api/* router ----------
 
 async function route(method, url, body, signal) {
@@ -1576,6 +1663,16 @@ async function route(method, url, body, signal) {
       requireReady();
       const r = await cloudShare("POST", "share-extend", { code: body.code, days: Number(body.days) });
       return { ...r.share, link: shareLink(r.share.code), capped: r.capped };
+    }
+
+    case "GET /api/post-stats": {
+      requireReady();
+      const scan = getScan(url.searchParams.get("key"));
+      const ids = (url.searchParams.get("ids") || "")
+        .split(",")
+        .map(Number)
+        .filter((id) => scan.items.has(id));
+      return postStatsOf(scan, ids.slice(0, 200));
     }
 
     case "GET /api/favorites/files":

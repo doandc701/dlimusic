@@ -606,5 +606,6 @@
     "chưa rõ lý do": "原因未知",
     "Lượt xem": "浏览量",
     "Biểu tượng cảm xúc riêng": "自定义表情",
+    "Kênh vừa có {n} bài mới": "频道有 {n} 条新内容",
   },
 };

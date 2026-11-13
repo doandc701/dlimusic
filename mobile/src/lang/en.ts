@@ -309,5 +309,8 @@ export default {
     "Thứ tự không khớp playlist": "The order does not match the playlist",
     "Tên playlist tối đa {n} ký tự": "A playlist name is at most {n} characters",
     "Đã có playlist trùng tên": "A playlist with this name already exists",
+    "Kênh vừa có {n} bài mới": "The channel has {n} new {n|post|posts}",
+    "Biểu tượng cảm xúc riêng": "Custom emoji",
+    "Lượt xem": "Views",
   },
 } satisfies LangFile;

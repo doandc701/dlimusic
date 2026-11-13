@@ -637,5 +637,6 @@
     "chưa rõ lý do": "reason unknown",
     "Lượt xem": "Views",
     "Biểu tượng cảm xúc riêng": "Custom emoji",
+    "Kênh vừa có {n} bài mới": "The channel has {n} new {n|post|posts}",
   },
 };

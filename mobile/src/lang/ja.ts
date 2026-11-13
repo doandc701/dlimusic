@@ -311,5 +311,8 @@ export default {
     "Thứ tự không khớp playlist": "並び順がプレイリストと一致しません",
     "Tên playlist tối đa {n} ký tự": "プレイリスト名は {n} 文字までです",
     "Đã có playlist trùng tên": "同じ名前のプレイリストがすでにあります",
+    "Kênh vừa có {n} bài mới": "チャンネルに新しい投稿が {n} 件あります",
+    "Biểu tượng cảm xúc riêng": "カスタム絵文字",
+    "Lượt xem": "閲覧数",
   },
 } satisfies Translation;

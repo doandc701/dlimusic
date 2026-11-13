@@ -299,5 +299,8 @@ export default {
     "Thứ tự không khớp playlist": "顺序与歌单不符",
     "Tên playlist tối đa {n} ký tự": "歌单名称最多 {n} 个字符",
     "Đã có playlist trùng tên": "已有同名歌单",
+    "Kênh vừa có {n} bài mới": "频道有 {n} 条新内容",
+    "Biểu tượng cảm xúc riêng": "自定义表情",
+    "Lượt xem": "浏览量",
   },
 } satisfies Translation;

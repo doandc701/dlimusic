@@ -13,6 +13,9 @@ import {
   fileInfo,
   mediaKind,
   postStats,
+  readUpdate,
+  fitsType,
+  fetchPostStats,
   resolveTarget,
   claimTarget,
   FILTERS,
@@ -223,6 +226,100 @@ describe("postStats", () => {
     });
     assert.deepEqual(postStats(new Api.Message({ id: 2, views: 5 })), { views: 5 }, "no reactions yet");
     assert.deepEqual(postStats(new Api.Message({ id: 3 })), {}, "a group's message");
+  });
+});
+
+describe("live updates (what changes on Telegram while a list is open)", () => {
+  const channel = (id) => new Api.PeerChannel({ channelId: BigInt(id) });
+  const audio = (id, peerId) =>
+    Object.assign(docMessage(id, { attributes: [new Api.DocumentAttributeAudio({ duration: 3 })] }), { peerId });
+
+  test("readUpdate: new / edited / deleted posts, reactions, views, chats; anything else is nothing", () => {
+    const msg = audio(7, channel(1234));
+    assert.deepEqual(readUpdate(new Api.UpdateNewChannelMessage({ message: msg, pts: 1, ptsCount: 1 })), {
+      op: "new",
+      chat: "1234",
+      msg,
+    });
+    assert.equal(readUpdate(new Api.UpdateEditChannelMessage({ message: msg, pts: 1, ptsCount: 1 })).op, "edit");
+    assert.deepEqual(
+      readUpdate(
+        new Api.UpdateDeleteChannelMessages({ channelId: BigInt(1234), messages: [7, 8], pts: 1, ptsCount: 1 }),
+      ),
+      { op: "delete", chat: "1234", ids: [7, 8] },
+    );
+    assert.deepEqual(readUpdate(new Api.UpdateDeleteMessages({ messages: [3], pts: 1, ptsCount: 1 })), {
+      op: "delete",
+      chat: null,
+      ids: [3],
+    });
+    const reactions = new Api.MessageReactions({ results: [] });
+    assert.deepEqual(readUpdate(new Api.UpdateMessageReactions({ peer: channel(1234), msgId: 7, reactions })), {
+      op: "reactions",
+      chat: "1234",
+      id: 7,
+      reactions,
+    });
+    assert.deepEqual(readUpdate(new Api.UpdateChannelMessageViews({ channelId: BigInt(1234), id: 7, views: 99 })), {
+      op: "views",
+      chat: "1234",
+      id: 7,
+      views: 99,
+    });
+    assert.deepEqual(readUpdate(new Api.UpdateChannel({ channelId: BigInt(1234) })), { op: "chats" });
+    assert.equal(
+      readUpdate(new Api.UpdateUserTyping({ userId: BigInt(1), action: new Api.SendMessageTypingAction() })),
+      null,
+    );
+  });
+
+  test("fitsType: a new post goes into the lists of its kind only", () => {
+    const song = audio(1, channel(1));
+    assert.equal(fitsType("all", song), true);
+    assert.equal(fitsType("music", song), true);
+    assert.equal(fitsType("video", song), false);
+    assert.equal(fitsType("all", new Api.Message({ id: 2, message: "chỉ có chữ" })), false, "no file: in no list");
+  });
+
+  test("fetchPostStats: views only read (increment false), 100 posts a request, a post with no reaction left: none", async () => {
+    const asked = [];
+    const client = {
+      async invoke(req) {
+        asked.push(req);
+        if (req instanceof Api.messages.GetMessagesViews)
+          return { views: req.id.map((id) => new Api.MessageViews({ views: id * 10 })) };
+        // reactions: only post 1 has some
+        return {
+          updates: req.id.includes(1)
+            ? [
+                new Api.UpdateMessageReactions({
+                  peer: channel(1),
+                  msgId: 1,
+                  reactions: new Api.MessageReactions({
+                    results: [new Api.ReactionCount({ reaction: new Api.ReactionEmoji({ emoticon: "🔥" }), count: 4 })],
+                  }),
+                }),
+              ]
+            : [],
+        };
+      },
+    };
+    const ids = Array.from({ length: 150 }, (_, i) => i + 1);
+    const stats = await fetchPostStats(client, new Api.InputPeerEmpty(), ids);
+    const views = asked.filter((r) => r instanceof Api.messages.GetMessagesViews);
+    assert.deepEqual(
+      views.map((r) => [r.id.length, r.increment]),
+      [
+        [100, false],
+        [50, false],
+      ],
+    );
+    assert.deepEqual(postStats(Object.assign(new Api.Message({ id: 1 }), stats.get(1))), {
+      views: 10,
+      reactions: [{ emoji: "🔥", count: 4 }],
+    });
+    assert.deepEqual(postStats(Object.assign(new Api.Message({ id: 2 }), stats.get(2))), { views: 20 }, "no reactions");
+    assert.equal(stats.size, 150);
   });
 });
 

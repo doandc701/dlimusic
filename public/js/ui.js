@@ -3545,6 +3545,85 @@ $("filesWrap").addEventListener(
 );
 $("filesMore").addEventListener("click", (e) => e.target.closest("#loadMoreBtn") && loadMore());
 
+// ---------- live (browser build): what changes on Telegram reaches the open list (web/backend.js "live") ----------
+
+const LIVE_STATS_MS = 60_000; // the reactions / views of the rows on screen, asked again this often (tab shown)
+
+/** The list a change is for: the open one, or the one playing (another chat may be open meanwhile). */
+const liveList = (key) => [state.scan, state.playScan].find((s) => s?.key === key) || null;
+
+function onLive(d) {
+  if (d.op === "chats") return void loadDialogs(); // joined, left, renamed
+  const scan = liveList(d.key);
+  if (!scan) return;
+  const shown = scan === state.scan;
+  if (d.op === "new") {
+    const have = new Set(scan.files.map((f) => f.id));
+    const fresh = d.files.filter((f) => !have.has(f.id));
+    if (!fresh.length) return;
+    scan.files.unshift(...fresh); // newest first, like the chat
+    if (shown) {
+      renderFiles();
+      toast(t("Kênh vừa có {n} bài mới", { n: fresh.length }), "info", { oneLine: true });
+    }
+  } else if (d.op === "delete") {
+    const gone = new Set(d.ids);
+    scan.files = scan.files.filter((f) => !gone.has(f.id));
+    // the queue: a song deleted is not played next (the one playing plays on)
+    if (scan === state.playScan) {
+      const keep = (id) => !gone.has(id) || id === state.playingId;
+      state.playQueue = state.playQueue.filter(keep);
+      state.playOrder = state.playOrder.filter(keep);
+    }
+    if (shown) {
+      for (const id of gone) state.selected.delete(id);
+      renderFiles();
+    }
+  } else if (d.op === "update") applyRows(scan, d.files);
+}
+
+/** New details of some rows (reactions, views; an edited post): merged, and drawn again where they show. */
+function applyRows(scan, files) {
+  let renamed = false;
+  for (const f of files) {
+    const row = scan.files.find((x) => x.id === f.id);
+    if (!row) continue;
+    renamed ||= row.name !== (f.name ?? row.name) || row.title !== (f.title ?? row.title);
+    row.reactions = f.reactions; // none any more: gone (Object.assign would keep the old ones)
+    Object.assign(row, f);
+  }
+  if (scan !== state.scan) return;
+  if (renamed) return renderFiles();
+  for (const f of files) {
+    const cell = $("files").querySelector(`tr[data-id="${f.id}"] .name-cell`);
+    const row = scan.files.find((x) => x.id === f.id);
+    if (!cell || !row) continue;
+    cell.querySelector(".post-stats")?.remove();
+    cell.insertAdjacentHTML("beforeend", postStatsHtml(row));
+  }
+}
+
+/** Every minute (tab shown): the reactions and views of the rows on screen, asked of Telegram again. */
+setInterval(async () => {
+  const scan = state.scan;
+  if (!CAPS.live || !scan || state.scanning || document.visibilityState !== "visible") return;
+  const box = $("filesWrap").getBoundingClientRect();
+  const ids = [...$("files").querySelectorAll("tr[data-id]")]
+    .filter((tr) => {
+      const r = tr.getBoundingClientRect();
+      return r.bottom > box.top && r.top < box.bottom;
+    })
+    .map((tr) => Number(tr.dataset.id))
+    .slice(0, 100);
+  if (!ids.length) return;
+  try {
+    const r = await api(`/api/post-stats?key=${encodeURIComponent(scan.key)}&ids=${ids.join(",")}`);
+    if (state.scan === scan) applyRows(scan, r.files);
+  } catch {
+    // offline, or the list was closed meanwhile: next minute
+  }
+}, LIVE_STATS_MS);
+
 function updateRow(id) {
   const row = $("files").querySelector(`tr[data-id="${id}"]`);
   if (!row) return;
@@ -5381,6 +5460,7 @@ const EVENTS = {
     state.history.unshift(d);
   },
   share: (d) => shareProgress(d), // the songs of a shared link being sent (browser build)
+  live: (d) => onLive(d), // what changed on Telegram (browser build)
   scan: ({ scanId, count }) => {
     // Only the latest scan of this page: an earlier scan (same chat reloaded, other type / chat) or
     // another tab's scan must not make the number jump.

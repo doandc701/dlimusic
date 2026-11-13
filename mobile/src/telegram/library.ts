@@ -2,7 +2,19 @@
 // readPage — pages of 500 files, newest first), and the favourites gathered from every chat.
 import { Api } from "telegram";
 
-import { FILTERS, PAGE_SIZE, dialogType, entityTitle, fileInfo, mediaKind, photoId, readPage } from "../../../core.js";
+import {
+  FILTERS,
+  PAGE_SIZE,
+  dialogType,
+  entityTitle,
+  fetchPostStats,
+  fileInfo,
+  fitsType,
+  mediaKind,
+  photoId,
+  postStats,
+  readPage,
+} from "../../../core.js";
 import { rememberDialogs } from "./avatars";
 import { songKey } from "./ids";
 import { MOCK, MOCK_CHATS, MOCK_SONGS } from "../mock";
@@ -31,6 +43,19 @@ export type Song = {
   size: number;
   date: number;
   kind: FileKind | null;
+  views?: number; // a channel post's, as Telegram shows them under it (core.js postStats)
+  reactions?: { emoji: string; count: number }[];
+};
+
+/** A change pushed by Telegram, as core.js readUpdate reads it (chat: the bare id). */
+export type LiveChange = {
+  op: "new" | "edit" | "delete" | "reactions" | "views" | "chats";
+  chat?: string | null;
+  msg?: Api.Message;
+  ids?: number[];
+  id?: number;
+  reactions?: Api.MessageReactions;
+  views?: number;
 };
 
 const entities = new Map<string, Api.TypeEntityLike>();
@@ -94,7 +119,16 @@ export function toSong(msg: Api.Message, chatId: string, chat?: string): Song | 
     date: msg.date ?? 0,
     kind: mediaKind(msg) as FileKind | null,
     ...info,
+    ...postStats(msg),
   };
+}
+
+/** The message a change is about, made as it is now (reactions / views taken in, or the edited one). */
+function changed(msg: Api.Message, c: LiveChange): Api.Message {
+  if (c.op === "edit" && c.msg) return c.msg;
+  if (c.op === "reactions") msg.reactions = c.reactions;
+  if (c.op === "views" && c.views !== undefined) msg.views = c.views;
+  return msg;
 }
 
 export interface FileList {
@@ -105,6 +139,10 @@ export interface FileList {
   more: boolean;
   message(id: number): Api.Message | undefined;
   next(onProgress?: (count: number) => void): Promise<void>;
+  /** A change Telegram pushed, taken in: whether this list changed (its songs are a new array then). */
+  apply(c: LiveChange): boolean;
+  /** The reactions and views of these songs asked of Telegram again (taken into their songs). */
+  refreshStats(keys: string[]): Promise<void>;
 }
 
 /** One chat's files of one type, page by page (`next()` reads 500 more). */
@@ -123,6 +161,50 @@ export class SongScan implements FileList {
 
   message(id: number) {
     return this.scan.items.get(id)?.msg;
+  }
+
+  apply(c: LiveChange) {
+    if (MOCK || c.op === "chats") return false;
+    const own = String(this.chatId).replace(/^-(100)?/, "");
+    if (c.op === "new") {
+      const msg = c.msg!;
+      if (c.chat !== own || this.scan.items.has(msg.id) || !fitsType(this.type, msg)) return false;
+      const song = toSong(msg, this.chatId, this.title ?? chatById(this.chatId)?.title);
+      if (!song) return false;
+      this.scan.items.set(msg.id, { msg });
+      this.songs = [song, ...this.songs]; // newest first, like the chat
+      return true;
+    }
+    // a deletion that does not say its chat is a group's or a person's: not a channel's list
+    const mine = c.chat == null ? chatById(this.chatId)?.type !== "channel" : c.chat === own;
+    const ids = new Set((c.ids ?? [c.id ?? c.msg?.id]).filter((id) => mine && this.scan.items.has(id!)));
+    if (!ids.size) return false;
+    if (c.op === "delete") {
+      for (const id of ids) this.scan.items.delete(id!);
+      this.songs = this.songs.filter((s) => !ids.has(s.id));
+      return true;
+    }
+    this.songs = this.songs.map((s) => {
+      if (!ids.has(s.id)) return s;
+      const msg = changed(this.scan.items.get(s.id)!.msg, c);
+      this.scan.items.set(s.id, { msg });
+      return toSong(msg, this.chatId, s.chat) ?? s;
+    });
+    return true;
+  }
+
+  async refreshStats(keys: string[]) {
+    if (MOCK) return;
+    const ids = this.songs.filter((s) => keys.includes(s.key)).map((s) => s.id);
+    if (!ids.length) return;
+    const stats = await fetchPostStats(await getClient(), await entityOf(this.chatId), ids);
+    this.songs = this.songs.map((s) => {
+      const st = stats.get(s.id);
+      const msg = this.scan.items.get(s.id)?.msg;
+      if (!st || !msg) return s;
+      Object.assign(msg, st);
+      return toSong(msg, this.chatId, s.chat) ?? s;
+    });
   }
 
   next(onProgress?: (count: number) => void) {
@@ -172,6 +254,47 @@ export class FavoritesScan implements FileList {
   }
   messageOf(song: Song) {
     return this.messages.get(song.key);
+  }
+
+  apply(c: LiveChange) {
+    // new posts do not join these lists; the songs of them that changed follow
+    if (MOCK || c.op === "new" || c.op === "chats" || c.chat == null) return false;
+    const keys = new Set((c.ids ?? [c.id ?? c.msg?.id]).map((id) => `${c.chat}|${id}`));
+    if (!this.songs.some((s) => keys.has(s.key))) return false;
+    if (c.op === "delete") {
+      this.songs = this.songs.filter((s) => !keys.has(s.key));
+      return true;
+    }
+    this.songs = this.songs.map((s) => {
+      const msg = keys.has(s.key) && this.messages.get(s.key);
+      if (!msg) return s;
+      const now = changed(msg, c);
+      this.messages.set(s.key, now);
+      return toSong(now, s.chatId, s.chat) ?? s;
+    });
+    return true;
+  }
+
+  async refreshStats(keys: string[]) {
+    if (MOCK) return;
+    const client = await getClient();
+    const byChat = new Map<string, Song[]>();
+    for (const s of this.songs) if (keys.includes(s.key)) byChat.set(s.chatId, [...(byChat.get(s.chatId) ?? []), s]);
+    for (const [chatId, songs] of byChat) {
+      const stats = await fetchPostStats(
+        client,
+        await entityOf(chatId),
+        songs.map((s) => s.id),
+      );
+      for (const s of songs) {
+        const msg = this.messages.get(s.key);
+        if (msg && stats.get(s.id)) Object.assign(msg, stats.get(s.id));
+      }
+    }
+    this.songs = this.songs.map((s) => {
+      const msg = byChat.has(s.chatId) && keys.includes(s.key) ? this.messages.get(s.key) : undefined;
+      return msg ? (toSong(msg, s.chatId, s.chat) ?? s) : s;
+    });
   }
 
   async next() {

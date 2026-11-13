@@ -6,9 +6,11 @@ import { Api, utils } from "telegram";
 import {
   SONG_SEARCHES_MAX,
   chatResult,
+  fetchPostStats,
   inviteHash,
   joinChat,
   joinRequest,
+  postStats,
   resolveChat,
   searchChats,
   songSearchKey,
@@ -19,7 +21,7 @@ import { MOCK, MOCK_SONGS } from "../mock";
 import { rememberEntity } from "./avatars";
 import { getClient } from "./client";
 import { songKey } from "./ids";
-import { entityOf, rememberChat, type Chat, type ChatType, type FileList, type Song } from "./library";
+import { entityOf, rememberChat, type Chat, type ChatType, type FileList, type LiveChange, type Song } from "./library";
 
 /** A chat found by Telegram's global search (core.js chatResult). */
 export type FoundChat = {
@@ -179,6 +181,45 @@ export class SongSearch implements FileList {
     return this.scan.items.get(id)?.msg;
   }
 
+  apply(c: LiveChange) {
+    // new posts do not join a search; the songs found that changed follow
+    if (MOCK || c.op === "new" || c.op === "chats" || c.chat == null) return false;
+    const keys = new Set((c.ids ?? [c.id ?? c.msg?.id]).map((id) => `${c.chat}|${id}`));
+    if (!this.songs.some((s) => keys.has(s.key))) return false;
+    if (c.op === "delete") {
+      this.songs = this.songs.filter((s) => !keys.has(s.key));
+      return true;
+    }
+    this.songs = this.songs.map((s) => {
+      const it = keys.has(s.key) ? this.scan.items.get(s.id) : undefined;
+      if (!it) return s;
+      if (c.op === "edit" && c.msg) it.msg = c.msg;
+      else if (c.op === "reactions") it.msg.reactions = c.reactions!;
+      else if (c.op === "views" && c.views !== undefined) it.msg.views = c.views;
+      return { ...s, ...postStats(it.msg), reactions: postStats(it.msg).reactions };
+    });
+    return true;
+  }
+
+  async refreshStats(keys: string[]) {
+    if (MOCK) return;
+    const client = await getClient();
+    const byChat = new Map<string, Song[]>();
+    for (const s of this.songs) if (keys.includes(s.key)) byChat.set(s.chatId, [...(byChat.get(s.chatId) ?? []), s]);
+    for (const [chatId, songs] of byChat) {
+      const msgIds = songs.map((s) => this.scan.items.get(s.id)!.msg.id);
+      const stats = await fetchPostStats(client, await entityOf(chatId), msgIds);
+      for (const s of songs) {
+        const it = this.scan.items.get(s.id)!;
+        if (stats.get(it.msg.id)) Object.assign(it.msg, stats.get(it.msg.id));
+      }
+    }
+    this.songs = this.songs.map((s) => {
+      const it = keys.includes(s.key) ? this.scan.items.get(s.id) : undefined;
+      return it ? { ...s, ...postStats(it.msg), reactions: postStats(it.msg).reactions } : s;
+    });
+  }
+
   /** Stop the page being read (the search box changed). */
   abort() {
     this.ctrl.abort();
@@ -214,6 +255,7 @@ export class SongSearch implements FileList {
           date: it.msg.date ?? 0,
           kind: "audio",
           ...it.info,
+          ...postStats(it.msg),
         });
       }
       this.more = this.scan.more;

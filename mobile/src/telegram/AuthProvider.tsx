@@ -6,6 +6,7 @@ import { authErrorText } from "../../../core.js";
 import { currentUser, signOut as tgSignOut } from "./client";
 import { stopCloud } from "../store/cloud";
 import { forgetAvatars } from "./avatars";
+import { startLive } from "./live";
 import { resetChats } from "./useChats";
 
 type Auth = {
@@ -49,6 +50,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setState("error");
       });
   }, []);
+
+  // signed in: what changes on Telegram from now on reaches the open lists (telegram/live.ts)
+  useEffect(() => {
+    if (state === "in") startLive().catch(() => {});
+  }, [state]);
 
   const signOut = useCallback(async () => {
     await stopCloud(); // the last changes go to the web version's copy first

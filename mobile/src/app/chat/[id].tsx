@@ -4,11 +4,12 @@
 // name, size · duration, ♡; "Tải thêm 500 file". Tap a song to play it. "Lọc" opens type / sort.
 import { FlashList, type FlashListRef } from "@shopify/flash-list";
 import { LinearGradient } from "expo-linear-gradient";
-import { router, useLocalSearchParams } from "expo-router";
+import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  AppState,
   FlatList,
   Pressable,
   StyleSheet,
@@ -42,6 +43,7 @@ import {
   type FileType,
   type Song,
 } from "@/telegram/library";
+import { onLive } from "@/telegram/live";
 import { chatMembers, knownMembers, songSearch } from "@/telegram/search";
 import { FONT, GRADIENT, tint, useTheme } from "@/theme";
 
@@ -67,6 +69,12 @@ const SORTS: [Sort, string][] = [
 ];
 const collator = new Intl.Collator("vi", { sensitivity: "base", numeric: true });
 const nameOf = (s: Song) => norm(displayName(s));
+const LIVE_STATS_MS = 60_000; // the reactions / views of the rows on screen, asked of Telegram again this often
+/** A count written as Telegram writes it: 6022 in full, then 12.3K, 1.2M (like the web's). */
+const tgCount = (n: number) => {
+  const short = (v: number, unit: string) => `${(Math.floor(v * 10) / 10).toFixed(1).replace(/\.0$/, "")}${unit}`;
+  return n >= 1e6 ? short(n / 1e6, "M") : n >= 1e4 ? short(n / 1e3, "K") : String(n);
+};
 /** When a song was posted in its chat: "16/09/2024 21:04" in the picked language's date format. */
 const postedAt = (date: number, locale: string) => {
   const d = new Date(date * 1000);
@@ -319,6 +327,32 @@ function ChatFiles() {
   const onViewable = useCallback(({ viewableItems }: { viewableItems: { item: Song }[] }) => {
     onScreen.current = new Set(viewableItems.map((v) => v.item.key));
   }, []);
+
+  // what changes on Telegram meanwhile (telegram/live.ts): new posts at the top, deleted ones gone, edited ones,
+  // reactions and views pushed
+  useEffect(
+    () =>
+      onLive((c) => {
+        if (!list.apply(c)) return;
+        setSongs([...list.songs]);
+        if (c.op === "new") toast(tr("Kênh vừa có {n} bài mới", { n: 1 }), "info");
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [list],
+  );
+  // every minute, while this screen shows and the app is in front: the reactions and views of the rows on screen
+  useFocusEffect(
+    useCallback(() => {
+      const timer = setInterval(() => {
+        if (AppState.currentState !== "active" || !onScreen.current.size) return;
+        list
+          .refreshStats([...onScreen.current].slice(0, 100))
+          .then(() => setSongs([...list.songs]))
+          .catch(() => {}); // offline: next minute
+      }, LIVE_STATS_MS);
+      return () => clearInterval(timer);
+    }, [list]),
+  );
   const seenJumps = useRef(jumps);
   useEffect(() => {
     if (jumps === seenJumps.current) return;
@@ -550,6 +584,34 @@ function ChatFiles() {
             <T size={12} weight="semibold" muted numberOfLines={1} style={styles.lineText}>
               {[fmtSize(item.size), fmtDur(item.duration)].filter(Boolean).join(" · ")}
             </T>
+            {/* the last line, as Telegram shows under a channel post: its reactions one by one, then its views */}
+            {(item.reactions?.length || item.views !== undefined) && (
+              <View style={styles.stats}>
+                {item.reactions?.map((r, i) =>
+                  r.emoji === "custom" ? (
+                    <View key={i} style={styles.stat} accessibilityLabel={tr("Biểu tượng cảm xúc riêng")}>
+                      <Icon name="emoji-smile" size={11} color={t.textMuted} />
+                      <T size={12} weight="semibold">
+                        {tgCount(r.count)}
+                      </T>
+                    </View>
+                  ) : (
+                    <T key={i} size={12} weight="semibold">
+                      {/* U+FE0F: "❤" drawn as the red heart Telegram shows */}
+                      {`${r.emoji.includes("\uFE0F") ? r.emoji : `${r.emoji}\uFE0F`} ${tgCount(r.count)}`}
+                    </T>
+                  ),
+                )}
+                {item.views !== undefined && (
+                  <View style={styles.stat} accessibilityLabel={tr("Lượt xem")}>
+                    <Icon name="eye" size={11} color={t.textMuted} />
+                    <T size={12} muted>
+                      {tgCount(item.views)}
+                    </T>
+                  </View>
+                )}
+              </View>
+            )}
           </View>
         </View>
         {plId !== null && playable(item) && (
@@ -1040,6 +1102,8 @@ const styles = StyleSheet.create({
   meta: { marginTop: 4, gap: 2 },
   line: { flexDirection: "row", alignItems: "center", gap: 4 },
   lineText: { flexShrink: 1, lineHeight: 16 },
+  stats: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", columnGap: 12, rowGap: 2 },
+  stat: { flexDirection: "row", alignItems: "center", gap: 3 },
   headLine: { lineHeight: 17, minHeight: 17 },
   heart: { width: 34, height: 34, alignItems: "center", justifyContent: "center" },
   rowBtn: { width: 30, height: 34, alignItems: "center", justifyContent: "center" },

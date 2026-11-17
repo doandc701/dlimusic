@@ -845,6 +845,42 @@ describe("MongoDB storage", () => {
         );
       });
 
+      test("songs' loudness: kept once per Telegram file; a link plays each song at its gain", async () => {
+        const api = h();
+        const { token } = (await call(api, "POST", "login", { body: { session: SESSION_A } })).data;
+        const measured = (items, t = token) => call(api, "POST", "loudness", { token: t, body: { items } });
+        assert.equal((await measured([{ doc: "11", lufs: -6, peak: 2.1 }], null)).status, 401);
+        for (const bad of [[], [{ doc: "x", lufs: -6, peak: 0 }], [{ doc: "11", lufs: 50, peak: 0 }]])
+          assert.equal((await measured(bad)).status, 400, JSON.stringify(bad));
+        const two = [
+          { doc: "11", lufs: -6, peak: 2.1 },
+          { doc: "12", lufs: -18, peak: -8 },
+        ];
+        assert.equal((await measured(two)).status, 200);
+        assert.equal((await measured([{ doc: "11", lufs: -30, peak: -20 }])).status, 200); // the first measure stays
+        // read without a token (only numbers)
+        assert.deepEqual((await call(api, "GET", "loudness", { query: "?ids=11,12,13,bad" })).data.items, {
+          11: { lufs: -6, peak: 2.1 },
+          12: { lufs: -18, peak: -8 },
+        });
+
+        const songs = [
+          { ...song("a", 10, "6|1"), doc: "11" },
+          { ...song("b", 10, "6|2"), doc: "12" },
+          song("c", 10, "6|3"),
+        ];
+        const { code } = (
+          await call(api, "POST", "share-create", { token, body: { playlistId: "g1", name: "Gain", days: 7, songs } })
+        ).data.share;
+        const gains = async () =>
+          (await call(api, "GET", "share-open", { query: `?code=${code}` })).data.songs.map((x) => x.gain);
+        assert.deepEqual(await gains(), [-8, 4, undefined]);
+        // a song shared before its doc was sent gets it on the next sync
+        songs[2] = { ...songs[2], doc: "12" };
+        assert.equal((await call(api, "POST", "share-sync", { token, body: { code, songs } })).status, 200);
+        assert.deepEqual(await gains(), [-8, 4, 4]);
+      });
+
       test("a link made before song ids keeps playing its songs, and gets ids on the owner's next request", async () => {
         const api = h();
         const { token } = (await call(api, "POST", "login", { body: { session: SESSION_A } })).data;

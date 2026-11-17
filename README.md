@@ -106,6 +106,7 @@ Vercel không chạy được `server.js` (response tối đa 4,5 MB, function s
 - Mỗi người tự đăng nhập Telegram bằng tài khoản mình; phiên, cài đặt, lịch sử nằm **trong trình duyệt của họ** — không server nào giữ phiên của ai.
 - File tải **thẳng từ Telegram về máy người dùng**: Chrome/Edge (máy tính) chọn được thư mục thật; Firefox/Safari/điện thoại lưu vào thư mục _Tải về_ của trình duyệt (stream qua Service Worker, không giữ cả file trong RAM).
 - Nghe/xem trước, tua, sắp xếp, lịch sử… giống bản local. Không có: nút mở thư mục trên máy.
+- **Âm lượng đồng đều giữa các bài:** mỗi bài được đo độ to một lần (chuẩn ITU-R BS.1770, đơn vị LUFS) khi đã tải trọn bài, rồi phát ở mức **-14 LUFS** như Spotify / YouTube: bài to thì giảm, bài nhỏ thì tăng nhưng chỉ tới khi đỉnh chạm -1 dBFS (tối đa +12 dB; không nén nên không méo). Kết quả lưu trong trình duyệt và trên MongoDB (collection `loudness`, theo id file Telegram) nên mỗi file chỉ cần đo một lần cho mọi người, kể cả link chia sẻ. Không đo bài dài hơn 12 phút hoặc lớn hơn 40 MB. Chưa bật trên iPhone / iPad (Web Audio có thể dừng nhạc khi khoá màn hình). App điện thoại (Expo Go) không tự đo được: nó đọc số đo trên MongoDB và chỉ giảm được bài to (âm lượng của trình phát tối đa 100%), bài nhỏ hoặc chưa ai nghe trên web thì phát như cũ.
 
 ```bash
 npm run preview:web      # build vào dist/, chạy thử ở http://127.0.0.1:4173 (header giống Vercel) và tự mở trình duyệt

@@ -986,6 +986,103 @@ export const SHARE_CHUNK = 3 * 1024 * 1024;
 // a link may be extended, up to this many days after it was made (the R2 lifecycle rule keeps songs 91 days)
 export const SHARE_MAX_DAYS = 90;
 
+// ---------- one loudness for every song ----------
+// Each song's loudness is measured once (ITU-R BS.1770 / EBU R128, in LUFS) and played turned to LOUDNESS_TARGET,
+// like Spotify / YouTube: louder songs down, quieter ones up — up only as far as their peak stays under PEAK_ROOM
+// (no limiter: a song is never squashed or clipped), and BOOST_MAX at most (a quiet recording's noise).
+export const LOUDNESS_TARGET = -14;
+const PEAK_ROOM = -1;
+const BOOST_MAX = 12;
+
+/** The K-weighting filters (a high shelf, then a high pass) at this sample rate, as libebur128 derives them. */
+function kWeighting(rate) {
+  let K = Math.tan((Math.PI * 1681.974450955533) / rate);
+  const Vh = 10 ** (3.999843853973347 / 20);
+  const Vb = Vh ** 0.4996667741545416;
+  let Q = 0.7071752369554196;
+  let a0 = 1 + K / Q + K * K;
+  const shelf = {
+    b0: (Vh + (Vb * K) / Q + K * K) / a0,
+    b1: (2 * (K * K - Vh)) / a0,
+    b2: (Vh - (Vb * K) / Q + K * K) / a0,
+    a1: (2 * (K * K - 1)) / a0,
+    a2: (1 - K / Q + K * K) / a0,
+  };
+  K = Math.tan((Math.PI * 38.13547087602444) / rate);
+  Q = 0.5003270373238773;
+  a0 = 1 + K / Q + K * K;
+  return [shelf, { a1: (2 * (K * K - 1)) / a0, a2: (1 - K / Q + K * K) / a0 }]; // the high pass: b = 1, -2, 1
+}
+
+/**
+ * A song's integrated loudness (LUFS) and sample peak (dBFS), from its decoded channels (Float32Array each, as Web
+ * Audio's decodeAudioData gives them); null when it is too short or silent. A mono song counts twice: it plays
+ * from both speakers.
+ */
+export function measureLoudness(channels, rate) {
+  const step = Math.round(rate / 10); // 100 ms; a block is 4 of them (400 ms, overlapping by 75 %)
+  const steps = Math.floor((channels[0]?.length || 0) / step);
+  if (steps < 4) return null;
+  const sums = new Float64Array(steps);
+  const [s, h] = kWeighting(rate);
+  let peak = 0;
+  for (const x of channels) {
+    let x1 = 0;
+    let x2 = 0;
+    let y1 = 0;
+    let y2 = 0;
+    let z1 = 0;
+    let z2 = 0;
+    for (let i = 0, k = 0; i < steps; i++) {
+      let sum = 0;
+      for (const end = k + step; k < end; k++) {
+        const v = x[k];
+        if (v > peak) peak = v;
+        else if (-v > peak) peak = -v;
+        const y = s.b0 * v + s.b1 * x1 + s.b2 * x2 - s.a1 * y1 - s.a2 * y2;
+        const z = y - 2 * y1 + y2 - h.a1 * z1 - h.a2 * z2;
+        x2 = x1;
+        x1 = v;
+        y2 = y1;
+        y1 = y;
+        z2 = z1;
+        z1 = z;
+        sum += z * z;
+      }
+      sums[i] += channels.length === 1 ? 2 * sum : sum;
+    }
+  }
+  const lufs = (e) => -0.691 + 10 * Math.log10(e);
+  const blocks = [];
+  for (let i = 0; i + 4 <= steps; i++) blocks.push((sums[i] + sums[i + 1] + sums[i + 2] + sums[i + 3]) / (4 * step));
+  const mean = (list) => list.reduce((a, b) => a + b, 0) / list.length;
+  const heard = blocks.filter((e) => lufs(e) > -70); // the silence left out
+  if (!heard.length) return null;
+  const gate = lufs(mean(heard)) - 10; // and the quiet parts, 10 LU under the rest
+  const round = (v) => Math.round(v * 10) / 10;
+  return { lufs: round(lufs(mean(heard.filter((e) => lufs(e) > gate)))), peak: round(20 * Math.log10(peak)) };
+}
+
+/** A Telegram document id (a song file, the same in every chat it is forwarded to), as text. */
+export const isDocId = (v) => typeof v === "string" && /^-?\d{1,20}$/.test(v);
+
+/** A measure as stored (MongoDB, the browser): plausible numbers only. */
+export const isLoudness = (v) =>
+  !!v &&
+  Number.isFinite(v.lufs) &&
+  v.lufs >= -70 &&
+  v.lufs <= 6 &&
+  Number.isFinite(v.peak) &&
+  v.peak >= -70 &&
+  v.peak <= 12;
+
+/** The gain (dB) that plays a song measured so at LOUDNESS_TARGET. */
+export function levelGain({ lufs, peak }) {
+  let gain = LOUDNESS_TARGET - lufs;
+  if (gain > 0) gain = Math.max(0, Math.min(gain, BOOST_MAX, PEAK_ROOM - peak));
+  return Math.round(gain * 10) / 10;
+}
+
 /** A new playlist id: no two devices pick the same one. */
 export const newPlaylistId = () =>
   Date.now().toString(36) +

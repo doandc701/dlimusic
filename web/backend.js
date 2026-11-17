@@ -55,6 +55,9 @@ import {
   SHARE_SONGS_MAX,
   SHARE_FILE_MAX,
   SHARE_CHUNK,
+  measureLoudness,
+  isLoudness,
+  levelGain,
 } from "../core.js";
 import { createCloudSync, TOKEN_KEY } from "./cloud-sync.js";
 
@@ -95,6 +98,15 @@ const caps = {
   serviceWorker: "serviceWorker" in navigator,
   share: true, // a playlist shared through a link (/s/<code>), see "shared playlists" below
   live: true, // what changes on Telegram reaches the open list, see "live" below
+  // every song at one loudness, see "loudness" below; not on iPhones / iPads: their browsers may stop Web Audio
+  // (which plays it) with the screen locked
+  loudness:
+    typeof OfflineAudioContext === "function" &&
+    typeof AudioContext === "function" &&
+    !(
+      /iPhone|iPad|iPod/.test(navigator.userAgent) ||
+      (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1)
+    ),
 };
 
 const httpError = (status, message, extra = {}) => Object.assign(new Error(message), { status, ...extra });
@@ -1322,6 +1334,7 @@ async function shareItems(p) {
     size: it.info.size,
     type: it.msg.media.document?.mimeType || "audio/mpeg",
     ref: it.fav,
+    doc: docOf(it), // the loudness the link plays it at (cloud/loudness.js)
   }));
   const shared = new Set(songs.map((x) => x.ref));
   const byRef = new Map([...scan.items.values()].map((it) => [it.fav, it]));
@@ -1673,6 +1686,12 @@ async function route(method, url, body, signal) {
         .map(Number)
         .filter((id) => scan.items.has(id));
       return postStatsOf(scan, ids.slice(0, 200));
+    }
+
+    case "GET /api/loudness": {
+      requireReady();
+      const m = await loudnessOf(url.searchParams.get("key"), url.searchParams.get("id"));
+      return m ? { gain: levelGain(m) } : {};
     }
 
     case "GET /api/favorites/files":
@@ -2087,6 +2106,83 @@ async function* wholeRange(w, start, end) {
   }
 }
 
+// ---------- one loudness for every song (core.js measureLoudness / levelGain) ----------
+// A song is measured once, when it is fetched whole (fetchWhole: the one playing, the next ones): decoded by the
+// browser, its loudness kept here and in MongoDB (cloud/loudness.js, by Telegram document id), so every device and
+// every shared link plays it at the same level afterwards. ui.js asks GET /api/loudness for the gain to play it at.
+const LOUD_KEY = "tdl-loudness"; // doc id -> { lufs, peak }: this browser's copy
+const LOUD_KEEP = 3000;
+const MEASURE_RATE = 24000; // decoded at this rate: half the memory of 48 kHz, 0.1 LU apart
+const MEASURE_MAX_S = 12 * 60; // a song is decoded whole (about 11 MB a minute): longer ones are not measured
+const loudKnown = new Map(Object.entries(load(LOUD_KEY, {})));
+const loudJobs = new Map(); // doc id -> promise of its measure
+let measuring = Promise.resolve(); // one song decoded at a time
+
+const docOf = (item) => item.msg.media?.document?.id?.toString() ?? null;
+
+function keepLoudness(doc, m) {
+  loudKnown.delete(doc);
+  loudKnown.set(doc, m);
+  while (loudKnown.size > LOUD_KEEP) loudKnown.delete(loudKnown.keys().next().value);
+  save(LOUD_KEY, Object.fromEntries(loudKnown));
+}
+
+/** The measure MongoDB has (no token needed), or null. */
+async function cloudLoudness(doc) {
+  const res = await fetch(`/api/cloud/loudness?ids=${doc}`, { cache: "no-store" }).catch(() => null);
+  const m = res?.ok ? (await res.json().catch(() => ({}))).items?.[doc] : null;
+  return isLoudness(m) ? { lufs: m.lufs, peak: m.peak } : null;
+}
+
+/** A song's bytes decoded and measured, one song at a time (a decoded song takes memory). */
+function measureBytes(bytes) {
+  const run = measuring.then(async () => {
+    const audio = await new OfflineAudioContext(2, 1, MEASURE_RATE).decodeAudioData(bytes.slice().buffer);
+    const channels = Array.from({ length: audio.numberOfChannels }, (_, c) => audio.getChannelData(c));
+    return measureLoudness(channels, MEASURE_RATE);
+  });
+  measuring = run.catch(() => {});
+  return run;
+}
+
+/** The loudness of a song of a list: known (here, MongoDB) or measured once fetched whole; null when it cannot be. */
+function loudnessOf(key, id) {
+  const item = scans.get(key)?.items.get(Number(id));
+  const doc = item && ["audio", "voice"].includes(mediaKind(item.msg)) ? docOf(item) : null;
+  if (!doc) return Promise.resolve(null);
+  if (loudKnown.has(doc)) return Promise.resolve(loudKnown.get(doc));
+  if (!loudJobs.has(doc)) {
+    const job = (async () => {
+      let m = await cloudLoudness(doc);
+      if (!m) {
+        if ((item.info.duration || 0) > MEASURE_MAX_S) return null;
+        const w = fetchWhole(key, id, { ahead: true }); // the one fetched to play (a long mix: none, not measured)
+        if (!w || w.long) return null;
+        await w.job;
+        if (w.failed) return null;
+        m = await measureBytes(w.buf);
+        if (!m) return null;
+        const token = load(TOKEN_KEY, null);
+        if (token?.token && token.account === auth.me?.id)
+          fetch("/api/cloud/loudness", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${token.token}` },
+            body: JSON.stringify({ items: [{ doc, ...m }] }),
+          }).catch(() => {});
+      }
+      keepLoudness(doc, m);
+      return m;
+    })()
+      .catch((err) => {
+        console.warn("loudness: not measured:", err);
+        return null;
+      })
+      .finally(() => loudJobs.delete(doc));
+    loudJobs.set(doc, job);
+  }
+  return loudJobs.get(doc);
+}
+
 /** The songs of the play now (the playing one and the next ones, ui.js asks for them in turn). */
 let wanted = new Set();
 
@@ -2103,6 +2199,7 @@ async function prefetch(key, id) {
   const w = fetchWhole(key, id, { ahead: true });
   if (!w) return false;
   await w.job;
+  if (!w.failed && caps.loudness) loudnessOf(key, id); // measured meanwhile (once)
   return !w.failed;
 }
 

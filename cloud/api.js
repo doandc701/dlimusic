@@ -19,6 +19,7 @@
 //   GET  /api/cloud/status                            -> { enabled }   (no token needed)
 //   /api/cloud/share-*                                 shared playlists (cloud/share.js); share-put takes raw
 //                                                      bytes, share-audio answers with them
+//   /api/cloud/loudness                                songs' loudness, by Telegram document id (cloud/loudness.js)
 
 import {
   openDb,
@@ -38,6 +39,7 @@ import {
 import { readAccount, joinAccount, checkOps, applyOps } from "./account.js";
 import { SHARE_CHUNK } from "../core.js";
 import { shareRoutes, RAW_BODY, RAW } from "./share.js";
+import { loudnessRoutes } from "./loudness.js";
 
 const MAX_BODY = 2 * 1024 * 1024;
 
@@ -143,6 +145,7 @@ export function createCloudApi({ env, verify, fetchFn, now, shareLimits }) {
     },
 
     ...shareRoutes({ env, db, account, fail, key, fetchFn, now, limits: shareLimits }),
+    ...loudnessRoutes({ db, account, fail }),
   };
 
   /** Node (req, res) handler; `action` is the last path segment. */

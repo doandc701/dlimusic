@@ -1,7 +1,7 @@
 // Shared playlists: a copy of a playlist's songs in Cloudflare R2 (cloud/r2.js), listened to through a secret
 // link (/s/<code>) without signing in. Routes of /api/cloud/* (cloud/api.js):
 //
-//   POST share-create   { playlistId, name, days, songs: [{ title, performer, duration, size, type, ref }], skipped }
+//   POST share-create   { playlistId, name, days, songs: [{ title, performer, duration, size, type, ref, doc }], skipped }
 //                                                   -> { share }          (owner; the link works at once)
 //   POST share-put?code=&id=&k=  piece k of song id (application/octet-stream, SHARE_CHUNK bytes but the last)
 //                                                   -> { ok }             (owner; the last piece makes the song playable)
@@ -13,7 +13,8 @@
 //   GET  share-list                                 -> { shares }         (owner; links still open)
 //   POST share-revoke   { code }                    -> { ok }             (owner; songs removed from R2)
 //   GET  share-open?code=                           -> { name, expiresAt, songs: [{ id, title, performer, duration,
-//                                                         size, ready, url? }] }   (url: as share-play's, songs ready)
+//                                                         size, ready, url?, gain? }] }   (url: as share-play's, songs
+//                                                         ready; gain: dB to play it at, once measured)
 //   GET  share-play?code=&i=                        -> { url, expiresIn } (a signed /api/cloud/share-audio URL, 10 min)
 //   GET  share-audio?code=&id=&n=&t=&exp=&sig=   the song's bytes, one piece at most per Range request (206)
 //
@@ -28,7 +29,7 @@
 // what plays).
 //
 // MongoDB collection "shares": { _id: code, accountId, playlistId, name, songs: [{ id, title, performer, duration,
-// size, type, ref, ok }], nextId, skipped, createdAt, expiresAt }. ref: the song's "<chat>|<message>" (only the owner
+// size, type, ref, doc, ok }], nextId, skipped, createdAt, expiresAt }. ref: the song's "<chat>|<message>" (only the owner
 // sees it: to upload again later, to sync). id: the song's place in R2, kept when the list changes (links made before
 // ids: their index, given on the owner's next request). skipped: the playlist's songs that are not shared (not music,
 // too big), so a sync does not count them as new. R2 objects: "s/<code>/<id>/<k>". Expired links are removed by the
@@ -38,7 +39,16 @@
 
 import crypto from "node:crypto";
 import { r2Config, createBucket } from "./r2.js";
-import { SHARE_DAYS, SHARE_SONGS_MAX, SHARE_FILE_MAX, SHARE_CHUNK, SHARE_MAX_DAYS, isFavoriteId } from "../core.js";
+import {
+  SHARE_DAYS,
+  SHARE_SONGS_MAX,
+  SHARE_FILE_MAX,
+  SHARE_CHUNK,
+  SHARE_MAX_DAYS,
+  isFavoriteId,
+  isDocId,
+} from "../core.js";
+import { gainsOf } from "./loudness.js";
 
 // An owner is anyone with a Telegram account, and R2 is paid by the GB kept and by the write: what one account may
 // keep shared at once (the songs of all its open links), and send in a day (UTC; a piece may be sent again and again).
@@ -98,6 +108,7 @@ function cleanSong(s) {
     size,
     type: isAudioType(s.type) ? s.type : "audio/mpeg",
     ref: s.ref,
+    doc: isDocId(s.doc) ? s.doc : null, // its Telegram document: the loudness it is played at (cloud/loudness.js)
     ok: false,
   };
 }
@@ -382,7 +393,14 @@ export function shareRoutes({ env, db, account, fail, key, fetchFn, now = () => 
           seen.add(x.ref);
           const old = had.get(x.ref);
           // already in the link: kept (uploaded or not), its details refreshed; new: to upload
-          if (old) songs.push({ ...old, title: x.title, performer: x.performer, duration: x.duration ?? old.duration });
+          if (old)
+            songs.push({
+              ...old,
+              title: x.title,
+              performer: x.performer,
+              duration: x.duration ?? old.duration,
+              doc: x.doc ?? old.doc ?? null, // links made before it: known from the next sync
+            });
           else {
             songs.push({ ...x, id: nextId++ });
             added++;
@@ -450,6 +468,10 @@ export function shareRoutes({ env, db, account, fail, key, fetchFn, now = () => 
     "GET share-open": async (req) => {
       need();
       const s = await open(query(req).get("code"));
+      const gains = await gainsOf(
+        db,
+        s.songs.map((x) => x.doc),
+      );
       return {
         name: s.name,
         expiresAt: s.expiresAt.getTime(),
@@ -460,6 +482,7 @@ export function shareRoutes({ env, db, account, fail, key, fetchFn, now = () => 
           duration: x.duration,
           size: x.size,
           ready: x.ok,
+          ...(gains.has(x.doc) && { gain: gains.get(x.doc) }),
           ...(x.ok && { url: audioUrl(s._id, songId(x, i), x) }),
         })),
         expiresIn: PLAY_URL_TTL,

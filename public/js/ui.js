@@ -4008,6 +4008,7 @@ function playFrom(scan, id) {
   clearTimeout(netRetryTimer);
   // Downloaded files play from disk; others stream straight from Telegram (preview, nothing is saved).
   player.src = `/api/media?key=${encodeURIComponent(scan.key)}&id=${id}`;
+  levelFor(scan, id);
   show($("playerBar"), true);
   $("npTitle").textContent = displayName(f);
   $("npSub").innerHTML =
@@ -4040,6 +4041,51 @@ function playFrom(scan, id) {
     revealNext = false;
     requestAnimationFrame(revealPlaying); // once its row shows as playing
   }
+}
+
+// ---------- every song at one loudness (browser build: web/backend.js measures each song once) ----------
+// The player plays through Web Audio, with a gain per song (core.js levelGain: down for loud songs, up for quiet
+// ones as far as their peak allows). Built on the first play: a page may start Web Audio only after a tap, as for
+// a sound; until it runs the player plays as it is. Not on iPhones (CAPS.loudness): with the screen locked
+// their browsers may stop Web Audio, and the music with it.
+const level = { ctx: null, gain: null, db: 0 };
+
+async function levelOn() {
+  if (!CAPS.loudness || level.gain) return void level.ctx?.resume().catch(() => {});
+  try {
+    level.ctx ??= new AudioContext();
+    await level.ctx.resume();
+    if (level.ctx.state !== "running" || level.gain) return; // not allowed yet: the next play tries again
+    const gain = level.ctx.createGain();
+    gain.gain.value = 10 ** (level.db / 20);
+    level.ctx.createMediaElementSource($("player")).connect(gain).connect(level.ctx.destination);
+    level.gain = gain;
+  } catch (err) {
+    console.warn("loudness: no Web Audio:", err);
+  }
+}
+$("player").addEventListener("play", levelOn);
+
+/** The gain (dB) the playing song is played at: at once as it starts, smoothly when it comes later. */
+function setLevel(db, smooth = false) {
+  level.db = db;
+  if (!level.gain) return;
+  const at = level.ctx.currentTime;
+  level.gain.gain.cancelScheduledValues(at);
+  if (smooth) level.gain.gain.setTargetAtTime(10 ** (db / 20), at, 0.3);
+  else level.gain.gain.setValueAtTime(10 ** (db / 20), at);
+}
+
+/** A song starts: as it is until its gain is known (measured once it is fetched whole, the first time). */
+function levelFor(scan, id) {
+  if (!CAPS.loudness) return;
+  setLevel(0);
+  api(`/api/loudness?key=${encodeURIComponent(scan.key)}&id=${id}`)
+    .then((r) => {
+      if (state.playingKey === scan.key && state.playingId === id && Number.isFinite(r.gain))
+        setLevel(r.gain, $("player").currentTime > 0.5);
+    })
+    .catch(() => {});
 }
 
 /**

@@ -18,6 +18,7 @@ import { MOCK } from "../mock";
 import { useLibrary } from "../store/LibraryProvider";
 import { chatById, orderIdOf, type FileList, type Song } from "../telegram/library";
 import { cacheFile } from "./cache";
+import { gainOf, volumeOf } from "./loudness";
 import { prefetchHead, takeHead } from "./prefetch";
 import { SongStream } from "./stream";
 
@@ -67,6 +68,14 @@ const players = [
   createAudioPlayer(null, { updateInterval: 250, keepAudioSessionActive: true }),
 ] as [ReturnType<typeof createAudioPlayer>, ReturnType<typeof createAudioPlayer>];
 let activeIndex = 0;
+// the volume of both players: the song's loudness (loudness.ts) times the sleep timer's fade, each 0..1
+let level = 1;
+let fade = 1;
+function setVolume(v: { level?: number; fade?: number }) {
+  level = v.level ?? level;
+  fade = v.fade ?? fade;
+  for (const p of players) p.volume = level * fade; // both: a take-over keeps it
+}
 
 // A third player playing 2 s of silence in a loop the whole time the music is on, and the one the lock screen
 // follows. With the screen off, a phone keeps an app running only while it plays sound: the moment between two
@@ -171,7 +180,6 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const upcoming = useRef<string | null>(null); // with shuffle: the next song, picked ahead so it can be prefetched
   const playing = MOCK ? !!now : isPlaying; // the sample screens: a song "playing" at its start
   const [sleep, setSleepState] = useState<Sleep>({ mode: "off", endsAt: null });
-  const fadeFrom = useRef<number | null>(null); // the volume before the fade (null: not fading)
   // checked on each update of the player, on each change of AppState and every 250 ms while a minutes timer runs:
   // timers alone may be late or stopped with the screen locked, the deadline is the wall clock's
   const sleepCheck = useRef(() => {});
@@ -234,6 +242,9 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     }
     const mine = token.current;
     const live = () => token.current === mine;
+    // at its loudness once known (measured on the web), as it is until then
+    setVolume({ level: 1 });
+    gainOf(msg.media).then((gain) => live() && setVolume({ level: volumeOf(gain) }));
     const s = new SongStream({
       players,
       active: () => activeIndex,
@@ -310,7 +321,9 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   /** Fetch the first piece of the song that comes next, so "next" (or the end of this one) sounds at once. */
   function prefetchNext(list: FileList, song: Song) {
     const n = pickNext(list, song);
-    if (n && n.key !== song.key) prefetchHead(n.key, list.message(n.id)?.media, n.size);
+    if (!n || n.key === song.key) return;
+    prefetchHead(n.key, list.message(n.id)?.media, n.size);
+    gainOf(list.message(n.id)?.media); // its loudness too
   }
 
   /** Pause / play as the button does (also what the sleep timer pauses with). */
@@ -328,9 +341,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
   /** The volume as it was before the fade, on both players (the next play is at the usual volume). */
   function unfade() {
-    if (fadeFrom.current === null) return;
-    for (const p of players) p.volume = fadeFrom.current;
-    fadeFrom.current = null;
+    if (fade === 1) return;
+    setVolume({ fade: 1 });
   }
 
   function setSleep(mode: SleepMode) {
@@ -348,8 +360,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       return setSleep("off"); // after the pause: the volume back for the next play
     }
     if (left > FADE_MS || !player().playing) return;
-    if (fadeFrom.current === null) fadeFrom.current = player().volume;
-    for (const p of players) p.volume = fadeFrom.current * (left / FADE_MS); // both: a take-over keeps it
+    setVolume({ fade: left / FADE_MS });
   }
   useEffect(() => {
     sleepCheck.current = checkSleep;

@@ -35,6 +35,10 @@ import {
   photoId,
   avatarIdsQuery,
   createAvatars,
+  measureLoudness,
+  levelGain,
+  isLoudness,
+  LOUDNESS_TARGET,
 } from "../core.js";
 import { parseSelection } from "../index.js";
 
@@ -706,5 +710,52 @@ describe("songs dragged to a new place", async () => {
     assert.equal(ids(orderFiles([7, 6, 55, 5, 4, 3], saved, key)), "3,7,6,55,5,4");
     // filtered (some not shown): the others keep their saved order
     assert.equal(ids(orderFiles([7, 5, 3], saved, key)), "3,7,5");
+  });
+});
+
+describe("loudness", () => {
+  // a sine of this frequency, amplitude (dBFS) and length, at this sample rate
+  const sine = (rate, db, seconds, hz = 1000) =>
+    Float32Array.from({ length: rate * seconds }, (_, k) => 10 ** (db / 20) * Math.sin((2 * Math.PI * hz * k) / rate));
+
+  test("a full-scale 1 kHz sine in both channels is 0 LUFS (BS.1770), at any sample rate", () => {
+    for (const rate of [48000, 44100, 24000]) {
+      const x = sine(rate, 0, 5);
+      const m = measureLoudness([x, x], rate);
+      assert.ok(Math.abs(m.lufs) <= 0.1, `${rate}: ${m.lufs}`);
+      assert.ok(Math.abs(m.peak) <= 0.1);
+    }
+  });
+
+  test("20 dB quieter reads 20 LU less; a mono song counts as heard from both speakers", () => {
+    const x = sine(48000, -20, 5);
+    assert.equal(measureLoudness([x, x], 48000).lufs, -20);
+    assert.equal(measureLoudness([x], 48000).lufs, -20);
+    assert.equal(measureLoudness([x, new Float32Array(x.length)], 48000).lufs, -23);
+  });
+
+  test("silence does not pull the loudness down; too short or silent: no measure", () => {
+    const loud = sine(48000, -20, 5);
+    const withGap = new Float32Array(loud.length * 2);
+    withGap.set(loud); // 5 s of music, then 5 s of silence (only the blocks across the edge count a little)
+    assert.ok(Math.abs(measureLoudness([withGap, withGap], 48000).lufs + 20) <= 0.2);
+    assert.equal(measureLoudness([new Float32Array(48000 * 3)], 48000), null);
+    assert.equal(measureLoudness([sine(48000, 0, 0.3)], 48000), null);
+  });
+
+  test("the gain: louder songs down to the target, quieter ones up as far as their peak allows", () => {
+    assert.equal(LOUDNESS_TARGET, -14);
+    assert.equal(levelGain({ lufs: -6, peak: 2.1 }), -8); // a loud remix
+    assert.equal(levelGain({ lufs: -14, peak: -1 }), 0);
+    assert.equal(levelGain({ lufs: -18, peak: -8 }), 4); // quiet, room to spare
+    assert.equal(levelGain({ lufs: -18, peak: -3 }), 2); // only up to a peak of -1 dBFS
+    assert.equal(levelGain({ lufs: -18, peak: 0.5 }), 0); // already peaking: as it is, never down
+    assert.equal(levelGain({ lufs: -40, peak: -30 }), 12); // a whisper: 12 dB at most
+  });
+
+  test("only plausible measures are kept", () => {
+    assert.ok(isLoudness({ lufs: -6, peak: 2.1 }));
+    for (const v of [null, {}, { lufs: -6 }, { lufs: "x", peak: 0 }, { lufs: 20, peak: 0 }, { lufs: -10, peak: 99 }])
+      assert.ok(!isLoudness(v), JSON.stringify(v));
   });
 });

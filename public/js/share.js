@@ -692,6 +692,36 @@
   }
 
   /** Song i from `at` seconds: a fresh signed URL each time. `paused`: only loaded (a reload restoring it). */
+  // Every song at one loudness, as on the main page (ui.js levelOn): the player plays through Web Audio, at the gain
+  // share-open gives for each song (measured once by DLiMusic, cloud/loudness.js). Not on iPhones / iPads: with the
+  // screen locked their browsers may stop Web Audio, and the music with it.
+  const LEVEL =
+    typeof AudioContext === "function" &&
+    !(
+      /iPhone|iPad|iPod/.test(navigator.userAgent) ||
+      (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1)
+    );
+  const level = { ctx: null, gain: null, db: 0 };
+  async function levelOn() {
+    if (!LEVEL || level.gain) return void level.ctx?.resume().catch(() => {});
+    try {
+      level.ctx ??= new AudioContext();
+      await level.ctx.resume();
+      if (level.ctx.state !== "running" || level.gain) return; // not allowed yet: the next play tries again
+      const gain = level.ctx.createGain();
+      gain.gain.value = 10 ** (level.db / 20);
+      level.ctx.createMediaElementSource(player).connect(gain).connect(level.ctx.destination);
+      level.gain = gain;
+    } catch (err) {
+      console.warn("loudness: no Web Audio:", err);
+    }
+  }
+  player.addEventListener("play", levelOn);
+  function setLevel(db) {
+    level.db = db;
+    if (level.gain) level.gain.gain.setValueAtTime(10 ** (db / 20), level.ctx.currentTime);
+  }
+
   async function play(i, at = 0, { reveal = false, paused = false } = {}) {
     if (!songs[i]?.ready) return;
     waiting = null;
@@ -711,6 +741,7 @@
       if (!wholes.get(songs[i].id)?.url) await swReady;
       if (current !== i) return; // another song was chosen meanwhile
       player.src = url;
+      setLevel(songs[i].gain ?? 0);
       if (at) player.currentTime = at;
       showStart(i, at);
       if (!paused) await player.play().catch(() => {}); // blocked autoplay: the play button is there
@@ -1188,6 +1219,7 @@
         data.songs.forEach((x, i) => {
           songs[i].ready = x.ready;
           songs[i].size = x.size;
+          songs[i].gain = x.gain;
           if (x.url) setUrl(i, x.url);
         });
       else relist(data.songs);

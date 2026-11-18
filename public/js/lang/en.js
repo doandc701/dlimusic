@@ -647,6 +647,5 @@
     "Đặt lại": "Reset",
     Xong: "Done",
     Đóng: "Close",
-    "Cần đeo tai nghe": "Needs headphones",
   },
 };

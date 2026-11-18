@@ -255,12 +255,11 @@ window.AudioFx = (() => {
   }
 
   /**
-   * A change made in the panel: heard at once. "Bình thường" when the curve is left flat; "Tuỳ chỉnh" when a slider
-   * is moved by hand. The surround leaves the preset as it is (Bình thường with 8D, Pop with 8D).
+   * A change made in the panel: heard at once. A slider moved by hand: "Tuỳ chỉnh", or "Bình thường" when the curve
+   * is left flat. The surround leaves the preset as it is (Bình thường with 8D, Pop with 8D).
    */
   function changed(byHand) {
-    if (!curved(cur)) cur.preset = DEFAULT;
-    else if (byHand || cur.preset === DEFAULT) cur.preset = CUSTOM;
+    if (byHand) cur.preset = curved(cur) ? CUSTOM : DEFAULT;
     apply();
     renderPanel();
   }
@@ -274,7 +273,7 @@ window.AudioFx = (() => {
     el.setAttribute("aria-labelledby", "eqTitle");
     el.setAttribute("aria-hidden", "true");
     el.innerHTML = `
-      <div class="modal-dialog modal-dialog-centered modal-fullscreen-sm-down modal-lg">
+      <div class="modal-dialog modal-dialog-centered modal-lg">
         <div class="modal-content">
           <div class="modal-header">
             <h5 class="modal-title" id="eqTitle"><i class="bi bi-sliders me-2"></i>${t("Bộ chỉnh âm")}</h5>
@@ -315,9 +314,7 @@ window.AudioFx = (() => {
             ${Object.entries(SPACES)
               .map(
                 ([k, [label, icon]], i) => `
-              <div class="d-flex align-items-center gap-3 ${i ? "mt-2" : "mt-3"} eq-knob"${
-                k === "8d" ? ` title="${t("Cần đeo tai nghe")}"` : ""
-              }>
+              <div class="d-flex align-items-center gap-3 ${i ? "mt-2" : "mt-3"} eq-knob">
                 <label class="eq-knob-name" for="eqSpace-${k}"><i class="bi ${icon} me-1"></i>${t(label)}</label>
                 <div class="form-check form-switch mb-0">
                   <input class="form-check-input" type="checkbox" role="switch" id="eqSpace-${k}" data-eq-space="${k}" />
@@ -339,7 +336,7 @@ window.AudioFx = (() => {
     el.addEventListener("click", (e) => {
       const preset = e.target.closest("[data-eq-preset]")?.dataset.eqPreset;
       if (preset === CUSTOM) {
-        cur.preset = curved(cur) ? CUSTOM : DEFAULT; // the sliders as they are, to move by hand
+        cur.preset = CUSTOM; // the sliders as they are, to move by hand
         renderPanel();
       } else if (preset === DEFAULT) {
         cur = { ...flat(), space: cur.space }; // the surround stays

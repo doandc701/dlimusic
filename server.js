@@ -77,6 +77,7 @@ const PUBLIC_ASSETS = {
   "/css/styles.css": "text/css; charset=utf-8",
   "/js/theme.js": "text/javascript; charset=utf-8",
   "/js/i18n.js": "text/javascript; charset=utf-8",
+  "/js/audiofx.js": "text/javascript; charset=utf-8",
   "/js/ui.js": "text/javascript; charset=utf-8",
   "/img/logo-128.png": "image/png",
   "/img/logo-192.png": "image/png",

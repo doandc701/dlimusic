@@ -390,6 +390,16 @@
         </div>
       </div>
       <div class="dock-right">
+        <!-- the equalizer (js/audiofx.js): hidden where the browser cannot run it (iPhones) -->
+        <button
+          class="btn btn-sm btn-outline-secondary border-0 eq-btn d-none"
+          id="eqBtn"
+          type="button"
+          title="Bộ chỉnh âm"
+          aria-label="Bộ chỉnh âm"
+        >
+          <i class="bi bi-sliders"></i>
+        </button>
         <!-- sleep timer (like YouTube's): pause after some minutes, or when this song ends -->
         <div class="dropup sleep-wrap">
           <button
@@ -476,6 +486,7 @@
       integrity="sha384-FKyoEForCGlyvwx9Hj09JcYn3nv7wiPVlz7YYwJrWVcXK/BmnVDxM+D2scQbITxI"
       crossorigin="anonymous"
     ></script>
+    <script src="/js/audiofx.js"></script>
     <script src="/js/share.js"></script>
   </body>
 </html>

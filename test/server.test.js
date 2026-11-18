@@ -342,6 +342,10 @@ describe("security hardening (R1-R7)", () => {
       ["/js/lang/en.js", /javascript/],
       ["/js/lang/ja.js", /javascript/],
       ["/js/ui.js", /javascript/],
+      // every script index.html loads from public/ (a file left out of PUBLIC_ASSETS: the page never starts)
+      ...[
+        ...fs.readFileSync(path.join(ROOT, "public/index.html"), "utf8").matchAll(/<script src="(js\/[\w/.-]+)"/g),
+      ].map((m) => [`/${m[1]}`, /javascript/]),
     ]) {
       const res = await authed(base + p);
       assert.equal(res.status, 200, p);

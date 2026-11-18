@@ -1726,6 +1726,69 @@ body:has(.search-view) #filterSheet .type-filter {
 .speed-menu {
   min-width: 15rem;
 }
+
+/* the equalizer (js/audiofx.js): its button lit while it changes the sound, its panel */
+.eq-btn {
+  padding: 0.15rem 0.35rem;
+}
+.eq-btn.on {
+  background: var(--bs-primary) !important;
+  color: #fff !important;
+  border-radius: 50%;
+}
+.eq-bands {
+  display: grid;
+  grid-template-columns: repeat(10, 1fr);
+  gap: 0.25rem;
+  text-align: center;
+}
+.eq-db {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--bs-primary);
+}
+.eq-hz {
+  font-size: 0.72rem;
+  color: var(--bs-secondary-color);
+}
+/* a vertical slider: the usual horizontal one turned (the same thin track and round thumb) */
+.eq-slot {
+  position: relative;
+  height: 150px;
+  margin: 0.4rem 0;
+}
+.eq-slot input {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 150px;
+  transform: translate(-50%, -50%) rotate(-90deg);
+}
+.eq-knob .form-range {
+  flex: 1;
+}
+.eq-knob-name {
+  width: 8rem;
+  flex-shrink: 0;
+}
+.eq-knob-val {
+  width: 3.2rem;
+  text-align: right;
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+@media (max-width: 575.98px) {
+  .eq-slot {
+    height: 120px;
+  }
+  .eq-slot input {
+    width: 120px;
+  }
+  .eq-db,
+  .eq-hz {
+    font-size: 0.62rem;
+  }
+}
 .speed-val {
   font-weight: 600;
   font-variant-numeric: tabular-nums;
